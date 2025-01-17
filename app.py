@@ -11,10 +11,12 @@ from vanna_calls import (
     is_sql_valid_cached,
     generate_summary_cached
 )
-
-# avatar_url = "https://vanna.ai/img/vanna.svg"
+from train_vanna import (train)
 
 st.set_page_config(layout="wide")
+
+# Train Vanna on database schema
+# train()
 
 # Initialize session state variables
 if "questions_history" not in st.session_state:
