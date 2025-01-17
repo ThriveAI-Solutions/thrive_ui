@@ -27,12 +27,13 @@ st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup"
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True)
 
 st.title("Thrive UI")
-# st.sidebar.write(st.session_state)
-
+st.sidebar.write(st.session_state)
 
 def set_question(question):
     st.session_state["my_question"] = question
-
+    if question is None:
+        # Clear questions history when resetting
+        st.session_state.questions_history = []
 
 assistant_message_suggested = st.chat_message(
     "assistant"
@@ -55,9 +56,23 @@ if my_question is None:
         "Ask me a question about your data",
     )
 
+# Initialize questions history in session state if it doesn't exist
+if "questions_history" not in st.session_state:
+    st.session_state.questions_history = []
+    
+# Display questions history in sidebar
+st.sidebar.title("Questions History")
+if len(st.session_state.questions_history) > 0:
+    for past_question in st.session_state.questions_history:
+        st.sidebar.button(past_question, on_click=set_question, args=(past_question,), use_container_width=True)
+else:
+    st.sidebar.text("No questions asked yet")
 
 if my_question:
     st.session_state["my_question"] = my_question
+    # Add question to history if it's not already there
+    if my_question not in st.session_state.questions_history:
+        st.session_state.questions_history.append(my_question)
     user_message = st.chat_message("user")
     user_message.write(f"{my_question}")
 
