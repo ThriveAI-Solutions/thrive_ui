@@ -16,6 +16,12 @@ from vanna_calls import (
 
 st.set_page_config(layout="wide")
 
+# Initialize session state variables
+if "questions_history" not in st.session_state:
+    st.session_state.questions_history = []
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
+
 st.sidebar.title("Output Settings")
 st.sidebar.checkbox("Show SQL", value=False, key="show_sql")
 st.sidebar.checkbox("Show Table", value=True, key="show_table")
@@ -24,52 +30,58 @@ show_plotly_code = False
 st.sidebar.checkbox("Show Chart", value=False, key="show_chart")
 st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
 st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
-st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True)
+st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
 st.title("Thrive UI")
-st.sidebar.write(st.session_state)
+# st.sidebar.write(st.session_state)
 
-def set_question(question):
-    st.session_state["my_question"] = question
+def set_question(question, rerun=False):
     if question is None:
         # Clear questions history when resetting
         st.session_state.questions_history = []
+        st.session_state.my_question = None
+        st.session_state.is_processing = False
+    else:
+        # Set question and processing flag
+        st.session_state.my_question = question
+        st.session_state.is_processing = True
+        if rerun is True:
+            st.rerun()
+
+# Display questions history in sidebar
+st.sidebar.title("Questions History")
+if len(st.session_state.questions_history) > 0:
+    for past_question in st.session_state.questions_history:
+        st.sidebar.button(past_question, on_click=set_question, args=(past_question,False), use_container_width=True)
+else:
+    st.sidebar.text("No questions asked yet")
 
 assistant_message_suggested = st.chat_message(
     "assistant"
 )
 if assistant_message_suggested.button("Click to show suggested questions"):
-    st.session_state["my_question"] = None
+    st.session_state.my_question = None
     questions = generate_questions_cached()
     for i, question in enumerate(questions):
         time.sleep(0.05)
         button = st.button(
             question,
             on_click=set_question,
-            args=(question,),
+            args=(question, False),
         )
 
-my_question = st.session_state.get("my_question", default=None)
+# Always show chat input
+chat_input = st.chat_input("Ask me a question about your data")
 
-if my_question is None:
-    my_question = st.chat_input(
-        "Ask me a question about your data",
-    )
+# Handle new chat input
+if chat_input:
+    set_question(chat_input, True)
 
-# Initialize questions history in session state if it doesn't exist
-if "questions_history" not in st.session_state:
-    st.session_state.questions_history = []
-    
-# Display questions history in sidebar
-st.sidebar.title("Questions History")
-if len(st.session_state.questions_history) > 0:
-    for past_question in st.session_state.questions_history:
-        st.sidebar.button(past_question, on_click=set_question, args=(past_question,), use_container_width=True)
-else:
-    st.sidebar.text("No questions asked yet")
+# Get question from session state
+my_question = st.session_state.get("my_question", None)
 
-if my_question:
-    st.session_state["my_question"] = my_question
+if my_question and st.session_state.is_processing:
+    # Process the question and add to history
     # Add question to history if it's not already there
     if my_question not in st.session_state.questions_history:
         st.session_state.questions_history.append(my_question)
@@ -77,6 +89,10 @@ if my_question:
     user_message.write(f"{my_question}")
 
     sql = generate_sql_cached(question=my_question)
+    
+    # Clear processing flag and question after processing
+    st.session_state.is_processing = False
+    st.session_state.my_question = None
 
     if sql:
         if is_sql_valid_cached(sql=sql):
@@ -155,7 +171,7 @@ if my_question:
                     )
                     # Print the first 5 follow-up questions
                     for question in followup_questions[:5]:
-                        assistant_message_followup.button(question, on_click=set_question, args=(question,))
+                        assistant_message_followup.button(question, on_click=set_question, args=(question, True))
 
     else:
         assistant_message_error = st.chat_message(
