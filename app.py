@@ -31,7 +31,8 @@ st.sidebar.checkbox("Show Table", value=True, key="show_table")
 show_plotly_code = False
 # st.sidebar.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
 st.sidebar.checkbox("Show Chart", value=False, key="show_chart")
-st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
+show_summary = True
+# st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
 st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
 st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
