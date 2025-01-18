@@ -1,3 +1,4 @@
+import streamlit as st
 import pyttsx3
 import speech_recognition as sr
 
@@ -15,13 +16,13 @@ def listen():
         try:
             # Recognize speech using Google Web Speech API
             text = recognizer.recognize_google(audio)
-            
+
             return text
         except sr.UnknownValueError:
-            print("Sorry, I could not understand the audio.")
+            st.error('Sorry, I could not understand the audio.', icon="🚨")
             return None
         except sr.RequestError as e:
-            print(f"Could not request results from Google Speech Recognition service; {e}")
+            st.error(f"Could not request results from Google Speech Recognition service; {e}", icon="🚨")
             return None
 
 def speak(message):
@@ -45,5 +46,5 @@ def speak(message):
     try:
         engine.runAndWait()
     except RuntimeError:
-        print("Sorry, speech is already in progress.")
+        st.error('Sorry, speech is already in progress.', icon="🚨")
         pass  # Ignore the error if the loop is already running

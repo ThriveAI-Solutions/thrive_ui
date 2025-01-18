@@ -4,3 +4,4 @@ python-dotenv
 pyttsx3
 psycopg2
 SpeechRecognition
+pyaudio

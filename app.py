@@ -32,7 +32,7 @@ show_plotly_code = False
 # st.sidebar.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
 st.sidebar.checkbox("Show Chart", value=False, key="show_chart")
 st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
-st.sidebar.checkbox("Speak Summary", value=True, key="speak_summary")
+st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
 st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
@@ -63,6 +63,17 @@ else:
 assistant_message_suggested = st.chat_message(
     "assistant"
 )
+
+if assistant_message_suggested.button("🎤 Speak Human"):
+   with st.status("Listening..."):
+        text = listen()
+        if text:
+            st.success(f"Recognized text: {text}")
+        else:
+            st.error("No input detected.")
+
+        if text:
+            set_question(text, True)
 if assistant_message_suggested.button("Click to show suggested questions"):
     st.session_state.my_question = None
     questions = generate_questions_cached()
@@ -75,21 +86,7 @@ if assistant_message_suggested.button("Click to show suggested questions"):
         )
 
 # Always show chat input
-# chat_input = st.chat_input("Ask me a question about your data")
-
-# Create columns for chat input and microphone button
-col1, col2 = st.columns([0.9, 0.1])
-
-# Chat input in the first column
-with col1:
-    chat_input = st.chat_input("Ask me a question about your data")
-
-# Microphone button in the second column
-with col2:
-    if st.button("🎤"):
-        text = listen()
-        if text:
-            set_question(text, True)
+chat_input = st.chat_input("Ask me a question about your data")
 
 # Handle new chat input
 if chat_input:
