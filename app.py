@@ -12,7 +12,7 @@ from vanna_calls import (
     generate_summary_cached
 )
 from train_vanna import (train)
-from communicate import (speak)
+from communicate import (speak, listen)
 
 st.set_page_config(layout="wide")
 
@@ -75,7 +75,21 @@ if assistant_message_suggested.button("Click to show suggested questions"):
         )
 
 # Always show chat input
-chat_input = st.chat_input("Ask me a question about your data")
+# chat_input = st.chat_input("Ask me a question about your data")
+
+# Create columns for chat input and microphone button
+col1, col2 = st.columns([0.9, 0.1])
+
+# Chat input in the first column
+with col1:
+    chat_input = st.chat_input("Ask me a question about your data")
+
+# Microphone button in the second column
+with col2:
+    if st.button("🎤"):
+        text = listen()
+        if text:
+            set_question(text, True)
 
 # Handle new chat input
 if chat_input:
