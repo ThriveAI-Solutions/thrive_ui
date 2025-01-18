@@ -36,7 +36,7 @@ st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
 st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
-st.title("Thrive UI")
+st.title("Thrive AI")
 # st.sidebar.write(st.session_state)
 
 def set_question(question, rerun=False):
