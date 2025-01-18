@@ -12,6 +12,7 @@ from vanna_calls import (
     generate_summary_cached
 )
 from train_vanna import (train)
+from communicate import (speak)
 
 st.set_page_config(layout="wide")
 
@@ -31,6 +32,7 @@ show_plotly_code = False
 # st.sidebar.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
 st.sidebar.checkbox("Show Chart", value=False, key="show_chart")
 st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
+st.sidebar.checkbox("Speak Summary", value=True, key="speak_summary")
 st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
@@ -150,13 +152,19 @@ if my_question and st.session_state.is_processing:
                         else:
                             assistant_message_chart.error("I couldn't generate a chart")
 
-            if st.session_state.get("show_summary", True):
+            if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
                 assistant_message_summary = st.chat_message(
                     "assistant"
                 )
                 summary = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
-                    assistant_message_summary.text(summary)
+                    if st.session_state.get("show_summary", True):
+                        assistant_message_summary.text(summary)
+                    if st.session_state.get("speak_summary", True):
+                        speak(summary)
+                else:
+                    if st.session_state.get("speak_summary", True):
+                        speak("No results found")
 
             if st.session_state.get("show_followup", True):
                 assistant_message_followup = st.chat_message(
