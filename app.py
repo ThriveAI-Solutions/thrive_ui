@@ -12,7 +12,7 @@ from vanna_calls import (
     generate_summary_cached
 )
 from train_vanna import (train)
-from communicate import (speak, listen)
+from communicate import (speak, listen, copy_to_clipboard)
 
 st.set_page_config(layout="wide")
 
@@ -184,7 +184,13 @@ if my_question and st.session_state.is_processing:
                         
                         # Add feedback buttons below the summary
                         cols = assistant_message_summary.columns([0.1, 0.1, 0.1, 0.7])
-                        with cols[0]:
+                        with cols[0]: #TODO: why does this trigger a redraw?
+                            st.button("📋 Copy", 
+                            key=f"copy_btn",
+                            type="secondary",
+                            on_click=copy_to_clipboard, 
+                            args=(summary,))
+                        with cols[1]:
                             st.button(
                                 "👍",
                                 key=f"thumbs_up_{len(st.session_state.questions_history)}",
@@ -192,7 +198,7 @@ if my_question and st.session_state.is_processing:
                                 on_click=set_feedback,
                                 args=(feedback_key, "up")
                             )
-                        with cols[1]:
+                        with cols[2]:
                             st.button(
                                 "👎",
                                 key=f"thumbs_down_{len(st.session_state.questions_history)}",
@@ -200,10 +206,7 @@ if my_question and st.session_state.is_processing:
                                 on_click=set_feedback,
                                 args=(feedback_key, "down")
                             )
-                        with cols[2]:
-                            if st.button("📋 Copy", key=f"copy_{len(st.session_state.questions_history)}"):
-                                st.toast("✅ Copied to clipboard!", icon="✅")
-                    
+                                
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:

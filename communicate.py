@@ -1,6 +1,16 @@
 import streamlit as st
 import pyttsx3
 import speech_recognition as sr
+import pyperclip
+
+def copy_to_clipboard(text):
+    try:
+        pyperclip.copy(text)
+        st.session_state["clipboard_copied"] = True
+        st.success("Copied to clipboard!", icon="✅")
+    except Exception as e:
+        st.session_state["clipboard_copied"] = False
+        st.error("Failed to copy to clipboard", icon="❌")
 
 def listen():
     # Initialize the recognizer
