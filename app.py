@@ -40,6 +40,13 @@ st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_contai
 st.title("Thrive AI")
 # st.sidebar.write(st.session_state)
 
+def set_feedback(key: str, value: str):
+    """Set feedback state for a specific summary"""
+    current = st.session_state.get(key)
+    # Toggle off if same value, otherwise set new value
+    st.session_state[key] = None if current == value else value
+    set_question(st.session_state.questions_history[-1], False)
+
 def set_question(question, rerun=False):
     if question is None:
         # Clear questions history when resetting
@@ -163,13 +170,40 @@ if my_question and st.session_state.is_processing:
                             assistant_message_chart.error("I couldn't generate a chart")
 
             if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
-                assistant_message_summary = st.chat_message(
-                    "assistant"
-                )
+                assistant_message_summary = st.chat_message("assistant")
                 summary = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
                     if st.session_state.get("show_summary", True):
-                        assistant_message_summary.text(summary)
+                        # Display summary in a code block for easy copying
+                        assistant_message_summary.code(summary, language=None)
+                        
+                        # Initialize feedback state for this summary if not exists
+                        feedback_key = f"feedback_{len(st.session_state.questions_history)}"
+                        if feedback_key not in st.session_state:
+                            st.session_state[feedback_key] = None
+                        
+                        # Add feedback buttons below the summary
+                        cols = assistant_message_summary.columns([0.1, 0.1, 0.1, 0.7])
+                        with cols[0]:
+                            st.button(
+                                "👍",
+                                key=f"thumbs_up_{len(st.session_state.questions_history)}",
+                                type="primary" if st.session_state[feedback_key] == "up" else "secondary",
+                                on_click=set_feedback,
+                                args=(feedback_key, "up")
+                            )
+                        with cols[1]:
+                            st.button(
+                                "👎",
+                                key=f"thumbs_down_{len(st.session_state.questions_history)}",
+                                type="primary" if st.session_state[feedback_key] == "down" else "secondary",
+                                on_click=set_feedback,
+                                args=(feedback_key, "down")
+                            )
+                        with cols[2]:
+                            if st.button("📋 Copy", key=f"copy_{len(st.session_state.questions_history)}"):
+                                st.toast("✅ Copied to clipboard!", icon="✅")
+                    
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:
