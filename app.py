@@ -65,15 +65,13 @@ assistant_message_suggested = st.chat_message(
 )
 
 if assistant_message_suggested.button("🎤 Speak Human"):
-   with st.status("Listening..."):
-        text = listen()
-        if text:
-            st.success(f"Recognized text: {text}")
-        else:
-            st.error("No input detected.")
-
-        if text:
-            set_question(text, True)
+    text = listen()
+    if text:
+        st.success(f"Recognized text: {text}")
+    else:
+        st.error("No input detected.")
+    if text:
+        set_question(text, True)
 if assistant_message_suggested.button("Click to show suggested questions"):
     st.session_state.my_question = None
     questions = generate_questions_cached()

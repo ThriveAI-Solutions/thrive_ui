@@ -6,24 +6,29 @@ def listen():
     # Initialize the recognizer
     recognizer = sr.Recognizer()
 
-    # Use the microphone as the source for input
-    with sr.Microphone() as source:
-
-        # Adjust for ambient noise and record the audio
-        recognizer.adjust_for_ambient_noise(source)
-        audio = recognizer.listen(source)
-
-        try:
-            # Recognize speech using Google Web Speech API
-            text = recognizer.recognize_google(audio)
-
-            return text
-        except sr.UnknownValueError:
-            st.error('Sorry, I could not understand the audio.', icon="🚨")
-            return None
-        except sr.RequestError as e:
-            st.error(f"Could not request results from Google Speech Recognition service; {e}", icon="🚨")
-            return None
+    # Create a status element to show listening state
+    with st.status("🎤 Listening...", expanded=True) as status:
+        # Use the microphone as the source for input
+        with sr.Microphone() as source:
+            status.update(label="Adjusting for ambient noise...")
+            # Adjust for ambient noise and record the audio
+            recognizer.adjust_for_ambient_noise(source)
+            
+            status.update(label="🎤 Listening... (speak now)")
+            audio = recognizer.listen(source)
+            
+            status.update(label="Processing speech...")
+            try:
+                # Recognize speech using Google Web Speech API
+                text = recognizer.recognize_google(audio)
+                status.update(label=f"Heard: {text}", state="complete")
+                return text
+            except sr.UnknownValueError:
+                st.error('Sorry, I could not understand the audio.', icon="🚨")
+                return None
+            except sr.RequestError as e:
+                st.error(f"Could not request results from Google Speech Recognition service; {e}", icon="🚨")
+                return None
 
 def speak(message):
     # Initialize the text-to-speech engine
