@@ -3,7 +3,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from vanna.remote import VannaDefault
-from vanna_calls import (
+from helperClasses.vanna_calls import (
     setup_vanna
 )
 #TODO: Convert this to a ChromaDB implementation?
