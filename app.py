@@ -17,7 +17,7 @@ from communicate import (speak, listen, copy_to_clipboard)
 st.set_page_config(layout="wide")
 
 # Train Vanna on database schema
-# train()
+train()
 
 # Initialize session state variables
 if "questions_history" not in st.session_state:

@@ -60,7 +60,9 @@ def train():
         ddl.append(');')
     
     # Sample SQL query for training
-    sample_sql_query = "select count(*) from public.patients; select * from medical_records;"
+    # sample_sql_query = "select count(*) from public.patients; select * from medical_records;"
+    # sample_sql_query = 'select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex, year from penguins'
+    sample_sql_query = 'select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train'
 
     vn.train('\n'.join(ddl), sample_sql_query)
     cursor.close()
