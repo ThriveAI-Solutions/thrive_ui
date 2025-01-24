@@ -13,9 +13,9 @@ from helperClasses.vanna_calls import (
 )
 from helperClasses.train_vanna import (train)
 from helperClasses.communicate import (speak, listen, copy_to_clipboard)
-
-if st.session_state.get("logged_in") is not True: #TODO: update this in the cookies
-    st.switch_page("views/login.py")
+print('chat_bot')
+# if st.session_state["authentication_status"] is False or st.session_state["authentication_status"] is None:
+#     st.switch_page("views/login.py")
 
 # --- HIDE LOGIN NAVIGATION ---
 st.markdown(

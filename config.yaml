@@ -1,0 +1,28 @@
+cookie:
+  expiry_days: 30
+  key: some_signature_key
+  name: some_cookie_name
+credentials:
+  usernames:
+    kroot:
+      email: kroot@email.com
+      failed_login_attempts: 2
+      first_name: Kyle
+      last_name: Root
+      logged_in: false
+      password: $2b$12$AeeTcNCqRLGNbCpGBn234.ODWef1rf94VF.zTeJ.nF2L3OST3cFbS
+      roles:
+      - admin
+      - editor
+      - viewer
+    thriveai:
+      email: test@email.com
+      failed_login_attempts: 0
+      first_name: Thrive
+      last_name: AI
+      logged_in: false
+      password: $2b$12$1PBZilEQEQ4uVb/FNjVdi.gtV7nESC02r8c56P4VOmLjOay./blLC
+      roles:
+      - admin
+      - editor
+      - viewer

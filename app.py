@@ -1,4 +1,7 @@
 import streamlit as st
+print('app')
+def logout_callback(arg):
+    st.switch_page("views/login.py")
 
 # --- PAGE SETUP ---
 login_page = st.Page(
@@ -15,10 +18,15 @@ chat_bot_page = st.Page(
 
 pg = st.navigation(pages=[login_page, chat_bot_page])
 
-if st.sidebar.button("Logout", use_container_width=True, type="primary"):
-    st.session_state["logged_in"] = False #TODO: update this in the cookies
-    st.switch_page("views/login.py")
-
-st.write("Authenticated:", st.session_state.get("logged_in"))
-
 pg.run()
+
+if 'authentication_status' not in st.session_state:
+    print('goto login')
+    st.switch_page('views/login.py')
+
+if "authenticator" in st.session_state:
+    print('authenticator')
+    authenticator = st.session_state["authenticator"]
+
+    if st.session_state["authentication_status"]:
+        authenticator.logout(location='sidebar',  callback=logout_callback)
