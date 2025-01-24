@@ -17,7 +17,7 @@ credentials:
       - viewer
     thriveai:
       email: test@email.com
-      failed_login_attempts: 0
+      failed_login_attempts: 1
       first_name: Thrive
       last_name: AI
       logged_in: false
