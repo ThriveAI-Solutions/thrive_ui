@@ -13,22 +13,10 @@ from helperClasses.vanna_calls import (
 )
 from helperClasses.train_vanna import (train)
 from helperClasses.communicate import (speak, listen, copy_to_clipboard)
-print('chat_bot')
-# if st.session_state["authentication_status"] is False or st.session_state["authentication_status"] is None:
-#     st.switch_page("views/login.py")
+from helperClasses.auth import (is_logged_in)
 
-# --- HIDE LOGIN NAVIGATION ---
-st.markdown(
-    """
-    <style>
-    [data-testid="stSidebarNavItems"] li:first-child {
-        display: none;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-# --- HIDE LOGIN NAVIGATION ---
+if is_logged_in() is False:
+    st.switch_page("views/login.py")
 
 # Train Vanna on database schema
 train()

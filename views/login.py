@@ -1,9 +1,9 @@
 import streamlit as st
-import streamlit_authenticator as stauth
-import yaml
-from yaml.loader import SafeLoader
-from pathlib import Path
-print('login')
+from helperClasses.auth import (is_logged_in)
+
+if is_logged_in() is True:
+    st.switch_page("views/chat_bot.py")
+    
 #--- HIDE SIDEBAR ---
 st.markdown(
     """
@@ -17,39 +17,17 @@ st.markdown(
 )
 #--- HIDE SIDEBAR ---
 
-# --- AUTHENTICATION SETUP ---
-# Construct the path to the config.yaml file relative to the script's location
-config_path = Path(__file__).resolve().parent.parent / "config.yaml"
+st.title("🔓 Log In - Thrive AI")
 
-# Load the YAML configuration
-with config_path.open("r") as file:
-    config = yaml.load(file, Loader=SafeLoader)
+with st.form("login_form"):
+    username = st.text_input("Username", value="ThriveAI")
+    password = st.text_input("Password", type="password", value="AIThrive")
+    submit_button = st.form_submit_button("Login")
 
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days']
-)
-
-# Store the authenticator in the session state
-if "authenticator" not in st.session_state:
-    st.session_state["authenticator"] = authenticator
-
-authenticator.login(location='main')
-
-if st.session_state["authentication_status"]:
-    print('goto chat_bot')
-    st.write(f'Welcome *{st.session_state["name"]}*')
-    st.switch_page("views/chat_bot.py")
-
-elif st.session_state["authentication_status"] is False:
-    st.error('Username/password is incorrect')
-elif st.session_state["authentication_status"] is None:
-    st.warning('Please enter your username and password')
-
-# We call below code in case of registration, reset password, etc.
-with open(config_path, 'w') as file:
-    yaml.dump(config, file, default_flow_style=False)
-
-# --- AUTHENTICATION SETUP ---
+    if submit_button:
+        if username == "ThriveAI" and password == "AIThrive":
+            st.session_state["logged_in"] = True #TODO: update this in the cookies
+            st.success("You are now logged in!")
+            st.switch_page("views/chat_bot.py")
+        else:
+            st.error("Incorrect username or password. Please try again.")
