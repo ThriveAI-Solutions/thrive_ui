@@ -5,16 +5,16 @@ from yaml.loader import SafeLoader
 from pathlib import Path
 print('login')
 #--- HIDE SIDEBAR ---
-st.markdown(
-    """
-<style>
-    [data-testid="stSidebarCollapsedControl"], [data-testid="stSidebar"] {
-        display: none
-    }
-</style>
-""",
-    unsafe_allow_html=True,
-)
+# st.markdown(
+#     """
+# <style>
+#     [data-testid="stSidebarCollapsedControl"], [data-testid="stSidebar"] {
+#         display: none
+#     }
+# </style>
+# """,
+#     unsafe_allow_html=True,
+# )
 #--- HIDE SIDEBAR ---
 
 # --- AUTHENTICATION SETUP ---

@@ -39,6 +39,11 @@ if "questions_history" not in st.session_state:
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
 
+with st.sidebar.expander("Options"):
+    st.checkbox("Conversational Controls", value=False, key="show_conversational_controls")
+    st.checkbox("Suggested Questions", value=False, key="show_suggested_questions")
+    st.checkbox("Question History", value=False, key="show_question_history")
+
 st.sidebar.title("Output Settings")
 st.sidebar.checkbox("Show SQL", value=False, key="show_sql")
 st.sidebar.checkbox("Show Table", value=True, key="show_table")
@@ -47,8 +52,10 @@ show_plotly_code = False
 st.sidebar.checkbox("Show Chart", value=False, key="show_chart")
 show_summary = True
 # st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
-st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
-st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
+if st.session_state.get("show_conversational_controls", True):
+    st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
+if st.session_state.get("show_suggested_questions", True):
+    st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
 st.title("Thrive AI")
@@ -75,35 +82,38 @@ def set_question(question, rerun=False):
             st.rerun()
 
 # Display questions history in sidebar
-st.sidebar.title("Questions History")
-if len(st.session_state.questions_history) > 0:
-    for past_question in st.session_state.questions_history:
-        st.sidebar.button(past_question, on_click=set_question, args=(past_question,False), use_container_width=True)
-else:
-    st.sidebar.text("No questions asked yet")
-
-assistant_message_suggested = st.chat_message(
-    "assistant"
-)
-
-if assistant_message_suggested.button("🎤 Speak Human"):
-    text = listen()
-    if text:
-        st.success(f"Recognized text: {text}")
+if st.session_state.get("show_question_history", True):
+    st.sidebar.title("Questions History")
+    if len(st.session_state.questions_history) > 0:
+        for past_question in st.session_state.questions_history:
+            st.sidebar.button(past_question, on_click=set_question, args=(past_question,False), use_container_width=True)
     else:
-        st.error("No input detected.")
-    if text:
-        set_question(text, True)
-if assistant_message_suggested.button("Click to show suggested questions"):
-    st.session_state.my_question = None
-    questions = generate_questions_cached()
-    for i, question in enumerate(questions):
-        time.sleep(0.05)
-        button = st.button(
-            question,
-            on_click=set_question,
-            args=(question, False),
-        )
+        st.sidebar.text("No questions asked yet")
+
+if st.session_state.get("show_conversational_controls", True) or st.session_state.get("show_suggested_questions", True):
+    assistant_message_suggested = st.chat_message(
+        "assistant"
+    )
+
+    if st.session_state.get("show_conversational_controls", True) and assistant_message_suggested.button("🎤 Speak Human"):
+        text = listen()
+        if text:
+            st.success(f"Recognized text: {text}")
+        else:
+            st.error("No input detected.")
+        if text:
+            set_question(text, True)
+
+    if st.session_state.get("show_suggested_questions", True) and assistant_message_suggested.button("Click to show suggested questions"):
+        st.session_state.my_question = None
+        questions = generate_questions_cached()
+        for i, question in enumerate(questions):
+            time.sleep(0.05)
+            button = st.button(
+                question,
+                on_click=set_question,
+                args=(question, False),
+            )
 
 # Always show chat input
 chat_input = st.chat_input("Ask me a question about your data")
