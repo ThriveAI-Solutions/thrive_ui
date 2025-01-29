@@ -1,0 +1,20 @@
+{
+    "sample_queries": [
+        {
+            "description": "Query patients table",
+            "query": "select patient_id, first_name, last_name, date_of_birth, gender, phone_number, email, address from public.patients;"
+        },
+        {
+            "description": "Query medical records table",
+            "query": "select record_id, patient_id, visit_date, diagnosis, treatment, doctor_name, notes from medical_records;"
+        },
+        {
+            "description": "Query penguins table",
+            "query": "select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex, year from penguins;"
+        },
+        {
+            "description": "Query titanic training data",
+            "query": "select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train;"
+        }
+    ]
+}

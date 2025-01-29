@@ -1,6 +1,8 @@
 import streamlit as st
 import psycopg2
+import json
 from psycopg2.extras import RealDictCursor
+from pathlib import Path
 
 from helperClasses.vanna_calls import (
     setup_vanna
@@ -58,11 +60,14 @@ def train():
     if ddl:  # Close the last table
         ddl.append(');')
     
-    # Sample SQL query for training
-    sample_sql_query = "select patient_id, first_name, last_name, date_of_birth, gender, phone_number, email, address from public.patients; "
-    sample_sql_query = "select record_id, patient_id, visit_date, diagnosis, treatment, doctor_name, notes from medical_records;"
-    sample_sql_query += 'select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex, year from penguins;'
-    sample_sql_query += 'select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train;'
+    # Load training queries from JSON
+    training_file = Path(__file__).parent / 'config' / 'training_data.json'
+    with open(training_file, 'r') as f:
+        training_data = json.load(f)
+    
+    # Combine all queries
+    sample_sql_query = ' '.join(item['query'] for item in training_data['sample_queries'])
 
+    # Train vanna with schema and queries
     vn.train('\n'.join(ddl), sample_sql_query)
     cursor.close()
