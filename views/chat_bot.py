@@ -50,7 +50,7 @@ else:
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
 st.title("Thrive AI")
-# st.sidebar.write(st.session_state)
+st.sidebar.write(st.session_state)
 
 def set_feedback(key: str, value: str):
     """Set feedback state for a specific summary"""
@@ -67,6 +67,7 @@ def set_question(question, rerun=False):
         st.session_state.is_processing = False
     else:
         # Set question and processing flag
+        st.session_state.questions_history.append(question)
         st.session_state.my_question = question
         st.session_state.is_processing = True
         # if rerun is True:
@@ -104,6 +105,7 @@ if st.session_state.get("show_conversational_controls", True) or st.session_stat
                 question,
                 on_click=set_question,
                 args=(question, False),
+                use_container_width=True,
             )
 
 # Always show chat input
@@ -250,5 +252,3 @@ if my_question and st.session_state.is_processing:
             "assistant"
         )
         assistant_message_error.error("I wasn't able to generate SQL for that question")
-
-st.write(st.session_state)
