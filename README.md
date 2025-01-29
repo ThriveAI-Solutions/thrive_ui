@@ -10,7 +10,9 @@ pip install -r requirements.txt
 ```
 
 # Configure
-Modify the `setup_vanna` function in [vanna_calls.py](./vanna_calls.py) to use your desired Vanna setup.
+Copy the .streamlit/secrets_example.toml and Paste it to .streamlit/secrets.toml
+
+Modify the values in the secrets.toml to connect to your desired configuration.
 
 You can configure secrets in `.streamlit/secrets.toml` and access them in your app using `st.secrets.get(...)`.
 
@@ -19,7 +21,3 @@ You can configure secrets in `.streamlit/secrets.toml` and access them in your a
 ```bash
 streamlit run app.py
 ```
-
-
-## License
-[MIT](https://choosealicense.com/licenses/mit/)
