@@ -61,7 +61,7 @@ def train():
     
     # Sample SQL query for training
     sample_sql_query = "select patient_id, first_name, last_name, date_of_birth, gender, phone_number, email, address from public.patients; "
-    sample_sql_query = "select record_id, patient_id, visit_date, diagnosis, treatment, doctor_name, notes from medical_records;"
+    sample_sql_query += "select record_id, patient_id, visit_date, diagnosis, treatment, doctor_name, notes from medical_records;"
     sample_sql_query += 'select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex, year from penguins;'
     sample_sql_query += 'select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train;'
 

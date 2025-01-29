@@ -54,8 +54,12 @@ show_summary = True
 # st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
 if st.session_state.get("show_conversational_controls", True):
     st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
+else:
+    st.session_state["speak_summary"] = False
 if st.session_state.get("show_suggested_questions", True):
     st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
+else:
+    st.session_state["show_followup"] = False
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
 st.title("Thrive AI")

@@ -19,7 +19,3 @@ You can configure secrets in `.streamlit/secrets.toml` and access them in your a
 ```bash
 streamlit run app.py
 ```
-
-
-## License
-[MIT](https://choosealicense.com/licenses/mit/)
