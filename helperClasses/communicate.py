@@ -3,6 +3,7 @@ import pyttsx3
 import speech_recognition as sr
 import pyperclip
 
+# @st.fragment
 def copy_to_clipboard(text):
     try:
         pyperclip.copy(text)

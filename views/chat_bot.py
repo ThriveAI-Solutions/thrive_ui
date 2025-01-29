@@ -1,5 +1,5 @@
-import time
 import streamlit as st
+import time
 from helperClasses.vanna_calls import (
     generate_questions_cached,
     generate_sql_cached,
@@ -13,10 +13,9 @@ from helperClasses.vanna_calls import (
 )
 from helperClasses.train_vanna import (train)
 from helperClasses.communicate import (speak, listen, copy_to_clipboard)
-from helperClasses.auth import (is_logged_in)
+from helperClasses.auth import (check_authenticate)
 
-if is_logged_in() is False:
-    st.switch_page("views/login.py")
+check_authenticate()
 
 # Train Vanna on database schema
 train()
@@ -42,8 +41,12 @@ show_summary = True
 # st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
 if st.session_state.get("show_conversational_controls", True):
     st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
+else:
+    st.session_state["speak_summary"] = False
 if st.session_state.get("show_suggested_questions", True):
     st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
+else:
+    st.session_state["show_followup"] = False
 st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
 
 st.title("Thrive AI")
@@ -66,8 +69,8 @@ def set_question(question, rerun=False):
         # Set question and processing flag
         st.session_state.my_question = question
         st.session_state.is_processing = True
-        if rerun is True:
-            st.rerun()
+        # if rerun is True:
+        #     st.rerun()
 
 # Display questions history in sidebar
 if st.session_state.get("show_question_history", True):
@@ -197,7 +200,7 @@ if my_question and st.session_state.is_processing:
                         # Add feedback buttons below the summary
                         cols = assistant_message_summary.columns([0.1, 0.1, 0.1, 0.7])
                         with cols[0]: #TODO: why does this trigger a redraw?
-                            st.button("📋 Copy", 
+                            st.button("📋", 
                             key=f"copy_btn",
                             type="secondary",
                             on_click=copy_to_clipboard, 
@@ -247,3 +250,5 @@ if my_question and st.session_state.is_processing:
             "assistant"
         )
         assistant_message_error.error("I wasn't able to generate SQL for that question")
+
+st.write(st.session_state)

@@ -2,7 +2,6 @@ import streamlit as st
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from vanna.remote import VannaDefault
 from helperClasses.vanna_calls import (
     setup_vanna
 )
