@@ -21,6 +21,9 @@ You can configure secrets in `.streamlit/secrets.toml` and access them in your a
 ```bash
 streamlit run app.py
 ```
+<<<<<<< HEAD
 
 # Database
 Run the database create statements int he pgDatabase folder.  This assumes you are using PostgreSQL
+=======
+>>>>>>> main
