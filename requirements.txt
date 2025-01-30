@@ -1,6 +1,5 @@
 vanna==0.7.5
 streamlit==1.40.1
-python-dotenv==1.0.1
 pyttsx3==2.98
 psycopg2==2.9.10
 SpeechRecognition==3.14.0
