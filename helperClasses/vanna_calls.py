@@ -4,7 +4,7 @@ from vanna.remote import VannaDefault
 
 @st.cache_resource(ttl=3600)
 def setup_vanna():
-    vn = VannaDefault(api_key=st.secrets.get("VANNA_API_KEY"), model='thrive')
+    vn = VannaDefault(api_key=st.secrets.get("VANNA_API_KEY"), model=st.secrets.get("VANNA_MODEL"))
     vn.connect_to_postgres(
         host=st.secrets["postgres"]["host"],
         dbname=st.secrets["postgres"]["database"],
