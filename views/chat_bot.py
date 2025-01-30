@@ -35,29 +35,9 @@ def set_question(question):
         st.session_state.messages.append({"role": "user", "content": question, "type": "text"})
         renderLatestMessage()
 
-<<<<<<< HEAD
 def get_unique_messages():
     # Assuming st.session_state.messages is a list of dictionaries
     messages = st.session_state.messages
-=======
-st.sidebar.title("Output Settings")
-st.sidebar.checkbox("Show SQL", value=False, key="show_sql")
-st.sidebar.checkbox("Show Table", value=True, key="show_table")
-show_plotly_code = False
-# st.sidebar.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-st.sidebar.checkbox("Show Chart", value=False, key="show_chart")
-show_summary = True
-# st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
-if st.session_state.get("show_conversational_controls", True):
-    st.sidebar.checkbox("Speak Summary", value=False, key="speak_summary")
-else:
-    st.session_state["speak_summary"] = False
-if st.session_state.get("show_suggested_questions", True):
-    st.sidebar.checkbox("Show Follow-up Questions", value=False, key="show_followup")
-else:
-    st.session_state["show_followup"] = False
-st.sidebar.button("Reset", on_click=lambda: set_question(None, True), use_container_width=True)
->>>>>>> main
 
     # Filter messages to ensure uniqueness based on the "content" field
     seen_content = set()
