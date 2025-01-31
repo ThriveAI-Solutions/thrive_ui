@@ -146,6 +146,7 @@ if len(filtered_messages) > 0:
 else:
     st.sidebar.text("No questions asked yet")
 
+# for debugging
 # st.sidebar.write(st.session_state)
 ######### Sidebar settings #########
 
