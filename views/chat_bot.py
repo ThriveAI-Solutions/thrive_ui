@@ -24,7 +24,7 @@ train()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-def set_question(question):
+def set_question(question:str):
     if question is None:
         # Clear questions history when resetting
         st.session_state.my_question = None
@@ -51,15 +51,11 @@ def get_unique_messages():
 
     return unique_messages
 
-def set_feedback(key: str, value: str):
-    # TODO: change this to store on the messages list/object?
-    """Set feedback state for a specific summary"""
-    current = st.session_state.get(key)
-    # Toggle off if same value, otherwise set new value
-    st.session_state[key] = None if current == value else value
-    # set_question(st.session_state.questions_history[-1])
+def set_feedback(index:int, value: str):
+    st.session_state.messages[index]["feedback"] = value
+    # TODO: send this to the database at this point 
 
-def renderMessage(message, index):
+def renderMessage(message:object, index:int):
    with st.chat_message(message["role"]):
         match message["type"]:
             case "sql":
@@ -74,30 +70,24 @@ def renderMessage(message, index):
                 st.dataframe(message["content"])
             case "summary":
                 st.code(message["content"], language=None)
-                # TODO: add the thumbs back in, link them to the st.session_state.messages object list
-                # Initialize feedback state for this summary if not exists
-                # feedback_key = f"feedback_{index}"
-                # if feedback_key not in st.session_state:
-                #     st.session_state[feedback_key] = None
-                
-                # # Add feedback buttons below the summary
-                # cols = st.columns([0.1, 0.1, 0.8])
-                # with cols[0]:
-                #     st.button(
-                #         "👍",
-                #         key=f"thumbs_up_{len(st.session_state.questions_history)}",
-                #         type="primary" if st.session_state[feedback_key] == "up" else "secondary",
-                #         on_click=set_feedback,
-                #         args=(feedback_key, "up")
-                #     )
-                # with cols[1]:
-                #     st.button(
-                #         "👎",
-                #         key=f"thumbs_down_{len(st.session_state.questions_history)}",
-                #         type="primary" if st.session_state[feedback_key] == "down" else "secondary",
-                #         on_click=set_feedback,
-                #         args=(feedback_key, "down")
-                #     )
+                # Add feedback buttons below the summary
+                cols = st.columns([0.1, 0.1, 0.8])
+                with cols[0]:
+                    st.button(
+                        "👍",
+                        key=f"thumbs_up_{index}",
+                        type="primary" if message["feedback"] == "up" else "secondary",
+                        on_click=set_feedback,
+                        args=(index, "up")
+                    )
+                with cols[1]:
+                    st.button(
+                        "👎",
+                        key=f"thumbs_down_{index}",
+                        type="primary" if message["feedback"] == "down" else "secondary",
+                        on_click=set_feedback,
+                        args=(index, "down")
+                    )
             case "followup":
                  if len(message["content"]) > 0:
                     st.text(
@@ -191,10 +181,10 @@ if my_question:
     if sql:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
-                st.session_state.messages.append({"role": "assistant", "content": sql, "type": "sql"})
+                st.session_state.messages.append({"role": "assistant", "content": sql, "type": "sql", "feedback": None})
                 renderLatestMessage()
         else:
-            st.session_state.messages.append({"role": "assistant", "content": sql, "type": "error"})
+            st.session_state.messages.append({"role": "assistant", "content": sql, "type": "error", "feedback": None})
             # st.session_state.messages.append({"role": "assistant", "content": sql, "type": "sql"})
             renderLatestMessage()
             st.stop()
@@ -207,37 +197,37 @@ if my_question:
         if st.session_state.get("df") is not None:
             if st.session_state.get("show_table", True):
                 df = st.session_state.get("df")
-                st.session_state.messages.append({"role": "assistant", "content": df, "type": "dataframe"})
+                st.session_state.messages.append({"role": "assistant", "content": df, "type": "dataframe", "feedback": None})
                 renderLatestMessage()
 
             if should_generate_chart_cached(question=my_question, sql=sql, df=df):
                 code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
 
                 if st.session_state.get("show_plotly_code", False):
-                    st.session_state.messages.append({"role": "assistant", "content": code, "type": "python"})
+                    st.session_state.messages.append({"role": "assistant", "content": code, "type": "python", "feedback": None})
                     renderLatestMessage()
 
                 if code is not None and code != "":
                     if st.session_state.get("show_chart", True):
                         fig = generate_plot_cached(code=code, df=df)
                         if fig is not None:
-                            st.session_state.messages.append({"role": "assistant", "content": fig, "type": "plotly_chart"})
+                            st.session_state.messages.append({"role": "assistant", "content": fig, "type": "plotly_chart", "feedback": None})
                             renderLatestMessage()
                         else:
-                            st.session_state.messages.append({"role": "assistant", "content": "I couldn't generate a chart", "type": "error"})
+                            st.session_state.messages.append({"role": "assistant", "content": "I couldn't generate a chart", "type": "error", "feedback": None})
                             renderLatestMessage()
 
             if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
                 summary = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
                     if st.session_state.get("show_summary", True):
-                        st.session_state.messages.append({"role": "assistant", "content": summary, "type": "summary"})
+                        st.session_state.messages.append({"role": "assistant", "content": summary, "type": "summary", "feedback": None})
                         renderLatestMessage()
                                 
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:
-                    st.session_state.messages.append({"role": "assistant", "content": "Could not generate a summary", "type": "summary"})
+                    st.session_state.messages.append({"role": "assistant", "content": "Could not generate a summary", "type": "summary", "feedback": None})
                     renderLatestMessage()
                     if st.session_state.get("speak_summary", True):
                         speak("Could not generate a summary")
@@ -248,8 +238,8 @@ if my_question:
                 )
                 st.session_state["df"] = None
 
-                st.session_state.messages.append({"role": "assistant", "content": followup_questions, "type": "followup"})
+                st.session_state.messages.append({"role": "assistant", "content": followup_questions, "type": "followup", "feedback": None})
                 renderLatestMessage()
     else:
-        st.session_state.messages.append({"role": "assistant", "content": "I wasn't able to generate SQL for that question", "type": "error"})
+        st.session_state.messages.append({"role": "assistant", "content": "I wasn't able to generate SQL for that question", "type": "error", "feedback": None})
         renderLatestMessage()
