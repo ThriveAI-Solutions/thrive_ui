@@ -59,15 +59,22 @@ def train():
     
     if ddl:  # Close the last table
         ddl.append(');')
+
+    # Train vanna with schema and queries
+    vn.train('\n'.join(ddl), "select * from {currentTable}")
+    cursor.close()
     
     # Load training queries from JSON
     training_file = Path(__file__).parent / 'config' / 'training_data.json'
     with open(training_file, 'r') as f:
         training_data = json.load(f)
     
-    # Combine all queries
-    sample_sql_query = ' '.join(item['query'] for item in training_data['sample_queries'])
+    # Extract the sample queries
+    sample_queries = training_data.get("sample_queries", [])
 
-    # Train vanna with schema and queries
-    vn.train('\n'.join(ddl), sample_sql_query)
-    cursor.close()
+    # Iterate over the sample queries and send the question and sql to vn.train()
+    for query in sample_queries:
+        question = query.get("question")
+        sql = query.get("sql")
+        if question and sql:
+            vn.train(question, sql)

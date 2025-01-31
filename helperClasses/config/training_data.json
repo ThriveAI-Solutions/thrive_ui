@@ -1,20 +1,40 @@
 {
     "sample_queries": [
         {
-            "description": "Query patients table",
+            "question": "Show all information in the patients data?",
             "query": "select patient_id, first_name, last_name, date_of_birth, gender, phone_number, email, address from public.patients;"
         },
         {
-            "description": "Query medical records table",
+            "question": "Show all information in the medical record data?",
             "query": "select record_id, patient_id, visit_date, diagnosis, treatment, doctor_name, notes from medical_records;"
         },
         {
-            "description": "Query penguins table",
+            "question": "Show all information in the penguin data?",
             "query": "select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex, year from penguins;"
         },
         {
-            "description": "Query titanic training data",
+            "question": "Show all information in the titanic data.",
             "query": "select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train;"
+        },
+        {
+            "question": "How many records are there for people that survived?",
+            "query": "SELECT COUNT(*) as Number_of_Records FROM titanic_train WHERE survived = 1;"
+        },
+        {
+            "question": "How many records are there shown by if they survived?",
+            "query": "SELECT survived, COUNT(*) AS Number_of_Records FROM titanic_train GROUP BY survived;"
+        },
+        {
+            "question": "How many passengers survived and did not survive?",
+            "query": "SELECT survived, COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train GROUP BY survived;"
+        },
+        {
+            "question": "How many passengers survived?",
+            "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 1;"
+        },
+        {
+            "question": "How many passengers did not survive?",
+            "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 0;"
         }
     ]
 }

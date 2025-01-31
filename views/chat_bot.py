@@ -32,8 +32,7 @@ def set_question(question:str):
     else:
         # Set question
         st.session_state.my_question = question
-        st.session_state.messages.append({"role": "user", "content": question, "type": "text"})
-        renderLatestMessage()
+        addMessage({"role": "user", "content": question, "type": "text"})
 
 def get_unique_messages():
     # Assuming st.session_state.messages is a list of dictionaries
@@ -99,7 +98,8 @@ def renderMessage(message:object, index:int):
             case _:
                 st.markdown(message["content"])
 
-def renderLatestMessage():
+def addMessage(message:object):
+    st.session_state.messages.append(message)
     if len(st.session_state.messages) > 0:
         renderMessage(st.session_state.messages[-1], len(st.session_state.messages)-1)
 
@@ -182,12 +182,10 @@ if my_question:
     if sql:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
-                st.session_state.messages.append({"role": "assistant", "content": sql, "type": "sql", "feedback": None})
-                renderLatestMessage()
+                addMessage({"role": "assistant", "content": sql, "type": "sql", "feedback": None})
         else:
-            st.session_state.messages.append({"role": "assistant", "content": sql, "type": "error", "feedback": None})
-            # st.session_state.messages.append({"role": "assistant", "content": sql, "type": "sql"})
-            renderLatestMessage()
+            # addMessage({"role": "assistant", "content": sql, "type": "sql"})
+            addMessage({"role": "assistant", "content": sql, "type": "error", "feedback": None})
             st.stop()
 
         df = run_sql_cached(sql=sql)
@@ -198,38 +196,32 @@ if my_question:
         if st.session_state.get("df") is not None:
             if st.session_state.get("show_table", True):
                 df = st.session_state.get("df")
-                st.session_state.messages.append({"role": "assistant", "content": df, "type": "dataframe", "feedback": None})
-                renderLatestMessage()
+                addMessage({"role": "assistant", "content": df, "type": "dataframe", "feedback": None})
 
             if should_generate_chart_cached(question=my_question, sql=sql, df=df):
                 code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
 
                 if st.session_state.get("show_plotly_code", False):
-                    st.session_state.messages.append({"role": "assistant", "content": code, "type": "python", "feedback": None})
-                    renderLatestMessage()
+                    addMessage({"role": "assistant", "content": code, "type": "python", "feedback": None})
 
                 if code is not None and code != "":
                     if st.session_state.get("show_chart", True):
                         fig = generate_plot_cached(code=code, df=df)
                         if fig is not None:
-                            st.session_state.messages.append({"role": "assistant", "content": fig, "type": "plotly_chart", "feedback": None})
-                            renderLatestMessage()
+                            addMessage({"role": "assistant", "content": fig, "type": "plotly_chart", "feedback": None})
                         else:
-                            st.session_state.messages.append({"role": "assistant", "content": "I couldn't generate a chart", "type": "error", "feedback": None})
-                            renderLatestMessage()
+                            addMessage({"role": "assistant", "content": "I couldn't generate a chart", "type": "error", "feedback": None})
 
             if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
                 summary = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
                     if st.session_state.get("show_summary", True):
-                        st.session_state.messages.append({"role": "assistant", "content": summary, "type": "summary", "feedback": None})
-                        renderLatestMessage()
+                        addMessage({"role": "assistant", "content": summary, "type": "summary", "feedback": None})
                                 
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:
-                    st.session_state.messages.append({"role": "assistant", "content": "Could not generate a summary", "type": "summary", "feedback": None})
-                    renderLatestMessage()
+                    addMessage({"role": "assistant", "content": "Could not generate a summary", "type": "summary", "feedback": None})
                     if st.session_state.get("speak_summary", True):
                         speak("Could not generate a summary")
 
@@ -239,8 +231,6 @@ if my_question:
                 )
                 st.session_state["df"] = None
 
-                st.session_state.messages.append({"role": "assistant", "content": followup_questions, "type": "followup", "feedback": None})
-                renderLatestMessage()
+                addMessage({"role": "assistant", "content": followup_questions, "type": "followup", "feedback": None})
     else:
-        st.session_state.messages.append({"role": "assistant", "content": "I wasn't able to generate SQL for that question", "type": "error", "feedback": None})
-        renderLatestMessage()
+        addMessage({"role": "assistant", "content": "I wasn't able to generate SQL for that question", "type": "error", "feedback": None})
