@@ -35,6 +35,10 @@
         {
             "question": "How many passengers did not survive?",
             "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 0;"
+        },
+        {
+            "question": "how many patients see each doctor",
+            "query": "SELECT doctor_name, COUNT(DISTINCT patient_id) AS patient_count\nFROM medical_records\nGROUP BY doctor_name;"
         }
     ]
 }

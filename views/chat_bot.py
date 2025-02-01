@@ -11,7 +11,7 @@ from helperClasses.vanna_calls import (
     is_sql_valid_cached,
     generate_summary_cached
 )
-from helperClasses.train_vanna import (train)
+from helperClasses.train_vanna import (train, write_to_file)
 from helperClasses.communicate import (speak, listen)
 from helperClasses.llm_calls import (chat_gpt)
 
@@ -50,7 +50,11 @@ def get_unique_messages():
 
 def set_feedback(index:int, value: str):
     st.session_state.messages[index]["feedback"] = value
-    # TODO: send this to the database at this point 
+    new_entry = {
+        "question": st.session_state.messages[index]["question"],
+        "query": st.session_state.messages[index]["query"]
+    }
+    write_to_file(new_entry)
 
 def renderMessage(message:object, index:int):
    with st.chat_message(message["role"]):
@@ -173,7 +177,8 @@ for message in st.session_state.messages:
 # Always show chat input
 chat_input = st.chat_input("Ask me a question about your data")
 
-# Handle new chat input
+
+######### Handle new chat input #########
 if chat_input:
     set_question(chat_input)
 
@@ -187,10 +192,9 @@ if my_question:
     if sql:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
-                addMessage({"role": "assistant", "content": sql, "type": "sql", "feedback": None})
+                addMessage({"role": "assistant", "content": sql, "type": "sql", "feedback": None, "query": sql, "question": my_question})
         else:            
-            # addMessage({"role": "assistant", "content": sql, "type": "sql"})
-            addMessage({"role": "assistant", "content": sql, "type": "error", "feedback": None})
+            addMessage({"role": "assistant", "content": sql, "type": "error", "feedback": None, "query": sql, "question": my_question})
             if st.session_state.get("llm_fallback", True):
                 callLLM(my_question)
             st.stop()
@@ -203,21 +207,21 @@ if my_question:
         if st.session_state.get("df") is not None:
             if st.session_state.get("show_table", True):
                 df = st.session_state.get("df")
-                addMessage({"role": "assistant", "content": df, "type": "dataframe", "feedback": None})
+                addMessage({"role": "assistant", "content": df, "type": "dataframe", "feedback": None, "query": sql, "question": my_question})
 
             if should_generate_chart_cached(question=my_question, sql=sql, df=df):
                 code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
 
                 if st.session_state.get("show_plotly_code", False):
-                    addMessage({"role": "assistant", "content": code, "type": "python", "feedback": None})
+                    addMessage({"role": "assistant", "content": code, "type": "python", "feedback": None, "query": sql, "question": my_question})
 
                 if code is not None and code != "":
                     if st.session_state.get("show_chart", True):
                         fig = generate_plot_cached(code=code, df=df)
                         if fig is not None:
-                            addMessage({"role": "assistant", "content": fig, "type": "plotly_chart", "feedback": None})
+                            addMessage({"role": "assistant", "content": fig, "type": "plotly_chart", "feedback": None, "query": sql, "question": my_question})
                         else:
-                            addMessage({"role": "assistant", "content": "I couldn't generate a chart", "type": "error", "feedback": None})
+                            addMessage({"role": "assistant", "content": "I couldn't generate a chart", "type": "error", "feedback": None, "query": sql, "question": my_question})
                             if st.session_state.get("llm_fallback", True):
                                 callLLM(my_question)
 
@@ -225,12 +229,12 @@ if my_question:
                 summary = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
                     if st.session_state.get("show_summary", True):
-                        addMessage({"role": "assistant", "content": summary, "type": "summary", "feedback": None})
+                        addMessage({"role": "assistant", "content": summary, "type": "summary", "feedback": None, "query": sql, "question": my_question})
                                 
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:
-                    addMessage({"role": "assistant", "content": "Could not generate a summary", "type": "summary", "feedback": None})
+                    addMessage({"role": "assistant", "content": "Could not generate a summary", "type": "summary", "feedback": None, "query": sql, "question": my_question})
                     if st.session_state.get("speak_summary", True):
                         speak("Could not generate a summary")
 
@@ -240,8 +244,9 @@ if my_question:
                 )
                 st.session_state["df"] = None
 
-                addMessage({"role": "assistant", "content": followup_questions, "type": "followup", "feedback": None})
+                addMessage({"role": "assistant", "content": followup_questions, "type": "followup", "feedback": None, "query": sql, "question": my_question})
     else:
-        addMessage({"role": "assistant", "content": "I wasn't able to generate SQL for that question", "type": "error", "feedback": None})
+        addMessage({"role": "assistant", "content": "I wasn't able to generate SQL for that question", "type": "error", "feedback": None, "query": sql, "question": my_question})
         if st.session_state.get("llm_fallback", True):
             callLLM(my_question)
+######### Handle new chat input #########

@@ -9,6 +9,28 @@ from helperClasses.vanna_calls import (
 )
 #TODO: Convert this to a ChromaDB implementation?
 
+def write_to_file(new_entry: dict):
+       # Path to the training_data.json file
+    training_file_path = Path(__file__).parent / "config/training_data.json"
+
+    # Load the existing data
+    with training_file_path.open("r") as file:
+        training_data = json.load(file)
+
+    # Check for duplicates based on the question text
+    existing_questions = {entry["question"] for entry in training_data["sample_queries"]}
+    if new_entry["question"] not in existing_questions:
+        # Append the new entry to the sample_queries list if it's not a duplicate
+        training_data["sample_queries"].append(new_entry)
+
+        # Write the updated data back to the file
+        with training_file_path.open("w") as file:
+            json.dump(training_data, file, indent=4)
+
+        print('New entry added to training_data.json')
+    else:
+        print('Duplicate entry found. No new entry added.')
+
 # Train Vanna on database schema
 @st.cache_resource
 def train():
