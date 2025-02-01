@@ -14,6 +14,7 @@ from helperClasses.vanna_calls import (
 from helperClasses.train_vanna import (train)
 from helperClasses.communicate import (speak, listen)
 from helperClasses.auth import (check_authenticate)
+from helperClasses.llm_calls import (chat_gpt)
 
 check_authenticate()
 
@@ -103,6 +104,12 @@ def addMessage(message:object):
     if len(st.session_state.messages) > 0:
         renderMessage(st.session_state.messages[-1], len(st.session_state.messages)-1)
 
+def callLLM(my_question:str):
+    stream = chat_gpt({"role": "assistant", "content": my_question, "type": "sql", "feedback": None})
+    with st.chat_message("assistant"):
+        response = st.write_stream(stream)
+        st.session_state.messages.append({"role": "assistant", "content": response, "type": "text", "feedback": None})
+
 ######### Sidebar settings #########
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True,type="primary")
 
@@ -114,6 +121,7 @@ with st.sidebar.expander("Output Settings"):
     # st.checkbox("Show Summary", value=True, key="show_summary")
     st.checkbox("Speak Summary", value=False, key="speak_summary")
     st.checkbox("Show Follow-up Questions", value=False, key="show_followup")
+    st.checkbox("LLM Fallback on Error", value=True, key="llm_fallback")
 
 if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
     text = listen()
@@ -183,9 +191,11 @@ if my_question:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
                 addMessage({"role": "assistant", "content": sql, "type": "sql", "feedback": None})
-        else:
+        else:            
             # addMessage({"role": "assistant", "content": sql, "type": "sql"})
             addMessage({"role": "assistant", "content": sql, "type": "error", "feedback": None})
+            if st.session_state.get("llm_fallback", True):
+                callLLM(my_question)
             st.stop()
 
         df = run_sql_cached(sql=sql)
@@ -211,6 +221,8 @@ if my_question:
                             addMessage({"role": "assistant", "content": fig, "type": "plotly_chart", "feedback": None})
                         else:
                             addMessage({"role": "assistant", "content": "I couldn't generate a chart", "type": "error", "feedback": None})
+                            if st.session_state.get("llm_fallback", True):
+                                callLLM(my_question)
 
             if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
                 summary = generate_summary_cached(question=my_question, df=df)
@@ -234,3 +246,5 @@ if my_question:
                 addMessage({"role": "assistant", "content": followup_questions, "type": "followup", "feedback": None})
     else:
         addMessage({"role": "assistant", "content": "I wasn't able to generate SQL for that question", "type": "error", "feedback": None})
+        if st.session_state.get("llm_fallback", True):
+            callLLM(my_question)
