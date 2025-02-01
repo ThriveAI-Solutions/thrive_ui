@@ -13,10 +13,7 @@ from helperClasses.vanna_calls import (
 )
 from helperClasses.train_vanna import (train)
 from helperClasses.communicate import (speak, listen)
-from helperClasses.auth import (check_authenticate)
 from helperClasses.llm_calls import (chat_gpt)
-
-check_authenticate()
 
 # Train Vanna on database schema
 train()
