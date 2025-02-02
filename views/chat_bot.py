@@ -120,18 +120,20 @@ with st.sidebar.expander("Output Settings"):
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
     st.checkbox("Show Chart", value=False, key="show_chart")
     # st.checkbox("Show Summary", value=True, key="show_summary")
+    st.checkbox("Voice Input", value=False, key="voice_input")
     st.checkbox("Speak Summary", value=False, key="speak_summary")
     st.checkbox("Show Follow-up Questions", value=False, key="show_followup")
     st.checkbox("LLM Fallback on Error", value=True, key="llm_fallback")
 
-if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
-    text = listen()
-    if text:
-        st.success(f"Recognized text: {text}")
-    else:
-        st.error("No input detected.")
-    if text:
-        set_question(text)
+if st.session_state.get("voice_input", True):
+    if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
+        text = listen()
+        if text:
+            st.success(f"Recognized text: {text}")
+        else:
+            st.error("No input detected.")
+        if text:
+            set_question(text)
 
 # TODO: this seems to be broken for whatever reason
 # if st.sidebar.button("Click to show suggested questions", use_container_width=True):
