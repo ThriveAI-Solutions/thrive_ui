@@ -114,16 +114,17 @@ def callLLM(my_question:str):
 ######### Sidebar settings #########
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True,type="primary")
 
-with st.sidebar.expander("Output Settings"):
+with st.sidebar.expander("Settings"):
     st.checkbox("Show SQL", value=False, key="show_sql")
-    st.checkbox("Show Table", value=True, key="show_table")
+    st.checkbox("Show Table", value=False, key="show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show Chart", value=True, key="show_chart")
+    st.checkbox("Show Chart", value=False, key="show_chart")
+    st.checkbox("Show Question History", value=False, key="show_question_history")
     # st.checkbox("Show Summary", value=True, key="show_summary")
-    st.checkbox("Voice Input", value=True, key="voice_input")
+    st.checkbox("Voice Input", value=False, key="voice_input")
     st.checkbox("Speak Summary", value=False, key="speak_summary")
-    st.checkbox("Show Follow-up Questions", value=True, key="show_followup")
-    st.checkbox("LLM Fallback on Error", value=True, key="llm_fallback")
+    st.checkbox("Show Follow-up Questions", value=False, key="show_followup")
+    st.checkbox("LLM Fallback on Error", value=False, key="llm_fallback")
 
 if st.session_state.get("voice_input", True):
     if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
@@ -149,13 +150,14 @@ if st.session_state.get("voice_input", True):
 #         )
 
 # Display questions history in sidebar
-st.sidebar.title("Questions History")
-filtered_messages = get_unique_messages()
-if len(filtered_messages) > 0:
-    for past_question in filtered_messages:
-        st.sidebar.button(past_question["content"], on_click=set_question, args=(past_question["content"]), use_container_width=True)
-else:
-    st.sidebar.text("No questions asked yet")
+if st.session_state.get("show_question_history", True):
+    st.sidebar.title("Question History")
+    filtered_messages = get_unique_messages()
+    if len(filtered_messages) > 0:
+        for past_question in filtered_messages:
+            st.sidebar.button(past_question["content"], on_click=set_question, args=(past_question["content"]), use_container_width=True)
+    else:
+        st.sidebar.text("No questions asked yet")
 
 # for debugging
 # st.sidebar.write(st.session_state)
