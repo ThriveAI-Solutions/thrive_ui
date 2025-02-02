@@ -123,7 +123,7 @@ with st.sidebar.expander("Output Settings"):
     st.checkbox("Voice Input", value=False, key="voice_input")
     st.checkbox("Speak Summary", value=False, key="speak_summary")
     st.checkbox("Show Follow-up Questions", value=False, key="show_followup")
-    st.checkbox("LLM Fallback on Error", value=True, key="llm_fallback")
+    st.checkbox("LLM Fallback on Error", value=False, key="llm_fallback")
 
 if st.session_state.get("voice_input", True):
     if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
