@@ -118,12 +118,12 @@ with st.sidebar.expander("Output Settings"):
     st.checkbox("Show SQL", value=False, key="show_sql")
     st.checkbox("Show Table", value=True, key="show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show Chart", value=False, key="show_chart")
+    st.checkbox("Show Chart", value=True, key="show_chart")
     # st.checkbox("Show Summary", value=True, key="show_summary")
-    st.checkbox("Voice Input", value=False, key="voice_input")
+    st.checkbox("Voice Input", value=True, key="voice_input")
     st.checkbox("Speak Summary", value=False, key="speak_summary")
-    st.checkbox("Show Follow-up Questions", value=False, key="show_followup")
-    st.checkbox("LLM Fallback on Error", value=False, key="llm_fallback")
+    st.checkbox("Show Follow-up Questions", value=True, key="show_followup")
+    st.checkbox("LLM Fallback on Error", value=True, key="llm_fallback")
 
 if st.session_state.get("voice_input", True):
     if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
