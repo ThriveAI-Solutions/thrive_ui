@@ -70,18 +70,18 @@ INSERT INTO user_roles (role_name, description) VALUES ('Admin', 'Administrator 
 INSERT INTO user_roles (role_name, description) VALUES ('Doctor', 'A physician who has the rights to view some individual patient data');
 INSERT INTO user_roles (role_name, description) VALUES ('Patient', 'Patient access, only has access to see their own data or population data');
 
-INSERT INTO users (username, first_name, last_name, password, user_role_id) 
-VALUES ('kroot', 'Kyle', 'Root', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
+INSERT INTO users (username, first_name, last_name, show_summary, password, user_role_id) 
+VALUES ('kroot', 'Kyle', 'Root', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
         (SELECT id FROM user_roles WHERE role_name = 'Patient'));
-INSERT INTO users (username, first_name, last_name, password, user_role_id) 
-VALUES ('thriveai-je', 'Joseph', 'Eberle', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
+INSERT INTO users (username, first_name, last_name, show_summary, password, user_role_id) 
+VALUES ('thriveai-je', 'Joseph', 'Eberle', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
         (SELECT id FROM user_roles WHERE role_name = 'Patient'));
-INSERT INTO users (username, first_name, last_name, password, user_role_id) 
-VALUES ('thriveai-as', 'Al', 'Seoud', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
+INSERT INTO users (username, first_name, last_name, show_summary, password, user_role_id) 
+VALUES ('thriveai-as', 'Al', 'Seoud', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
         (SELECT id FROM user_roles WHERE role_name = 'Patient'));
-INSERT INTO users (username, first_name, last_name, password, user_role_id) 
-VALUES ('thriveai-fm', 'Frankly', 'Metty', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
+INSERT INTO users (username, first_name, last_name, show_summary, password, user_role_id) 
+VALUES ('thriveai-fm', 'Frankly', 'Metty', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
         (SELECT id FROM user_roles WHERE role_name = 'Patient'));
-INSERT INTO users (username, first_name, last_name, password, user_role_id) 
-VALUES ('thriveai-dr', 'Dr.', 'Smith', '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
+INSERT INTO users (username, first_name, last_name, show_summary, password, user_role_id) 
+VALUES ('thriveai-dr', 'Dr.', 'Smith', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
         (SELECT id FROM user_roles WHERE role_name = 'Doctor'));

@@ -117,9 +117,7 @@ def callLLM(my_question:str):
 ######### Sidebar settings #########
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True)
 
-with st.sidebar.expander("Settings"):
-    show_plotly_code = False
-    show_summary = True
+with st.sidebar.expander("Settings"):    
     st.checkbox("Show SQL", key="show_sql")
     st.checkbox("Show Table", key="show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
