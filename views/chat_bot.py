@@ -16,6 +16,7 @@ from utils.communicate import (speak, listen)
 from utils.llm_calls import (chat_gpt)
 from utils.enums import (MessageType, RoleType)
 from models.message import Message
+from models.user import (save_user_settings)
 
 # Train Vanna on database schema
 train()
@@ -114,20 +115,22 @@ def callLLM(my_question:str):
         st.session_state.messages.append(Message(RoleType.ASSISTANT.value, response, "text"))
 
 ######### Sidebar settings #########
-st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True,type="primary")
+st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True)
 
 with st.sidebar.expander("Settings"):
-    st.checkbox("Show SQL", value=False, key="show_sql")
-    st.checkbox("Show Table", value=True, key="show_table")
+    show_plotly_code = False
+    show_summary = True
+    st.checkbox("Show SQL", key="show_sql")
+    st.checkbox("Show Table", key="show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show Chart", value=False, key="show_chart")
-    st.checkbox("Show Question History", value=False, key="show_question_history")
-    # st.checkbox("Show Summary", value=True, key="show_summary")
-    st.checkbox("Voice Input", value=False, key="voice_input")
-    st.checkbox("Speak Summary", value=False, key="speak_summary")
-    st.checkbox("Show Suggested Questions", value=False, key="show_suggested")
-    st.checkbox("Show Follow-up Questions", value=False, key="show_followup")
-    st.checkbox("LLM Fallback on Error", value=False, key="llm_fallback")
+    st.checkbox("Show Chart", key="show_chart")
+    st.checkbox("Show Question History", key="show_question_history")
+    st.checkbox("Voice Input", key="voice_input")
+    st.checkbox("Speak Summary", key="speak_summary")
+    st.checkbox("Show Suggested Questions", key="show_suggested")
+    st.checkbox("Show Follow-up Questions", key="show_followup")
+    st.checkbox("LLM Fallback on Error", key="llm_fallback")
+    st.button("Save", on_click=save_user_settings, use_container_width=True)
 
 if st.session_state.get("voice_input", True):
     if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
@@ -153,9 +156,6 @@ if st.session_state.get("show_question_history", True):
 # for debugging
 # st.sidebar.write(st.session_state)
 ######### Sidebar settings #########
-
-show_plotly_code = False
-show_summary = True
 
 st.title("Thrive AI")
 
