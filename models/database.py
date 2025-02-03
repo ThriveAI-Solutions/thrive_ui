@@ -68,5 +68,18 @@ class User(Base):
             "llm_fallback": self.llm_fallback
         }
 
+class DB_Message(Base):
+    __tablename__ = 'messages'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('users.id'))
+    role = Column(String(50), nullable=False)
+    content = Column(String, nullable=False)
+    type = Column(String(50), nullable=False)
+    feedback = Column(String(50))
+    query = Column(String)
+    question = Column(String(1000))
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
 # Create tables
 Base.metadata.create_all(bind=engine)

@@ -52,6 +52,7 @@ def get_unique_messages():
     return unique_messages
 
 def set_feedback(index:int, value: str):
+    #TODO: update feedback in the database
     st.session_state.messages[index].feedback = value
     new_entry = {
         "question": st.session_state.messages[index].question,
@@ -108,6 +109,8 @@ def addMessage(message:Message):
     if len(st.session_state.messages) > 0:
         renderMessage(st.session_state.messages[-1], len(st.session_state.messages)-1)
 
+    message.save_to_db()
+
 def callLLM(my_question:str):
     stream = chat_gpt(Message(RoleType.ASSISTANT.value, my_question, MessageType.SQL))
     with st.chat_message(RoleType.ASSISTANT.value):
@@ -115,8 +118,6 @@ def callLLM(my_question:str):
         st.session_state.messages.append(Message(RoleType.ASSISTANT.value, response, "text"))
 
 ######### Sidebar settings #########
-st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True)
-
 with st.sidebar.expander("Settings"):    
     st.checkbox("Show SQL", key="show_sql")
     st.checkbox("Show Table", key="show_table")
@@ -130,6 +131,8 @@ with st.sidebar.expander("Settings"):
     st.checkbox("LLM Fallback on Error", key="llm_fallback")
     st.button("Save", on_click=save_user_settings, use_container_width=True)
 
+st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True, type="primary")
+
 if st.session_state.get("voice_input", True):
     if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
         text = listen()
@@ -139,6 +142,20 @@ if st.session_state.get("voice_input", True):
             st.error("No input detected.")
         if text:
             set_question(text)
+
+# Show suggested questions
+if st.session_state.get("show_suggested", True):
+    if st.sidebar.button("Click to show suggested questions", use_container_width=True):
+        st.session_state.my_question = None
+        questions = generate_questions_cached()
+        for i, question in enumerate(questions):
+            time.sleep(0.05)
+            button = st.button(
+                question,
+                on_click=set_question,
+                args=(question,),
+                use_container_width=True,
+            )
 
 # Display questions history in sidebar
 if st.session_state.get("show_question_history", True):
@@ -169,20 +186,6 @@ for message in st.session_state.messages:
 
 # Always show chat input
 chat_input = st.chat_input("Ask me a question about your data")
-
-# Show suggested questions
-if st.session_state.get("show_suggested", True):
-    if st.sidebar.button("Click to show suggested questions", use_container_width=True):
-        st.session_state.my_question = None
-        questions = generate_questions_cached()
-        for i, question in enumerate(questions):
-            time.sleep(0.05)
-            button = st.button(
-                question,
-                on_click=set_question,
-                args=(question,),
-                use_container_width=True,
-            )
 
 ######### Handle new chat input #########
 if chat_input:

@@ -21,7 +21,6 @@ def verify_user_credentials(username: str, password: str) -> bool:
     return user is not None
 
 def set_user_preferences_in_session_state(user):
-    print("Setting user preferences")
     if "loaded" not in st.session_state:
         st.session_state.show_sql = user.show_sql
         st.session_state.show_table = user.show_table
@@ -37,9 +36,8 @@ def set_user_preferences_in_session_state(user):
         st.session_state.loaded = True # dont call after initial load
     
 def save_user_settings():
-    user = st.session_state.cookies.get("user")
-    user = json.loads(user)
-    user_id = user["id"]
+    user_id = st.session_state.cookies.get("user_id")
+    user_id = json.loads(user_id)
     
     # Create a new database session
     session = SessionLocal()

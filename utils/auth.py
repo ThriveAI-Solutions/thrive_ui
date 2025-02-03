@@ -14,17 +14,19 @@ def check_authenticate():
         user = get_user(user_id)
         set_user_preferences_in_session_state(user)
         if datetime.now() < expiry_date:
-            with st.sidebar:
+            cols = st.sidebar.columns([.7, .3], vertical_alignment="bottom")
+            with cols[0]:
                 st.title(f"Welcome {user.first_name} {user.last_name}")
-            logout = st.sidebar.button("Log Out", type="primary", use_container_width=True)
-            if logout:
-                st.session_state.cookies["user_id"] = ""
-                st.session_state.cookies["expiry_date"] = ""
-                # TODO: This doesnt work, how to delete cookies?
-                # del st.session_state.cookies["user_id"]
-                # del st.session_state.cookies["expiry_date"]
-                st.session_state.cookies.save()
-                st.rerun()
+            with cols[1]:
+                logout = st.button("Log Out")
+                if logout:
+                    st.session_state.cookies["user_id"] = ""
+                    st.session_state.cookies["expiry_date"] = ""
+                    # TODO: This doesnt work, how to delete cookies?
+                    # del st.session_state.cookies["user_id"]
+                    # del st.session_state.cookies["expiry_date"]
+                    st.session_state.cookies.save()
+                    st.rerun()
         else:
             show_login()
     else:
