@@ -1,6 +1,6 @@
 import streamlit as st
 from streamlit_cookies_manager import EncryptedCookieManager
-from helperClasses.auth import (check_authenticate)
+from utils.auth import (check_authenticate)
 
 
 # TODO: **Update streamlit_cookies_manager**: The behavior of `st.cache` was updated in Streamlit 1.36 to the new caching

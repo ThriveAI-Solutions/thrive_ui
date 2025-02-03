@@ -1,6 +1,6 @@
 import streamlit as st
 import time
-from helperClasses.vanna_calls import (
+from utils.vanna_calls import (
     generate_questions_cached,
     generate_sql_cached,
     run_sql_cached,
@@ -11,11 +11,11 @@ from helperClasses.vanna_calls import (
     is_sql_valid_cached,
     generate_summary_cached
 )
-from helperClasses.train_vanna import (train, write_to_file)
-from helperClasses.communicate import (speak, listen)
-from helperClasses.llm_calls import (chat_gpt)
-from helperClasses.Enums import (MessageType, RoleType)
-from dto.Message import Message
+from utils.train_vanna import (train, write_to_file)
+from utils.communicate import (speak, listen)
+from utils.llm_calls import (chat_gpt)
+from utils.enums import (MessageType, RoleType)
+from models.message import Message
 
 # Train Vanna on database schema
 train()
@@ -141,7 +141,8 @@ if st.session_state.get("voice_input", True):
 
 # Display questions history in sidebar
 if st.session_state.get("show_question_history", True):
-    st.sidebar.title("Question History")
+    with st.sidebar:
+        st.title("Question History")
     filtered_messages = get_unique_messages()
     if len(filtered_messages) > 0:
         for past_question in filtered_messages:

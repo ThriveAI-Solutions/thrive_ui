@@ -1,5 +1,5 @@
 import uuid
-from helperClasses.Enums import (MessageType, RoleType)
+from utils.enums import (MessageType, RoleType)
 
 class Message:
     def __init__(self, role:RoleType, content:str, type:MessageType, query:str=None, question:str=None):

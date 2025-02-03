@@ -2,7 +2,7 @@ import streamlit as st
 import pyttsx3
 import speech_recognition as sr
 
-def listen():
+def listen() -> str:
     # Initialize the recognizer
     recognizer = sr.Recognizer()
 
