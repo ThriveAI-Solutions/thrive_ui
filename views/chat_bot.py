@@ -149,7 +149,7 @@ if st.session_state.get("voice_input", True):
             else:
                 st.error("No input detected.")
             if text:
-                set_question(text)
+                set_question(text, False)
 
 # Show suggested questions
 if st.session_state.get("show_suggested", True):
