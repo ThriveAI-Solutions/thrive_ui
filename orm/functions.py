@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import hashlib
+from sqlalchemy import func
 from orm.models import User, Message, SessionLocal
 
 def verify_user_credentials(username: str, password: str) -> bool:
@@ -11,7 +12,7 @@ def verify_user_credentials(username: str, password: str) -> bool:
     hashed_password = hashlib.sha256(password.encode()).hexdigest()
 
     # Query to check if the username and hashed password exist in the users table
-    user = session.query(User).filter(User.username == username, User.password == hashed_password).first()
+    user = session.query(User).filter(func.lower(User.username) == username.lower(), User.password == hashed_password).first()
     st.session_state.cookies["user_id"] = json.dumps(user.id)
 
     # Close the database session

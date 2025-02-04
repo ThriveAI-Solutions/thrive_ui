@@ -8,4 +8,4 @@ SpeechRecognition==3.14.0
 pyaudio==0.2.14
 streamlit-cookies-manager==0.2.0
 openai==1.61.0
-# langsec==0.0.1
+langsec==0.0.1

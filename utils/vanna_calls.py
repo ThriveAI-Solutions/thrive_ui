@@ -29,6 +29,7 @@ def generate_sql_cached(question: str):
     vn = setup_vanna()
     # Dont send data to LLM
     # return vn.generate_sql(question=question, allow_llm_to_see_data=True)
+    # return vn.generate_sql(question=question)
     return validate(vn.generate_sql(question=question))
 
 @st.cache_data(show_spinner="Checking for valid SQL ...")
@@ -121,6 +122,8 @@ def train():
             information_schema.columns
         WHERE 
             table_schema = 'public'
+        AND 
+            table_name NOT IN ('users', 'messages', 'user_roles')
         ORDER BY 
             table_schema, table_name, ordinal_position;
     """)
@@ -159,6 +162,6 @@ def train():
     # Iterate over the sample queries and send the question and sql to vn.train()
     for query in sample_queries:
         question = query.get("question")
-        sql = query.get("sql")
-        if question and sql:
-            vn.train(question, sql)
+        query = query.get("query")
+        if question and query:
+            vn.train(question, query)

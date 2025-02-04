@@ -12,7 +12,8 @@ from utils.vanna_calls import (
     should_generate_chart_cached,
     is_sql_valid_cached,
     generate_summary_cached,
-    write_to_file
+    write_to_file,
+    train
 )
 from utils.communicate import (speak, listen)
 from utils.llm_calls import (chat_gpt)
