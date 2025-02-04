@@ -8,6 +8,7 @@ class MessageType(Enum):
     SUMMARY = "summary"
     FOLLOWUP = "followup"
     ERROR = "error"
+    TEXT = "text"
 
 class RoleType(Enum):
     ASSISTANT = "assistant"

@@ -67,6 +67,10 @@
         {
             "question": "Can you show me all the patients who have had an Annual Check-up?",
             "query": "SELECT p.patient_id, p.first_name, p.last_name\nFROM patients p\nJOIN medical_records mr ON p.patient_id = mr.patient_id\nWHERE mr.diagnosis = 'Annual Check-up';"
+        },
+        {
+            "question": "how many patients are there",
+            "query": "SELECT COUNT(patient_id) AS total_patients FROM patients;"
         }
     ]
 }

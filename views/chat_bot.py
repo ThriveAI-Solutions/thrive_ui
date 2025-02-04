@@ -1,5 +1,6 @@
 import streamlit as st
 import time
+import json
 from utils.vanna_calls import (
     generate_questions_cached,
     generate_sql_cached,
@@ -15,15 +16,16 @@ from utils.train_vanna import (train, write_to_file)
 from utils.communicate import (speak, listen)
 from utils.llm_calls import (chat_gpt)
 from utils.enums import (MessageType, RoleType)
-from models.message import Message
-from models.user import (save_user_settings)
+from orm.functions import (save_user_settings, get_recent_messages)
+from orm.models import Message
+import pandas as pd
 
 # Train Vanna on database schema
 train()
 
 # Initialize session state variables
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = get_recent_messages()
 
 def set_question(question:str):
     if question is None:
@@ -33,7 +35,7 @@ def set_question(question:str):
     else:
         # Set question
         st.session_state.my_question = question
-        addMessage(Message(RoleType.USER.value, question, "text"))
+        addMessage(Message(RoleType.USER, question, MessageType.TEXT))
 
 def get_unique_messages():
     # Assuming st.session_state.messages is a list of dictionaries
@@ -52,8 +54,9 @@ def get_unique_messages():
     return unique_messages
 
 def set_feedback(index:int, value: str):
-    #TODO: update feedback in the database
-    st.session_state.messages[index].feedback = value
+    message = st.session_state.messages[index]
+    message.feedback = value
+    message.save()
     new_entry = {
         "question": st.session_state.messages[index].question,
         "query": st.session_state.messages[index].query,
@@ -68,11 +71,14 @@ def renderMessage(message:Message, index:int):
             case MessageType.PYTHON.value:
                 st.code(message.content, language="python", line_numbers=True)
             case MessageType.PLOTLY_CHART.value:
-                st.plotly_chart(message.content, key=message.key)
+                chart = json.loads(message.content)
+                st.plotly_chart(chart, key=f"message_{index}")
             case MessageType.ERROR.value:
                 st.error(message.content)
             case MessageType.DATAFRAME.value:
-                st.dataframe(message.content, key=message.key)
+                df = pd.read_json(message.content)
+                st.dataframe(df, key=f"message_{index}")
+                # st.markdown(message.content)
             case MessageType.SUMMARY.value:
                 st.code(message.content, language=None)
                 # Add feedback buttons below the summary
@@ -105,17 +111,16 @@ def renderMessage(message:Message, index:int):
                 st.markdown(message.content)
 
 def addMessage(message:Message):
+    message = message.save()
     st.session_state.messages.append(message)
     if len(st.session_state.messages) > 0:
         renderMessage(st.session_state.messages[-1], len(st.session_state.messages)-1)
 
-    message.save_to_db()
-
 def callLLM(my_question:str):
-    stream = chat_gpt(Message(RoleType.ASSISTANT.value, my_question, MessageType.SQL))
+    stream = chat_gpt(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
     with st.chat_message(RoleType.ASSISTANT.value):
         response = st.write_stream(stream)
-        st.session_state.messages.append(Message(RoleType.ASSISTANT.value, response, "text"))
+        st.session_state.messages.append(Message(RoleType.ASSISTANT, response, MessageType.TEXT))
 
 ######### Sidebar settings #########
 with st.sidebar.expander("Settings"):    
@@ -201,9 +206,9 @@ if my_question:
     if sql:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
-                addMessage(Message(RoleType.ASSISTANT.value, sql, "sql", sql, my_question))
+                addMessage(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question))
         else:            
-            addMessage(Message(RoleType.ASSISTANT.value, sql, "error", sql, my_question))
+            addMessage(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question))
             if st.session_state.get("llm_fallback", True):
                 callLLM(my_question)
             st.stop()
@@ -216,21 +221,21 @@ if my_question:
         if st.session_state.get("df") is not None:
             if st.session_state.get("show_table", True):
                 df = st.session_state.get("df")
-                addMessage(Message(RoleType.ASSISTANT.value, df, "dataframe", sql, my_question))
+                addMessage(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question))
 
             if should_generate_chart_cached(question=my_question, sql=sql, df=df):
                 code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
 
                 if st.session_state.get("show_plotly_code", False):
-                    addMessage(Message(RoleType.ASSISTANT.value, code, "python", sql, my_question))
+                    addMessage(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question))
 
                 if code is not None and code != "":
                     if st.session_state.get("show_chart", True):
                         fig = generate_plot_cached(code=code, df=df)
                         if fig is not None:
-                            addMessage(Message(RoleType.ASSISTANT.value, fig, "plotly_chart", sql, my_question))
+                            addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question))
                         else:
-                            addMessage(Message(RoleType.ASSISTANT.value, "I couldn't generate a chart", "error", sql, my_question))
+                            addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question))
                             if st.session_state.get("llm_fallback", True):
                                 callLLM(my_question)
 
@@ -238,12 +243,12 @@ if my_question:
                 summary = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
                     if st.session_state.get("show_summary", True):
-                        addMessage(Message(RoleType.ASSISTANT.value, summary, "summary", sql, my_question))
+                        addMessage(Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question))
                                 
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:
-                    addMessage(Message(RoleType.ASSISTANT.value, "Could not generate a summary", "summary", sql, my_question))
+                    addMessage(Message(RoleType.ASSISTANT, "Could not generate a summary", MessageType.SUMMARY, sql, my_question))
                     if st.session_state.get("speak_summary", True):
                         speak("Could not generate a summary")
 
@@ -253,9 +258,9 @@ if my_question:
                 )
                 st.session_state["df"] = None
 
-                addMessage(Message(RoleType.ASSISTANT.value, followup_questions, "followup",  sql, my_question))
+                addMessage(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP,  sql, my_question))
     else:
-        addMessage(Message(RoleType.ASSISTANT.value, "I wasn't able to generate SQL for that question", "error", sql, my_question))
+        addMessage(Message(RoleType.ASSISTANT, "I wasn't able to generate SQL for that question", MessageType.ERROR, sql, my_question))
         if st.session_state.get("llm_fallback", True):
             callLLM(my_question)
 ######### Handle new chat input #########

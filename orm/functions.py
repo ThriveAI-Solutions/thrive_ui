@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 import hashlib
-from models.database import User, SessionLocal
+from orm.models import User, Message, SessionLocal
 
 def verify_user_credentials(username: str, password: str) -> bool:
     # Create a new database session
@@ -79,3 +79,19 @@ def get_user(user_id):
     session.close()
 
     return user
+
+def get_recent_messages():
+    user_id = st.session_state.cookies.get("user_id")
+
+    # Create a new database session
+    session = SessionLocal()
+
+    # Query to get the user by ID
+    messages = session.query(Message).filter(Message.user_id == user_id).order_by(Message.created_at.desc()).limit(20).all()
+
+    # Close the session
+    session.close()
+
+    messages.reverse()
+
+    return messages

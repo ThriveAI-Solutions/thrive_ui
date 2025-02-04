@@ -1,7 +1,10 @@
 import streamlit as st
+import json
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, TIMESTAMP, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
+from utils.enums import (MessageType, RoleType)
+import pandas as pd
 
 # Load database settings from st.secrets
 db_settings = st.secrets["postgres"]
@@ -17,6 +20,15 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create a Base class for the models to inherit from
 Base = declarative_base()
+
+def content_to_json(type, content):
+    if type == MessageType.DATAFRAME.value and not isinstance(content, str):
+        panda_frame = pd.DataFrame(content)
+        return panda_frame.to_json()
+    if type == MessageType.PLOTLY_CHART.value and not isinstance(content, str):
+        json_content = content.to_json()
+        return json_content
+    return content
 
 class UserRole(Base):
     __tablename__ = 'user_roles'
@@ -68,7 +80,7 @@ class User(Base):
             "llm_fallback": self.llm_fallback
         }
 
-class DB_Message(Base):
+class Message(Base):
     __tablename__ = 'messages'
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey('users.id'))
@@ -80,6 +92,44 @@ class DB_Message(Base):
     question = Column(String(1000))
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+    
+    def __init__(self, role:RoleType, content:str, type:MessageType, query:str=None, question:str=None):
+        user_id = st.session_state.cookies.get("user_id")
+        user_id = json.loads(user_id)
+
+        self.user_id = user_id 
+        self.role = role.value
+        self.content = content_to_json(type.value, content)
+        self.type = type.value
+        self.feedback = None
+        self.query = query
+        self.question = question
+
+    def to_dict(self):
+        return {
+            "role": self.role,
+            "content": self.content,
+            "question": self.question
+        }
+    
+    def save(self):
+        session = SessionLocal()
+
+        self.content = content_to_json(self.type, self.content)
+
+        # Add the new message to the session and commit
+        if(self.id == None):
+            session.add(self)
+            # Refresh the db_message object to get the auto-generated fields
+            session.refresh(self)
+        else:
+            session.merge(self)
+        session.commit()
+        
+        # Close the session
+        session.close()
+
+        return self
 
 # Create tables
 Base.metadata.create_all(bind=engine)

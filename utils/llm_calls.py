@@ -1,6 +1,6 @@
 import streamlit as st
 import openai
-from models.message import Message
+from orm.models import Message
 
 def chat_gpt(message:Message):
     openai.api_key = st.secrets["ai_keys"]["openai_api"]

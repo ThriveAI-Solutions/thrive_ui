@@ -1,6 +1,6 @@
 import streamlit as st
 from datetime import datetime, timedelta
-from models.user import (
+from orm.functions import (
     verify_user_credentials, 
     get_user, 
     set_user_preferences_in_session_state
