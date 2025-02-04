@@ -86,7 +86,6 @@ def get_recent_messages():
     # Create a new database session
     session = SessionLocal()
 
-    # Query to get the user by ID
     messages = session.query(Message).filter(Message.user_id == user_id).order_by(Message.created_at.desc()).limit(20).all()
 
     # Close the session

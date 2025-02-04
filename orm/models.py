@@ -120,11 +120,12 @@ class Message(Base):
         # Add the new message to the session and commit
         if(self.id == None):
             session.add(self)
+            session.commit()
             # Refresh the db_message object to get the auto-generated fields
             session.refresh(self)
         else:
             session.merge(self)
-        session.commit()
+            session.commit()
         
         # Close the session
         session.close()

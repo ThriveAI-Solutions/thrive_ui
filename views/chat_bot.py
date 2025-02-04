@@ -1,6 +1,7 @@
 import streamlit as st
 import time
 import json
+from io import StringIO
 from utils.vanna_calls import (
     generate_questions_cached,
     generate_sql_cached,
@@ -24,7 +25,7 @@ import pandas as pd
 train()
 
 # Initialize session state variables
-if "messages" not in st.session_state:
+if "messages" not in st.session_state or st.session_state.messages == []:
     st.session_state.messages = get_recent_messages()
 
 def set_question(question:str):
@@ -76,7 +77,7 @@ def renderMessage(message:Message, index:int):
             case MessageType.ERROR.value:
                 st.error(message.content)
             case MessageType.DATAFRAME.value:
-                df = pd.read_json(message.content)
+                df = pd.read_json(StringIO(message.content))
                 st.dataframe(df, key=f"message_{index}")
                 # st.markdown(message.content)
             case MessageType.SUMMARY.value:
@@ -120,7 +121,9 @@ def callLLM(my_question:str):
     stream = chat_gpt(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
     with st.chat_message(RoleType.ASSISTANT.value):
         response = st.write_stream(stream)
-        st.session_state.messages.append(Message(RoleType.ASSISTANT, response, MessageType.TEXT))
+        message = Message(RoleType.ASSISTANT, response, MessageType.TEXT)
+        message = message.save()
+        st.session_state.messages.append(message)
 
 ######### Sidebar settings #########
 with st.sidebar.expander("Settings"):    

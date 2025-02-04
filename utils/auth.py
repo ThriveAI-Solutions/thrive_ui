@@ -26,6 +26,8 @@ def check_authenticate():
                     # del st.session_state.cookies["user_id"]
                     # del st.session_state.cookies["expiry_date"]
                     st.session_state.cookies.save()
+                    # reset session state
+                    st.session_state.messages = []
                     st.rerun()
         else:
             show_login()
