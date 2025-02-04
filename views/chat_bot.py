@@ -11,18 +11,15 @@ from utils.vanna_calls import (
     generate_followup_cached,
     should_generate_chart_cached,
     is_sql_valid_cached,
-    generate_summary_cached
+    generate_summary_cached,
+    write_to_file
 )
-from utils.train_vanna import (train, write_to_file)
 from utils.communicate import (speak, listen)
 from utils.llm_calls import (chat_gpt)
 from utils.enums import (MessageType, RoleType)
 from orm.functions import (save_user_settings, get_recent_messages)
 from orm.models import Message
 import pandas as pd
-
-# Train Vanna on database schema
-train()
 
 # Initialize session state variables
 if "messages" not in st.session_state or st.session_state.messages == []:

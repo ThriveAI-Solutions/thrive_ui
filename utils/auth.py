@@ -5,6 +5,7 @@ from orm.functions import (
     get_user, 
     set_user_preferences_in_session_state
 )
+from utils.vanna_calls import (train)
 
 def check_authenticate():
     user_id = st.session_state.cookies.get("user_id")
@@ -47,6 +48,7 @@ def show_login():
                 expiry_date = datetime.now() + timedelta(days=1)
                 st.session_state.cookies["expiry_date"] = expiry_date.isoformat()
                 st.session_state.cookies.save()
+                train()
                 st.rerun()
             else:
                 st.error("Incorrect username or password. Please try again.")
