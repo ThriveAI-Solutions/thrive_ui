@@ -69,7 +69,7 @@ def generate_summary_cached(question, df):
     vn = setup_vanna()
     return vn.generate_summary(question=question, df=df)
 
-#TODO: Convert this to a ChromaDB implementation?
+#TODO: Convert to a self hosted Vector DB  implementation? https://vanna.ai/docs/postgres-openai-standard-other-vectordb/
 
 def write_to_file(new_entry: dict):
        # Path to the training_data.json file
