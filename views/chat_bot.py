@@ -12,8 +12,7 @@ from utils.vanna_calls import (
     should_generate_chart_cached,
     is_sql_valid_cached,
     generate_summary_cached,
-    write_to_file,
-    train
+    write_to_file
 )
 from utils.communicate import (speak, listen)
 from utils.llm_calls import (chat_gpt)
@@ -25,16 +24,18 @@ import pandas as pd
 # Initialize session state variables
 if "messages" not in st.session_state or st.session_state.messages == []:
     st.session_state.messages = get_recent_messages()
+if st.session_state.messages is None:
+    st.session_state.messages = []
 
-def set_question(question:str):
+def set_question(question:str, render = True):
     if question is None:
         # Clear questions history when resetting
         st.session_state.my_question = None
-        st.session_state.messages = []
+        st.session_state.messages = None
     else:
         # Set question
         st.session_state.my_question = question
-        addMessage(Message(RoleType.USER, question, MessageType.TEXT))
+        addMessage(Message(RoleType.USER, question, MessageType.TEXT), render)
 
 def get_unique_messages():
     # Assuming st.session_state.messages is a list of dictionaries
@@ -109,10 +110,10 @@ def renderMessage(message:Message, index:int):
             case _:
                 st.markdown(message.content)
 
-def addMessage(message:Message):
+def addMessage(message:Message, render=True):
     message = message.save()
     st.session_state.messages.append(message)
-    if len(st.session_state.messages) > 0:
+    if len(st.session_state.messages) > 0 and render:
         renderMessage(st.session_state.messages[-1], len(st.session_state.messages)-1)
 
 def callLLM(my_question:str):
@@ -140,26 +141,27 @@ with st.sidebar.expander("Settings"):
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True, type="primary")
 
 if st.session_state.get("voice_input", True):
-    if st.sidebar.button("🎤 Speak Your Question", use_container_width=True):
-        text = listen()
-        if text:
-            st.success(f"Recognized text: {text}")
-        else:
-            st.error("No input detected.")
-        if text:
-            set_question(text)
+    with st.sidebar.popover("🎤 Speak Your Question", use_container_width=True):
+        if st.button("Listen", use_container_width=True):
+            text = listen()
+            if text:
+                st.success(f"Recognized text: {text}")
+            else:
+                st.error("No input detected.")
+            if text:
+                set_question(text)
 
 # Show suggested questions
 if st.session_state.get("show_suggested", True):
-    if st.sidebar.button("Click to show suggested questions", use_container_width=True):
-        st.session_state.my_question = None
+    with st.sidebar.popover("Click to show suggested questions", use_container_width=True):
         questions = generate_questions_cached()
         for i, question in enumerate(questions):
             time.sleep(0.05)
             button = st.button(
                 question,
                 on_click=set_question,
-                args=(question,),
+                args=(question, False),
+                key=f"suggested_question_{i}",
                 use_container_width=True,
             )
 
