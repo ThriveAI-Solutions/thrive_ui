@@ -33,7 +33,7 @@ def get_security_guard():
         tablename = table['tablename']
         tables[tablename] = TableSchema()
 
-    print(tables)
+    # print(tables)
 
     schema = SecuritySchema(
         tables=tables,
