@@ -8,9 +8,19 @@ import sqlparse
 from sqlparse.sql import IdentifierList, Identifier
 from sqlparse.tokens import Keyword, DML
 
-# TODO: make this json driven?
-forbidden_tables = {'thrive_user', 'thrive_message', 'user_role'}
-forbidden_columns = {'password'}
+def read_forbidden_from_json():
+    # Path to the forbidden_references.json file
+    forbidden_file_path = Path(__file__).parent / "config/forbidden_references.json"
+
+    # Load the forbidden references
+    with forbidden_file_path.open("r") as file:
+        forbidden_data = json.load(file)
+
+    forbidden_tables = forbidden_data.get("tables", [])
+    forbidden_columns = forbidden_data.get("columns", [])
+    return forbidden_tables, forbidden_columns
+
+forbidden_tables, forbidden_columns = read_forbidden_from_json()
 forbidden_tables_str = ", ".join(f"'{table}'" for table in forbidden_tables)
 
 @st.cache_resource(ttl=3600)
@@ -206,13 +216,13 @@ def get_identifiers(parsed):
     return tables, columns
 
 def check_references(sql):
-    # TODO: should I make this role basesd? or user based?
+    # TODO: should I make this role based? or user based?
     parsed = sqlparse.parse(sql)[0]
     tables, columns = get_identifiers(parsed)
     
     # Check for forbidden references
-    referenced_tables = forbidden_tables.intersection(set(tables))
-    referenced_columns = forbidden_columns.intersection(set(columns))
+    referenced_tables = set(forbidden_tables).intersection(set(tables))
+    referenced_columns = set(forbidden_columns).intersection(set(columns))
     if referenced_tables:
         raise ValueError(f"Referenced forbidden tables: {referenced_tables}")
     if referenced_columns:

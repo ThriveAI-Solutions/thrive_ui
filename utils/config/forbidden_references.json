@@ -1,0 +1,10 @@
+{
+    "tables": [
+        "thrive_user",
+        "thrive_message",
+        "user_role"
+    ],
+    "columns": [
+        "password"
+    ]
+}
