@@ -119,8 +119,8 @@ def addMessage(message:Message, render=True):
 def callLLM(my_question:str):
     stream = chat_gpt(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
     with st.chat_message(RoleType.ASSISTANT.value):
-        response = st.write_stream(stream)
-        message = Message(RoleType.ASSISTANT, response, MessageType.TEXT)
+        response = st.write("Chat GPT: ", stream)
+        message = Message(RoleType.ASSISTANT, f"Chat GPT: {response}", MessageType.TEXT)
         message = message.save()
         st.session_state.messages.append(message)
 
@@ -210,10 +210,11 @@ if my_question:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
                 addMessage(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question))
-        else:            
-            addMessage(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question))
+        else:    
             if st.session_state.get("llm_fallback", True):
                 callLLM(my_question)
+            else:
+                addMessage(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question))
             st.stop()
 
         df = run_sql_cached(sql=sql)
@@ -239,8 +240,6 @@ if my_question:
                             addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question))
                         else:
                             addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question))
-                            if st.session_state.get("llm_fallback", True):
-                                callLLM(my_question)
 
             if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
                 summary = generate_summary_cached(question=my_question, df=df)

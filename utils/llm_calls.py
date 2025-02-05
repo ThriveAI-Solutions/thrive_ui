@@ -7,7 +7,7 @@ def chat_gpt(message:Message):
     client = openai
 
     # Generate a response using the OpenAI API.
-    stream  = client.chat.completions.create(
+    stream = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[message.to_dict()],
         # messages=[

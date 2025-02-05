@@ -1,10 +1,17 @@
 import streamlit as st
 from vanna.remote import VannaDefault
-from utils.langsec import validate
 import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from pathlib import Path
+import sqlparse
+from sqlparse.sql import IdentifierList, Identifier
+from sqlparse.tokens import Keyword, DML
+
+# TODO: make this json driven?
+forbidden_tables = {'thrive_user', 'thrive_message', 'user_role'}
+forbidden_columns = {'password'}
+forbidden_tables_str = ", ".join(f"'{table}'" for table in forbidden_tables)
 
 @st.cache_resource(ttl=3600)
 def setup_vanna():
@@ -30,7 +37,7 @@ def generate_sql_cached(question: str):
     # Dont send data to LLM
     # return vn.generate_sql(question=question, allow_llm_to_see_data=True)
     # return vn.generate_sql(question=question)
-    return validate(vn.generate_sql(question=question))
+    return check_references(vn.generate_sql(question=question))
 
 @st.cache_data(show_spinner="Checking for valid SQL ...")
 def is_sql_valid_cached(sql: str):
@@ -70,7 +77,7 @@ def generate_summary_cached(question, df):
     vn = setup_vanna()
     return vn.generate_summary(question=question, df=df)
 
-#TODO: Convert to a self hosted Vector DB  implementation? https://vanna.ai/docs/postgres-openai-standard-other-vectordb/
+# TODO: Convert to a self hosted Vector DB  implementation? https://vanna.ai/docs/postgres-openai-standard-other-vectordb/
 
 def write_to_file(new_entry: dict):
        # Path to the training_data.json file
@@ -111,7 +118,7 @@ def train():
 
     # Get database schema
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT 
             table_schema,
             table_name,
@@ -123,7 +130,7 @@ def train():
         WHERE 
             table_schema = 'public'
         AND 
-            table_name NOT IN ('thrive_user', 'thrive_message', 'user_role')
+            table_name NOT IN ({forbidden_tables_str})
         ORDER BY 
             table_schema, table_name, ordinal_position;
     """)
@@ -165,3 +172,49 @@ def train():
         query = query.get("query")
         if question and query:
             vn.train(question=question, sql=query)
+
+def is_table_token(token):
+    # Check if the token is an Identifier and not a Keyword or DML
+    if isinstance(token, Identifier):
+        for sub_token in token.tokens:
+            if sub_token.ttype in (Keyword, DML):
+                return False
+        return True
+    return False
+
+def get_identifiers(parsed):
+    tables = []
+    columns = []
+    is_table_context = False
+    for token in parsed.tokens:
+        if token.ttype in Keyword and token.value.upper() in ('FROM', 'JOIN', 'INTO', 'UPDATE'):
+            is_table_context = True
+        elif token.ttype in Keyword and token.value.upper() in ('SELECT', 'WHERE', 'GROUP BY', 'ORDER BY'):
+            is_table_context = False
+
+        if isinstance(token, IdentifierList):
+            for identifier in token.get_identifiers():
+                if is_table_context and is_table_token(identifier):
+                    tables.append(identifier.get_real_name())
+                elif not is_table_context and isinstance(identifier, Identifier):
+                    columns.append(identifier.get_real_name())
+        elif isinstance(token, Identifier):
+            if is_table_context and is_table_token(token):
+                tables.append(token.get_real_name())
+            elif not is_table_context:
+                columns.append(token.get_real_name())
+    return tables, columns
+
+def check_references(sql):
+    # TODO: should I make this role basesd? or user based?
+    parsed = sqlparse.parse(sql)[0]
+    tables, columns = get_identifiers(parsed)
+    
+    # Check for forbidden references
+    referenced_tables = forbidden_tables.intersection(set(tables))
+    referenced_columns = forbidden_columns.intersection(set(columns))
+    if referenced_tables:
+        raise ValueError(f"Referenced forbidden tables: {referenced_tables}")
+    if referenced_columns:
+        raise ValueError(f"Referenced forbidden columns: {referenced_columns}")
+    return sql
