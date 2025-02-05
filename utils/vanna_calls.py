@@ -123,7 +123,7 @@ def train():
         WHERE 
             table_schema = 'public'
         AND 
-            table_name NOT IN ('users', 'messages', 'user_roles')
+            table_name NOT IN ('thrive_user', 'thrive_message', 'user_role')
         ORDER BY 
             table_schema, table_name, ordinal_position;
     """)

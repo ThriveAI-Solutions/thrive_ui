@@ -31,15 +31,15 @@ def content_to_json(type, content):
     return content
 
 class UserRole(Base):
-    __tablename__ = 'user_roles'
+    __tablename__ = 'user_role'
     id = Column(Integer, primary_key=True)
     role_name = Column(String(50), nullable=False, unique=True)
     description = Column(String)
 
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = 'thrive_user'
     id = Column(Integer, primary_key=True)
-    user_role_id = Column(Integer, ForeignKey('user_roles.id'))
+    user_role_id = Column(Integer, ForeignKey('user_role.id'))
     username = Column(String(50), nullable=False, unique=True)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
@@ -81,9 +81,9 @@ class User(Base):
         }
 
 class Message(Base):
-    __tablename__ = 'messages'
+    __tablename__ = 'thrive_message'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
+    user_id = Column(Integer, ForeignKey('thrive_user.id'))
     role = Column(String(50), nullable=False)
     content = Column(String, nullable=False)
     type = Column(String(50), nullable=False)

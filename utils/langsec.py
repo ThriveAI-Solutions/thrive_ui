@@ -24,7 +24,7 @@ def get_security_guard():
         SELECT tablename 
         FROM pg_tables 
         WHERE schemaname = 'public' 
-        AND tablename NOT IN ('users', 'messages', 'user_roles');
+        AND tablename NOT IN ('thrive_user', 'thrive_message', 'user_role');
     """)
     schema_info = cursor.fetchall()
 
