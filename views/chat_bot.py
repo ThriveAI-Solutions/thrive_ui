@@ -210,10 +210,11 @@ if my_question:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
                 addMessage(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question))
-        else:    
+        else:
             addMessage(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question))
-            if st.session_state.get("llm_fallback", True):
-                callLLM(my_question)
+            # TODO: not sure if calling the LLM here is the correct spot or not
+            # if st.session_state.get("llm_fallback", True):
+            #     callLLM(my_question)
             st.stop()
 
         df = run_sql_cached(sql=sql)
