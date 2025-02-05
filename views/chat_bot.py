@@ -11,14 +11,11 @@ from helperClasses.vanna_calls import (
     is_sql_valid_cached,
     generate_summary_cached
 )
-from helperClasses.train_vanna import (train, write_to_file)
+from helperClasses.train_vanna import (write_to_file)
 from helperClasses.communicate import (speak, listen)
 from helperClasses.llm_calls import (chat_gpt)
 from helperClasses.Enums import (MessageType, RoleType)
 from dto.Message import Message
-
-# Train Vanna on database schema
-train()
 
 # Initialize session state variables
 if "messages" not in st.session_state:

@@ -83,7 +83,7 @@ def train():
         ddl.append(');')
 
     # Train vanna with schema and queries
-    vn.train('\n'.join(ddl), "select * from {currentTable}")
+    vn.train(ddl='\n'.join(ddl), sql="select * from {currentTable}")
     cursor.close()
     
     # Load training queries from JSON
@@ -99,4 +99,4 @@ def train():
         question = query.get("question")
         sql = query.get("sql")
         if question and sql:
-            vn.train(question, sql)
+            vn.train(question=question, sql=sql)

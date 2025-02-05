@@ -1,5 +1,6 @@
 import streamlit as st
 from datetime import datetime, timedelta
+from helperClasses.train_vanna import (train)
 
 def check_authenticate():
     logged_in = st.session_state.cookies.get("logged_in")
@@ -32,6 +33,8 @@ def show_login():
             # TODO: Go to database and check for actual users
             # TODO: Save the user in the cookie
             if username == "ThriveAI" and password == "AIThrive":
+                # Train Vanna on database schema
+                train()
                 expiry_date = datetime.now() + timedelta(days=1) 
                 st.session_state.cookies["logged_in"] = "True"
                 st.session_state.cookies["username"] = username
