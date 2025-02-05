@@ -71,7 +71,7 @@ INSERT INTO user_role (role_name, description) VALUES ('Doctor', 'A physician wh
 INSERT INTO user_role (role_name, description) VALUES ('Patient', 'Patient access, only has access to see their own data or population data');
 
 INSERT INTO thrive_user (username, first_name, last_name, show_summary, password, user_role_id) 
-VALUES ('kroot', 'Kyle', 'Root', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
+VALUES ('thriveai-kr', 'Kyle', 'Root', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
         (SELECT id FROM user_role WHERE role_name = 'Patient'));
 INSERT INTO thrive_user (username, first_name, last_name, show_summary, password, user_role_id) 
 VALUES ('thriveai-je', 'Joseph', 'Eberle', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
