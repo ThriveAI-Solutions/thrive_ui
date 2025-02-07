@@ -16,6 +16,10 @@ Modify the values in the secrets.toml to connect to your desired configuration.
 
 You can configure secrets in `.streamlit/secrets.toml` and access them in your app using `st.secrets.get(...)`.
 
+`utils/config/training_data.json` Here you can configure your custom training data per your database.  No need to pass in DDL, the application will automatically read the DDL and populate that on its own.
+
+`utils/config/forbidden_references.json` Here you can specify any table or column names you want to actively block from querying or training on.
+
 # Run
 
 ```bash
