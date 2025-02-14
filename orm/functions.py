@@ -5,21 +5,29 @@ from sqlalchemy import func
 from orm.models import User, Message, SessionLocal
 
 def verify_user_credentials(username: str, password: str) -> bool:
-    # Create a new database session
-    session = SessionLocal()
+    try:
+        # Create a new database session
+        session = SessionLocal()
 
-    # Hash the password using SHA-256
-    hashed_password = hashlib.sha256(password.encode()).hexdigest()
+        # Hash the password using SHA-256
+        hashed_password = hashlib.sha256(password.encode()).hexdigest()
 
-    # Query to check if the username and hashed password exist in the users table
-    user = session.query(User).filter(func.lower(User.username) == username.lower(), User.password == hashed_password).first()
-    st.session_state.cookies["user_id"] = json.dumps(user.id)
+        # Query to check if the username and hashed password exist in the users table
+        user = session.query(User).filter(func.lower(User.username) == username.lower(), User.password == hashed_password).first()
+        
+        if user is None or "id" not in user:
+            return False
+        
+        st.session_state.cookies["user_id"] = json.dumps(user.id)
 
-    # Close the database session
-    session.close()
+        # Close the database session
+        session.close()
 
-    # Return True if the user exists, otherwise return False
-    return user is not None
+        # Return True if the user exists, otherwise return False
+        return user is not None
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+        return False
 
 def set_user_preferences_in_session_state(user):
     if "loaded" not in st.session_state:
