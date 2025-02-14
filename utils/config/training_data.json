@@ -71,6 +71,18 @@
         {
             "question": "how many patients are there",
             "query": "SELECT COUNT(patient_id) AS total_patients FROM patients;"
+        },
+        {
+            "question": "based on sex what were the survival rates",
+            "query": "SELECT sex, survived, COUNT(*) AS count\nFROM titanic_train\nGROUP BY sex, survived\nORDER BY sex, survived;"
+        },
+        {
+            "question": "based on the fare price what were the survival rates",
+            "query": "SELECT fare, AVG(survived) AS survival_rate \nFROM titanic_train \nGROUP BY fare;"
+        },
+        {
+            "question": "how many people on the titanic were male",
+            "query": "SELECT COUNT(*) AS number_of_male_passengers FROM titanic_train WHERE sex = 'male';"
         }
     ]
 }

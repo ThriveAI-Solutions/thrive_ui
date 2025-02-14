@@ -45,7 +45,7 @@ def show_login():
 
         if submit_button:
             if verify_user_credentials(username, password): # sets user_id in cookies
-                expiry_date = datetime.now() + timedelta(days=1)
+                expiry_date = datetime.now() + timedelta(hours=8)
                 st.session_state.cookies["expiry_date"] = expiry_date.isoformat()
                 st.session_state.cookies.save()
                 train()
