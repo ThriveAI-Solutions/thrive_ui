@@ -3,18 +3,21 @@ import openai
 from orm.models import Message
 
 def chat_gpt(message:Message):
-    openai.api_key = st.secrets["ai_keys"]["openai_api"]
-    client = openai
+    if "openai_api" in st.secrets.ai_keys and "openai_model" in st.secrets.ai_keys:
+        openai.api_key = st.secrets["ai_keys"]["openai_api"]
+        client = openai
 
-    # Generate a response using the OpenAI API.
-    stream = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[message.to_dict()],
-        # messages=[
-        #     {"role": m["role"], "content": m["content"]}
-        #     for m in st.session_state.messages
-        # ],
-        stream=True,
-    )
+        # Generate a response using the OpenAI API.
+        stream = client.chat.completions.create(
+            model=st.secrets["ai_keys"]["openai_model"],
+            messages=[message.to_dict()],
+            # messages=[
+            #     {"role": m["role"], "content": m["content"]}
+            #     for m in st.session_state.messages
+            # ],
+            stream=True,
+        )
 
-    return stream
+        return stream
+    else:
+        return "No API key found"

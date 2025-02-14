@@ -119,8 +119,9 @@ def addMessage(message:Message, render=True):
 def callLLM(my_question:str):
     stream = chat_gpt(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
     with st.chat_message(RoleType.ASSISTANT.value):
-        response = st.write("Chat GPT: ", stream)
-        message = Message(RoleType.ASSISTANT, f"Chat GPT: {response}", MessageType.TEXT)
+        response = st.write(f"{st.secrets["ai_keys"]["openai_model"]}:", stream)        
+        print("response", response) #TODO: why isnt this storing the response
+        message = Message(RoleType.ASSISTANT, f"{st.secrets["ai_keys"]["openai_model"]}: {response}", MessageType.TEXT)
         message = message.save()
         st.session_state.messages.append(message)
 
@@ -135,7 +136,8 @@ with st.sidebar.expander("Settings"):
     st.checkbox("Speak Summary", key="speak_summary")
     st.checkbox("Show Suggested Questions", key="show_suggested")
     st.checkbox("Show Follow-up Questions", key="show_followup")
-    st.checkbox("LLM Fallback on Error", key="llm_fallback")
+    if "openai_api" in st.secrets.ai_keys and "openai_model" in st.secrets.ai_keys:
+        st.checkbox("LLM Fallback on Error", key="llm_fallback")
     st.button("Save", on_click=save_user_settings, use_container_width=True)
 
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True, type="primary")
@@ -212,9 +214,9 @@ if my_question:
                 addMessage(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question))
         else:
             addMessage(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question))
-            # TODO: not sure if calling the LLM here is the correct spot or not
-            # if st.session_state.get("llm_fallback", True):
-            #     callLLM(my_question)
+            # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
+            if st.session_state.get("llm_fallback", True):
+                callLLM(my_question)
             st.stop()
 
         df = run_sql_cached(sql=sql)

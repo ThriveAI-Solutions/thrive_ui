@@ -83,6 +83,10 @@
         {
             "question": "how many people on the titanic were male",
             "query": "SELECT COUNT(*) AS number_of_male_passengers FROM titanic_train WHERE sex = 'male';"
+        },
+        {
+            "question": "how many people survived the titanic",
+            "query": "SELECT COUNT(*) AS total_survived FROM titanic_train WHERE survived = 1;"
         }
     ]
 }

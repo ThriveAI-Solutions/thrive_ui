@@ -15,9 +15,6 @@ def verify_user_credentials(username: str, password: str) -> bool:
         # Query to check if the username and hashed password exist in the users table
         user = session.query(User).filter(func.lower(User.username) == username.lower(), User.password == hashed_password).first()
         
-        if user is None or "id" not in user:
-            return False
-        
         st.session_state.cookies["user_id"] = json.dumps(user.id)
 
         # Close the database session

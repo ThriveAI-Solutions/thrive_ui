@@ -7,6 +7,13 @@ from pathlib import Path
 import sqlparse
 from sqlparse.sql import IdentifierList, Identifier
 from sqlparse.tokens import Keyword, DML
+from vanna.vannadb import VannaDB_VectorStore
+from vanna.anthropic import Anthropic_Chat
+
+class MyVanna(VannaDB_VectorStore, Anthropic_Chat):
+    def __init__(self, config=None):
+        VannaDB_VectorStore.__init__(self, vanna_model=st.secrets["ai_keys"]["vanna_model"], vanna_api_key=st.secrets["ai_keys"]["vanna_api"], config=config)
+        Anthropic_Chat.__init__(self, config={'api_key': st.secrets["ai_keys"]["anthropic_api"], 'model': st.secrets["ai_keys"]["anthropic_model"]})
 
 def read_forbidden_from_json():
     # Path to the forbidden_references.json file
@@ -25,7 +32,12 @@ forbidden_tables_str = ", ".join(f"'{table}'" for table in forbidden_tables)
 
 @st.cache_resource(ttl=3600)
 def setup_vanna():
-    vn = VannaDefault(api_key=st.secrets["ai_keys"]["vanna_api"], model=st.secrets["ai_keys"]["vanna_model"])
+    if "anthropic_api" not in st.secrets.ai_keys and "anthropic_model" not in st.secrets.ai_keys:
+        print('Using Default')
+        vn = VannaDefault(api_key=st.secrets["ai_keys"]["vanna_api"], model=st.secrets["ai_keys"]["vanna_model"])
+    else:
+        print('Using Anthropic')
+        vn = MyVanna()
     vn.connect_to_postgres(
         host=st.secrets["postgres"]["host"],
         dbname=st.secrets["postgres"]["database"],
