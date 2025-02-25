@@ -165,6 +165,9 @@ def train():
         if current_table != row['table_name']:
             if current_table is not None:
                 ddl.append(');')
+                # Train vanna with schema and queries
+                vn.train(ddl=' '.join(ddl))
+                ddl = [] # reset ddl for next table
             current_table = row['table_name']
             ddl.append(f"\nCREATE TABLE {row['table_name']} (")
         else:
@@ -175,9 +178,10 @@ def train():
     
     if ddl:  # Close the last table
         ddl.append(');')
-
-    # Train vanna with schema and queries
-    vn.train(ddl='\n'.join(ddl), sql="select * from {currentTable}")
+        # Train vanna with schema and queries
+        vn.train(ddl=' '.join(ddl))
+        ddl = [] # reset ddl for next table
+    
     cursor.close()
     
     # Load training queries from JSON
