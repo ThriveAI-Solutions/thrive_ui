@@ -14,12 +14,14 @@ from utils.vanna_calls import (
     generate_summary_cached,
     write_to_file
 )
-from utils.communicate import (speak, listen)
+from utils.communicate import (copy_to_clipboard, speak, listen)
 from utils.llm_calls import (chat_gpt)
 from utils.enums import (MessageType, RoleType)
-from orm.functions import (save_user_settings, get_recent_messages)
+from orm.functions import (save_user_settings, get_recent_messages, set_user_preferences_in_session_state)
 from orm.models import Message
 import pandas as pd
+
+set_user_preferences_in_session_state()
 
 # Initialize session state variables
 if "messages" not in st.session_state or st.session_state.messages == []:
@@ -29,9 +31,12 @@ if st.session_state.messages is None:
 
 def set_question(question:str, render = True):
     if question is None:
+        st.session_state.min_message_id = st.session_state.messages[-1].id
+        save_user_settings()
         # Clear questions history when resetting
         st.session_state.my_question = None
         st.session_state.messages = None
+        
     else:
         # Set question
         st.session_state.my_question = question
@@ -80,9 +85,9 @@ def renderMessage(message:Message, index:int):
                 st.dataframe(df, key=f"message_{index}")
                 # st.markdown(message.content)
             case MessageType.SUMMARY.value:
-                st.code(message.content, language=None)
+                st.code(message.content, language=None, wrap_lines=True)
                 # Add feedback buttons below the summary
-                cols = st.columns([0.1, 0.1, 0.8])
+                cols = st.columns([0.1, 0.1, 0.1, 0.1, 0.6])
                 with cols[0]:
                     st.button(
                         "👍",
@@ -98,6 +103,18 @@ def renderMessage(message:Message, index:int):
                         type="primary" if message.feedback == "down" else "secondary",
                         on_click=set_feedback,
                         args=(index, "down")
+                    )
+                with cols[2]:
+                    st.button(
+                        "📋",
+                        key=f"copy_to_clipboard_{index}",
+                        on_click=lambda: copy_to_clipboard(message.query)
+                    )
+                with cols[3]:
+                    st.button(
+                        "🔊",
+                        key=f"speak_summary_{index}",
+                        on_click=lambda: speak(message.content)
                     )
             case MessageType.FOLLOWUP.value:
                  if len(message.content) > 0:
@@ -147,7 +164,7 @@ if st.session_state.get("voice_input", True):
         if st.button("Listen", use_container_width=True):
             text = listen()
             if text:
-                st.success(f"Recognized text: {text}")
+                st.toast(f"Recognized text: {text}")
             else:
                 st.error("No input detected.")
             if text:

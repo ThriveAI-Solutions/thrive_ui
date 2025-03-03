@@ -2,18 +2,16 @@ import streamlit as st
 from datetime import datetime, timedelta
 from orm.functions import (
     verify_user_credentials, 
-    get_user, 
     set_user_preferences_in_session_state
 )
-from utils.vanna_calls import (train)
 
 def check_authenticate():
     user_id = st.session_state.cookies.get("user_id")
     expiry_date_str = st.session_state.cookies.get("expiry_date")
     if user_id and expiry_date_str:
         expiry_date = datetime.fromisoformat(expiry_date_str)
-        user = get_user(user_id)
-        set_user_preferences_in_session_state(user)
+        user = set_user_preferences_in_session_state()
+        
         if datetime.now() < expiry_date:
             cols = st.sidebar.columns([.7, .3], vertical_alignment="bottom")
             with cols[0]:
@@ -33,9 +31,22 @@ def check_authenticate():
         else:
             show_login()
     else:
-        show_login()
+        show_login()    
 
 def show_login():
+    # --- HIDE LOGIN NAVIGATION ---
+    st.markdown(
+        """
+    <style>
+        [data-testid="stSidebarCollapsedControl"], [data-testid="stSidebar"] {
+            display: none
+        }
+    </style>
+    """,
+        unsafe_allow_html=True,
+    )
+    # --- HIDE LOGIN NAVIGATION ---
+
     st.title("🔓 Log In - Thrive AI")
 
     with st.form("login_form"):
@@ -48,7 +59,6 @@ def show_login():
                 expiry_date = datetime.now() + timedelta(hours=8)
                 st.session_state.cookies["expiry_date"] = expiry_date.isoformat()
                 st.session_state.cookies.save()
-                train()
                 st.rerun()
             else:
                 st.error("Incorrect username or password. Please try again.")

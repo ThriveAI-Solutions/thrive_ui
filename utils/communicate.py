@@ -1,6 +1,12 @@
 import streamlit as st
 import pyttsx3
 import speech_recognition as sr
+import pyperclip
+
+def copy_to_clipboard(text: str):
+    # Copy the text to the clipboard
+    pyperclip.copy(text)
+    st.toast("Sql copied to clipboard")
 
 def listen() -> str:
     # Initialize the recognizer

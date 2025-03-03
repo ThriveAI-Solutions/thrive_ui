@@ -31,7 +31,7 @@ def content_to_json(type, content):
     return content
 
 class UserRole(Base):
-    __tablename__ = 'user_role'
+    __tablename__ = 'thrive_user_role'
     id = Column(Integer, primary_key=True)
     role_name = Column(String(50), nullable=False, unique=True)
     description = Column(String)
@@ -39,7 +39,7 @@ class UserRole(Base):
 class User(Base):
     __tablename__ = 'thrive_user'
     id = Column(Integer, primary_key=True)
-    user_role_id = Column(Integer, ForeignKey('user_role.id'))
+    user_role_id = Column(Integer, ForeignKey('thrive_user_role.id'))
     username = Column(String(50), nullable=False, unique=True)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
@@ -57,6 +57,7 @@ class User(Base):
     show_suggested = Column(Boolean)
     show_followup = Column(Boolean)
     llm_fallback = Column(Boolean)
+    min_message_id = Column(Integer)
 
     role = relationship("UserRole")
 
@@ -77,7 +78,8 @@ class User(Base):
             "speak_summary": self.speak_summary,
             "show_suggested": self.show_suggested,
             "show_followup": self.show_followup,
-            "llm_fallback": self.llm_fallback
+            "llm_fallback": self.llm_fallback,
+            "min_message_id": self.min_message_id
         }
 
 class Message(Base):

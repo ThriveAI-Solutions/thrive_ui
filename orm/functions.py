@@ -25,8 +25,38 @@ def verify_user_credentials(username: str, password: str) -> bool:
     except Exception as e:
         st.error(f"An error occurred: {e}")
         return False
+    
+def change_password(user_id: int, current_password: str, new_password: str) -> bool:
+    # Create a new database session
+    session = SessionLocal()
 
-def set_user_preferences_in_session_state(user):
+     # Retrieve the existing user from the database
+    user = session.query(User).filter(User.id == user_id).first()
+
+    current_password = hashlib.sha256(current_password.encode()).hexdigest()
+    
+    # Verify the current password
+    if user and current_password ==  user.password:
+        # Retrieve the existing user from the database
+        user = session.query(User).filter(User.id == user_id).first()
+
+        # Update the user's password in the database
+        user.password = hashlib.sha256(new_password.encode()).hexdigest()
+        session.commit()
+
+        # Close the session
+        session.close()
+
+        return True
+    else:
+        session.close()
+
+        return False
+
+def set_user_preferences_in_session_state():
+    user_id = st.session_state.cookies.get("user_id")
+    user = get_user(user_id)
+    
     if "loaded" not in st.session_state:
         st.session_state.show_sql = user.show_sql
         st.session_state.show_table = user.show_table
@@ -39,8 +69,11 @@ def set_user_preferences_in_session_state(user):
         st.session_state.show_suggested = user.show_suggested
         st.session_state.show_followup = user.show_followup
         st.session_state.llm_fallback = user.llm_fallback
+        st.session_state.min_message_id = user.min_message_id
         st.session_state.loaded = True # dont call after initial load
     
+    return user
+
 def save_user_settings():
     user_id = st.session_state.cookies.get("user_id")
     user_id = json.loads(user_id)
@@ -63,11 +96,12 @@ def save_user_settings():
         setattr(user, "show_suggested", st.session_state.show_suggested)
         setattr(user, "show_followup", st.session_state.show_followup)
         setattr(user, "llm_fallback", st.session_state.llm_fallback)
+        setattr(user, "min_message_id", st.session_state.min_message_id)
         
         # Commit the changes to the database
         session.commit()
 
-        st.success("User data updated successfully!")
+        st.toast("User data updated successfully!")
     else:
         st.error("User not found.")
 
@@ -87,12 +121,18 @@ def get_user(user_id):
     return user
 
 def get_recent_messages():
+    max_index = st.session_state.min_message_id
+
     user_id = st.session_state.cookies.get("user_id")
 
     # Create a new database session
     session = SessionLocal()
 
-    messages = session.query(Message).filter(Message.user_id == user_id).order_by(Message.created_at.desc()).limit(20).all()
+    # Query to get the last 20 messages for the user, excluding those with an index greater than max_index
+    messages = session.query(Message).filter(
+        Message.user_id == user_id,
+        Message.id > max_index
+    ).order_by(Message.created_at.desc()).limit(20).all()
 
     # Close the session
     session.close()
@@ -100,3 +140,19 @@ def get_recent_messages():
     messages.reverse()
 
     return messages
+
+def delete_all_messages():
+    user_id = st.session_state.cookies.get("user_id")
+
+    # Create a new database session
+    session = SessionLocal()
+
+    session.query(Message).filter(Message.user_id == user_id).delete()
+    session.commit()
+
+    # Close the session
+    session.close()
+
+    st.toast("All messages deleted successfully!")
+
+    st.session_state.messages = []

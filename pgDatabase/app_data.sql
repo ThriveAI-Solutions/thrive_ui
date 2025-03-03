@@ -3,9 +3,9 @@ DROP TRIGGER IF EXISTS trigger_update_updated_at ON thrive_message;
 
 DROP TABLE IF EXISTS thrive_message;
 DROP TABLE IF EXISTS thrive_user;
-DROP TABLE IF EXISTS user_role;
+DROP TABLE IF EXISTS thrive_user_role;
 
-CREATE TABLE user_role (
+CREATE TABLE thrive_user_role (
     id SERIAL PRIMARY KEY,
     role_name VARCHAR(50) NOT NULL UNIQUE,
     description TEXT
@@ -13,7 +13,7 @@ CREATE TABLE user_role (
 
 CREATE TABLE thrive_user (
     id SERIAL PRIMARY KEY,
-	user_role_id INTEGER REFERENCES user_role(id),
+	user_role_id INTEGER REFERENCES thrive_user_role(id),
     username VARCHAR(50) NOT NULL UNIQUE,
 	first_name VARCHAR(50) NOT NULL,
 	last_name VARCHAR(50) NOT NULL,
@@ -31,7 +31,8 @@ CREATE TABLE thrive_user (
 	speak_summary BOOLEAN DEFAULT false,
 	show_suggested BOOLEAN DEFAULT false,
 	show_followup BOOLEAN DEFAULT false,
-	llm_fallback BOOLEAN DEFAULT false
+	llm_fallback BOOLEAN DEFAULT false,
+	min_message_id INTEGER DEFAULT 0
 );
 
 --create a table to house all of the message data...
@@ -66,22 +67,22 @@ BEFORE UPDATE ON thrive_message
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
-INSERT INTO user_role (role_name, description) VALUES ('Admin', 'Administrator with full access');
-INSERT INTO user_role (role_name, description) VALUES ('Doctor', 'A physician who has the rights to view some individual patient data');
-INSERT INTO user_role (role_name, description) VALUES ('Patient', 'Patient access, only has access to see their own data or population data');
+INSERT INTO thrive_user_role (role_name, description) VALUES ('Admin', 'Administrator with full access');
+INSERT INTO thrive_user_role (role_name, description) VALUES ('Doctor', 'A physician who has the rights to view some individual patient data');
+INSERT INTO thrive_user_role (role_name, description) VALUES ('Patient', 'Patient access, only has access to see their own data or population data');
 
 INSERT INTO thrive_user (username, first_name, last_name, show_summary, password, user_role_id) 
 VALUES ('thriveai-kr', 'Kyle', 'Root', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
-        (SELECT id FROM user_role WHERE role_name = 'Patient'));
+        (SELECT id FROM thrive_user_role WHERE role_name = 'Patient'));
 INSERT INTO thrive_user (username, first_name, last_name, show_summary, password, user_role_id) 
 VALUES ('thriveai-je', 'Joseph', 'Eberle', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
-        (SELECT id FROM user_role WHERE role_name = 'Patient'));
+        (SELECT id FROM thrive_user_role WHERE role_name = 'Patient'));
 INSERT INTO thrive_user (username, first_name, last_name, show_summary, password, user_role_id) 
 VALUES ('thriveai-as', 'Al', 'Seoud', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
-        (SELECT id FROM user_role WHERE role_name = 'Patient'));
+        (SELECT id FROM thrive_user_role WHERE role_name = 'Patient'));
 INSERT INTO thrive_user (username, first_name, last_name, show_summary, password, user_role_id) 
 VALUES ('thriveai-fm', 'Frankly', 'Metty', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
-        (SELECT id FROM user_role WHERE role_name = 'Patient'));
+        (SELECT id FROM thrive_user_role WHERE role_name = 'Patient'));
 INSERT INTO thrive_user (username, first_name, last_name, show_summary, password, user_role_id) 
 VALUES ('thriveai-dr', 'Dr.', 'Smith', true, '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8', 
-        (SELECT id FROM user_role WHERE role_name = 'Doctor'));
+        (SELECT id FROM thrive_user_role WHERE role_name = 'Doctor'));

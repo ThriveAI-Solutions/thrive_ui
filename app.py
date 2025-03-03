@@ -17,11 +17,17 @@ if not st.session_state.cookies.ready():
 # --- PAGE SETUP ---
 chat_bot_page = st.Page(
     page = "views/chat_bot.py",
-    title = "Chat Bot - Thrive AI",
+    title = "Chat Bot",
     icon = "🤖"
 )
 
-pg = st.navigation(pages=[chat_bot_page])
+user_page = st.Page(
+    page = "views/user.py",
+    title = "User Account",
+    icon = "👤"
+)
+
+pg = st.navigation(pages=[chat_bot_page, user_page])
 
 check_authenticate()
 
