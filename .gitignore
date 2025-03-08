@@ -1,3 +1,6 @@
+# Chromadb local stuff
+chromadb/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -1,5 +1,5 @@
-vanna[anthropic,postgres]==0.7.5 
-#sqlalchemy==2.0.37 required by vanna
+vanna[anthropic,ollama,postgres,chromadb]==0.7.5 
+# sqlalchemy==2.0.37 # required by vanna
 streamlit==1.40.1
 pyttsx3==2.98
 psycopg2==2.9.10
@@ -10,3 +10,6 @@ streamlit-cookies-manager==0.2.0
 openai==1.61.0
 # langsec==0.0.1
 pyperclip==1.9.0
+
+# Desktop development with C++ from https://visualstudio.microsoft.com/visual-cpp-build-tools/
+chromadb==0.6.3

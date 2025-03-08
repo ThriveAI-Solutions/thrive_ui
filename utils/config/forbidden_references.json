@@ -2,7 +2,7 @@
     "tables": [
         "thrive_user",
         "thrive_message",
-        "user_role"
+        "thrive_user_role"
     ],
     "columns": [
         "password"

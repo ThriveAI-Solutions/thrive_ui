@@ -9,11 +9,32 @@ from sqlparse.sql import IdentifierList, Identifier
 from sqlparse.tokens import Keyword, DML
 from vanna.vannadb import VannaDB_VectorStore
 from vanna.anthropic import Anthropic_Chat
+from vanna.ollama import Ollama
+from vanna.chromadb import ChromaDB_VectorStore
 
-class MyVanna(VannaDB_VectorStore, Anthropic_Chat):
+class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
     def __init__(self, config=None):
+        print('Using Anthropic and VannaDB')
         VannaDB_VectorStore.__init__(self, vanna_model=st.secrets["ai_keys"]["vanna_model"], vanna_api_key=st.secrets["ai_keys"]["vanna_api"], config=config)
         Anthropic_Chat.__init__(self, config={'api_key': st.secrets["ai_keys"]["anthropic_api"], 'model': st.secrets["ai_keys"]["anthropic_model"]})
+
+class MyVannaAnthropicChromaDB(ChromaDB_VectorStore, Anthropic_Chat):
+    def __init__(self, config=None):
+        print('Using Anthropic and chromaDB')
+        ChromaDB_VectorStore.__init__(self, config={'path': st.secrets["rag_model"]["chroma_path"]})
+        Anthropic_Chat.__init__(self, config={'api_key': st.secrets["ai_keys"]["anthropic_api"], 'model': st.secrets["ai_keys"]["anthropic_model"]})
+
+class MyVannaOllama(VannaDB_VectorStore, Ollama):
+    def __init__(self, config=None):
+        print('Using Ollama and VannaDB')
+        VannaDB_VectorStore.__init__(self, vanna_model=st.secrets["ai_keys"]["vanna_model"], vanna_api_key=st.secrets["ai_keys"]["vanna_api"], config=config)
+        Ollama.__init__(self, config={'model': st.secrets["ai_keys"]["ollama_model"]})
+
+class MyVannaOllamaChromaDB(ChromaDB_VectorStore, Ollama):
+    def __init__(self, config=None):
+        print('Using Ollama and ChromaDB')
+        ChromaDB_VectorStore.__init__(self, config={'path': st.secrets["rag_model"]["chroma_path"]})
+        Ollama.__init__(self, config={'model': st.secrets["ai_keys"]["ollama_model"]})
 
 def read_forbidden_from_json():
     # Path to the forbidden_references.json file
@@ -32,12 +53,24 @@ forbidden_tables_str = ", ".join(f"'{table}'" for table in forbidden_tables)
 
 @st.cache_resource(ttl=3600)
 def setup_vanna():
-    if "anthropic_api" not in st.secrets.ai_keys and "anthropic_model" not in st.secrets.ai_keys:
+    if "ollama_host" in st.secrets.ai_keys and "ollama_model" in st.secrets.ai_keys:
+        if "chroma_path" in st.secrets.rag_model:
+            vn = MyVannaOllamaChromaDB()
+        elif "vanna_api" in st.secrets.ai_keys and "vanna_model" in st.secrets.ai_keys:
+            vn = MyVannaOllama()
+        else:
+            raise ValueError("Missing ollama Configuration Values")
+    elif "anthropic_api" in st.secrets.ai_keys and "anthropic_model" in st.secrets.ai_keys:
+        if "chroma_path" in st.secrets.rag_model:
+            vn = MyVannaAnthropicChromaDB()
+        elif "vanna_api" in st.secrets.ai_keys and "vanna_model" in st.secrets.ai_keys:
+            vn = MyVannaAnthropic()
+        else:
+            raise ValueError("Missing anthropic Configuration Values")
+    else:
         print('Using Default')
         vn = VannaDefault(api_key=st.secrets["ai_keys"]["vanna_api"], model=st.secrets["ai_keys"]["vanna_model"])
-    else:
-        print('Using Anthropic')
-        vn = MyVanna()
+
     vn.connect_to_postgres(
         host=st.secrets["postgres"]["host"],
         dbname=st.secrets["postgres"]["database"],
@@ -56,10 +89,13 @@ def generate_questions_cached():
 @st.cache_data(show_spinner="Generating SQL query ...")
 def generate_sql_cached(question: str):
     vn = setup_vanna()
-    # Dont send data to LLM
-    # return vn.generate_sql(question=question, allow_llm_to_see_data=True)
-    # return vn.generate_sql(question=question)
-    return check_references(vn.generate_sql(question=question))
+
+    if "allow_llm_to_see_data" in st.secrets.security and st.secrets.security["allow_llm_to_see_data"] == 'True':
+        print("Allowing LLM to see data")
+        return check_references(vn.generate_sql(question=question, allow_llm_to_see_data=True))
+    else:
+        print("NOT allowing LLM to see data")
+        return check_references(vn.generate_sql(question=question))
 
 @st.cache_data(show_spinner="Checking for valid SQL ...")
 def is_sql_valid_cached(sql: str):
@@ -98,8 +134,6 @@ def generate_followup_cached(question, sql, df):
 def generate_summary_cached(question, df):
     vn = setup_vanna()
     return vn.generate_summary(question=question, df=df)
-
-# TODO: Convert to a self hosted Vector DB  implementation? https://vanna.ai/docs/postgres-openai-standard-other-vectordb/
 
 def write_to_file(new_entry: dict):
        # Path to the training_data.json file
