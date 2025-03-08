@@ -90,7 +90,7 @@ def generate_questions_cached():
 def generate_sql_cached(question: str):
     vn = setup_vanna()
 
-    if "allow_llm_to_see_data" in st.secrets.security and st.secrets.security["allow_llm_to_see_data"] == 'True':
+    if "allow_llm_to_see_data" in st.secrets.security and bool(st.secrets.security["allow_llm_to_see_data"]) == True:
         print("Allowing LLM to see data")
         return check_references(vn.generate_sql(question=question, allow_llm_to_see_data=True))
     else:
@@ -135,8 +135,40 @@ def generate_summary_cached(question, df):
     vn = setup_vanna()
     return vn.generate_summary(question=question, df=df)
 
-def write_to_file(new_entry: dict):
-       # Path to the training_data.json file
+def remove_from_file_training(new_entry: dict):
+    vn = setup_vanna()
+    training_data = vn.get_training_data()
+    for index, row in training_data.iterrows():
+        if row["question"] and row["question"] == new_entry["question"]:
+            vn.remove_training_data(row["id"])
+
+    # Path to the training_data.json file
+    training_file_path = Path(__file__).parent / "config/training_data.json"
+
+    # Load the existing data
+    with training_file_path.open("r") as file:
+        training_data = json.load(file)
+
+    # Check for duplicates based on the question text
+    existing_questions = {entry["question"] for entry in training_data["sample_queries"]}
+    if new_entry["question"] in existing_questions:
+        # Remove the new entry from the sample_queries list if it's not a duplicate
+        training_data["sample_queries"] = [entry for entry in training_data["sample_queries"] if entry["question"] != new_entry["question"]]
+
+        # Write the updated data back to the file
+        with training_file_path.open("w") as file:
+            json.dump(training_data, file, indent=4)
+
+        print('Entry removed from training_data.json')
+    else:
+        print('Entry not found, nothing removed from training_data.json')
+
+def write_to_file_and_training(new_entry: dict):
+    vn = setup_vanna()
+
+    vn.train(question=new_entry["question"], sql=new_entry["query"])
+
+    # Path to the training_data.json file
     training_file_path = Path(__file__).parent / "config/training_data.json"
 
     # Load the existing data

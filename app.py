@@ -23,7 +23,7 @@ chat_bot_page = st.Page(
 
 user_page = st.Page(
     page = "views/user.py",
-    title = "User Account",
+    title = "User Settings",
     icon = "👤"
 )
 

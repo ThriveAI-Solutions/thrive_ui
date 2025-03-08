@@ -12,7 +12,8 @@ from utils.vanna_calls import (
     should_generate_chart_cached,
     is_sql_valid_cached,
     generate_summary_cached,
-    write_to_file
+    write_to_file_and_training,
+    remove_from_file_training
 )
 from utils.communicate import (copy_to_clipboard, speak, listen)
 from utils.llm_calls import (chat_gpt)
@@ -66,7 +67,10 @@ def set_feedback(index:int, value: str):
         "question": st.session_state.messages[index].question,
         "query": st.session_state.messages[index].query,
     }
-    write_to_file(new_entry)
+    if value == "up":
+        write_to_file_and_training(new_entry)
+    else:
+        remove_from_file_training(new_entry) 
 
 def renderMessage(message:Message, index:int):
    with st.chat_message(message.role):
