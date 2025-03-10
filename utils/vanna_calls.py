@@ -191,7 +191,7 @@ def write_to_file_and_training(new_entry: dict):
 
 # Train Vanna on database schema
 @st.cache_resource
-def train():
+def train_ddl():
     vn = setup_vanna()
 
     # PostgreSQL Connection
@@ -249,6 +249,12 @@ def train():
         ddl = [] # reset ddl for next table
     
     cursor.close()
+    conn.close()
+
+# Train Vanna on database question/query pairs from file
+@st.cache_resource
+def train_file():
+    vn = setup_vanna()
     
     # Load training queries from JSON
     training_file = Path(__file__).parent / 'config' / 'training_data.json'

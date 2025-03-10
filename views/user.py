@@ -1,23 +1,47 @@
 import streamlit as st
 from orm.functions import change_password, delete_all_messages
-from utils.vanna_calls import (train, setup_vanna)
+from utils.vanna_calls import (train_file, train_ddl, setup_vanna)
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
 vn = setup_vanna()
 
-def delete_message_by_id(message_id):
-    vn.remove_training_data(message_id)
+def delete_all_training():
+    training_data = vn.get_training_data()
+    for index, row in training_data.iterrows():
+        vn.remove_training_data(row["id"])
     st.toast("Training Data Deleted Successfully!")
 
 st.title("User Settings")
 
 with st.expander("Training Data", expanded=True):
-    st.button("Train Vanna", on_click=lambda: train())
-    # TODO: add a button to remove each row of training data
-    # TODO: add a form for entering training data
-    # TODO: breakout training to two commands, one for DDLs and one for fiile training
-    st.dataframe(vn.get_training_data(), column_order=("question", "content", "training_data_type"), hide_index=True)
+    cols = st.columns((1, 1, 1))
+    with cols[0]:
+        st.button("Train DDL", on_click=lambda: train_ddl())
+    with cols[1]:
+        st.button("Train from FIle", on_click=lambda: train_file())
+    with cols[2]:
+        st.button("Remove All", on_click=lambda: delete_all_training())
+
+    df =vn.get_training_data()
+
+    colms = st.columns((1, 2, 2, 1, 1))
+    fields = ["№", 'email', 'uid', 'verified', "action"]
+    for col, field_name in zip(colms, fields):
+        # header
+        col.write(field_name)
+
+    for index, row in df.iterrows():
+        col1, col2, col3, col4 = st.columns((1, 2, 3, 1))
+        col1.write(row['training_data_type'])
+        col2.write(row['question'])
+        col3.write(row['content'])
+        button_phold = col4.empty() 
+        do_action = button_phold.button(label="Delete", key=f"delete{row['id']}")
+        if do_action:
+            vn.remove_training_data(row['id'])
+            st.toast("Training Data Deleted Successfully!")
+            st.rerun()
 
 if user_id:
     with st.expander("Change Password"):
