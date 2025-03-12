@@ -4,9 +4,13 @@ import speech_recognition as sr
 import pyperclip
 
 def copy_to_clipboard(text: str):
-    # Copy the text to the clipboard
-    pyperclip.copy(text)
-    st.toast("Sql copied to clipboard")
+    try:
+        # Copy the text to the clipboard
+        pyperclip.copy(text)
+        st.toast("Sql copied to clipboard")
+    except Exception as e:
+        st.error(f"Error copying to clipboard: {e}")
+        print(e)
 
 def listen() -> str:
     # Initialize the recognizer
