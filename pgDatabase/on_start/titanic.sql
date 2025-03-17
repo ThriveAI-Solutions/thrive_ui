@@ -1,6 +1,6 @@
 -- Table: public.titanic_train
 
--- DROP TABLE IF EXISTS public.titanic_train;
+DROP TABLE IF EXISTS public.titanic_train;
 
 CREATE TABLE IF NOT EXISTS public.titanic_train
 (

@@ -1,6 +1,6 @@
 -- Table: public.penguins
 
--- DROP TABLE IF EXISTS public.penguins;
+DROP TABLE IF EXISTS public.penguins;
 
 CREATE TABLE IF NOT EXISTS public.penguins
 (
