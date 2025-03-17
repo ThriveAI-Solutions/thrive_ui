@@ -1,0 +1,24 @@
+[project]
+name = "thrive-ai"
+version = "0"
+description = "Thrive AI Chatbot"
+readme = "README.md"
+requires-python = "==3.13.*"
+dependencies = [
+    "anthropic>=0.49.0",
+    "chromadb>=0.6.3",
+    "kaleido==0.2.1",
+    "ollama>=0.4.7",
+    "openai>=1.66.3",
+    "psycopg2-binary>=2.9.10",
+    "pyaudio>=0.2.14",
+    "pyperclip>=1.9.0",
+    "pyttsx3>=2.98",
+    "speechrecognition>=3.14.1",
+    "streamlit>=1.43.2",
+    "streamlit-cookies-manager>=0.2.0",
+    "vanna[anthropic,ollama,postgres,chromadb]==0.7.5",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.3.5", "watchdog>=6.0.0"]

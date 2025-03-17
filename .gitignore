@@ -165,3 +165,12 @@ cython_debug/
 .DS_Store
 
 .streamlit/secrets.toml
+
+# qodo ai
+.qodo
+
+# pytest
+.pytest_cache
+
+# ruff type checker / formatter
+.ruff_cache
