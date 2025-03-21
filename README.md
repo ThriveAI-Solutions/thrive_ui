@@ -4,21 +4,25 @@
 
 [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
+Complete the full setup/install (requires restart and system admin)
+
+**You can skip the account setup stuff**
+
 ## Install UV
 
-Mac OS/Linux
+Mac OS/Linux - Install uv
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Windows
+Windows - Install uv
 
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-## Configure
+## Configure Application
 
 Copy the .streamlit/secrets_example.toml and Paste it to .streamlit/secrets.toml
 
@@ -49,6 +53,8 @@ set ollama_host, ollama_model, chroma_path
 docker compose up -d
 ```
 
+**restart the powershell**
+
 ## Run Streamlit
 
 ```bash
@@ -57,7 +63,7 @@ uv run streamlit run app.py
 
 ## Database
 
-Upon starting the docker container, the database will be initialized with the following tables:
+Upon starting the docker container, the database and data will be initialized with the following tables:
 
 - `public.penguins`
 - `public.titanic_train`
@@ -108,27 +114,3 @@ Note: This will automatically be created with uv run and uv sync
 ```bash
 uv venv
 ```
-
-### Output from uv help
-
-| Command  | Description                                                |
-| :------- | :--------------------------------------------------------- |
-| run      | Run a command or script                                    |
-| init     | Create a new project                                       |
-| add      | Add dependencies to the project                            |
-| remove   | Remove dependencies from the project                       |
-| sync     | Update the project's environment                           |
-| lock     | Update the project's lockfile                              |
-| export   | Export the project's lockfile to an alternate format       |
-| tree     | Display the project's dependency tree                      |
-| tool     | Run and install commands provided by Python packages       |
-| python   | Manage Python versions and installations                   |
-| pip      | Manage Python packages with a pip-compatible interface     |
-| venv     | Create a virtual environment                               |
-| build    | Build Python packages into source distributions and wheels |
-| publish  | Upload distributions to an index                           |
-| cache    | Manage uv's cache                                          |
-| self     | Manage the uv executable                                   |
-| version  | Display uv's version                                       |
-| generate | -shell-completion Generate shell completion                |
-| help     | Display documentation for a command                        |
