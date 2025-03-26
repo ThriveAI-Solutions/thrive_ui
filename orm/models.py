@@ -92,10 +92,11 @@ class Message(Base):
     feedback = Column(String(50))
     query = Column(String)
     question = Column(String(1000))
+    dataframe = Column(String)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     
-    def __init__(self, role:RoleType, content:str, type:MessageType, query:str=None, question:str=None):
+    def __init__(self, role:RoleType, content:str, type:MessageType, query:str=None, question:str=None, dataframe: pd.DataFrame = None):
         user_id = st.session_state.cookies.get("user_id")
         user_id = json.loads(user_id)
 
@@ -106,6 +107,12 @@ class Message(Base):
         self.feedback = None
         self.query = query
         self.question = question
+        
+        # Serialize the DataFrame to JSON if provided
+        if dataframe is not None:
+            self.dataframe = dataframe.to_json(orient="records")  # Convert DataFrame to JSON
+        else:
+            self.dataframe = None
 
     def to_dict(self):
         return {

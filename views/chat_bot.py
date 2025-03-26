@@ -1,4 +1,6 @@
 import streamlit as st
+import uuid
+import ast
 import time
 import json
 from io import StringIO
@@ -30,13 +32,38 @@ if "messages" not in st.session_state or st.session_state.messages == []:
 if st.session_state.messages is None:
     st.session_state.messages = []
 
+def generate_guid():
+    return str(uuid.uuid4())
+
+def get_followup_questions(my_question, sql, df):
+    followup_questions = generate_followup_cached(
+        question=my_question, sql=sql, df=df
+    )
+
+    addMessage(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP,  sql, my_question))
+
+def get_chart(my_question, sql, df):
+    if should_generate_chart_cached(question=my_question, sql=sql, df=df):
+        code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
+
+    if st.session_state.get("show_plotly_code", False):
+        addMessage(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question))
+
+    if code is not None and code != "":
+        fig = generate_plot_cached(code=code, df=df)
+        if fig is not None:
+            addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question))
+        else:
+            addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question))
+
 def set_question(question:str, render = True):
     if question is None:
-        st.session_state.min_message_id = st.session_state.messages[-1].id
-        save_user_settings()
-        # Clear questions history when resetting
-        st.session_state.my_question = None
-        st.session_state.messages = None
+        if len(st.session_state.messages) > 0:
+            st.session_state.min_message_id = st.session_state.messages[-1].id
+            save_user_settings()
+            # Clear questions history when resetting
+            st.session_state.my_question = None
+            st.session_state.messages = None
         
     else:
         # Set question
@@ -91,7 +118,7 @@ def renderMessage(message:Message, index:int):
             case MessageType.SUMMARY.value:
                 st.code(message.content, language=None, wrap_lines=True)
                 # Add feedback buttons below the summary
-                cols = st.columns([0.1, 0.1, 0.1, 0.1, 0.6])
+                cols = st.columns([0.1, 0.1, 0.6])
                 with cols[0]:
                     st.button(
                         "👍",
@@ -109,25 +136,45 @@ def renderMessage(message:Message, index:int):
                         args=(index, "down")
                     )
                 with cols[2]:
-                    st.button(
-                        "📋",
-                        key=f"copy_to_clipboard_{index}",
-                        on_click=lambda: copy_to_clipboard(message.query)
-                    )
-                with cols[3]:
-                    st.button(
-                        "🔊",
-                        key=f"speak_summary_{index}",
-                        on_click=lambda: speak(message.content)
-                    )
+                    with st.popover("Actions", use_container_width=True):
+                        st.button(
+                            "Speak Summary",
+                            key=f"speak_summary_{index}",
+                            on_click=lambda: speak(message.content)
+                        )
+                        my_df = pd.read_json(StringIO(message.dataframe), orient="records")
+                        st.button(
+                            "Follow-up Questions",
+                            key=f"follow_up_questions_{index}",
+                            on_click=lambda: get_followup_questions(message.question, message.query, my_df)
+                        )
+                        if st.button(
+                            "Generate Table",
+                            key=f"table_{index}"
+                        ):
+                            addMessage(Message(RoleType.ASSISTANT, my_df, MessageType.DATAFRAME, message.query, message.question))
+                        st.button(
+                            "Generate Graph",
+                            key=f"graph_{index}",
+                            on_click=lambda: get_chart(message.question, message.query, my_df)
+                        )
+                        # st.button(
+                        #     "Copy SQL",
+                        #     key=f"copy_to_clipboard_{index}",
+                        #     on_click=lambda: copy_to_clipboard(message.query)
+                        # )
+                        with st.expander("Show SQL"):
+                            st.code(message.query, language="sql", line_numbers=True) 
             case MessageType.FOLLOWUP.value:
                  if len(message.content) > 0:
                     st.text(
                         "Here are some possible follow-up questions"
                     )
+                    content_object = ast.literal_eval(message.content)
+                    content_array = list(content_object)
                     # Print the first 5 follow-up questions
-                    for question in message.content[:5]:
-                        st.button(question, on_click=set_question, args=(question,), key=message.generate_guid(), use_container_width=True)
+                    for question in content_array[:5]:
+                        st.button(question, on_click=set_question, args=(question,), key=generate_guid(), use_container_width=True)
             case _:
                 st.markdown(message.content)
 
@@ -250,40 +297,24 @@ if my_question:
                 df = st.session_state.get("df")
                 addMessage(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question))
 
-            if should_generate_chart_cached(question=my_question, sql=sql, df=df):
-                code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
-
-                if st.session_state.get("show_plotly_code", False):
-                    addMessage(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question))
-
-                if code is not None and code != "":
-                    if st.session_state.get("show_chart", True):
-                        fig = generate_plot_cached(code=code, df=df)
-                        if fig is not None:
-                            addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question))
-                        else:
-                            addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question))
+            if st.session_state.get("show_chart", True):
+                get_chart(my_question, sql, df)
 
             if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
                 summary = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
                     if st.session_state.get("show_summary", True):
-                        addMessage(Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question))
+                        addMessage(Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df))
                                 
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:
-                    addMessage(Message(RoleType.ASSISTANT, "Could not generate a summary", MessageType.SUMMARY, sql, my_question))
+                    addMessage(Message(RoleType.ASSISTANT, "Could not generate a summary", MessageType.SUMMARY, sql, my_question, df))
                     if st.session_state.get("speak_summary", True):
                         speak("Could not generate a summary")
 
             if st.session_state.get("show_followup", True):
-                followup_questions = generate_followup_cached(
-                    question=my_question, sql=sql, df=df
-                )
-                st.session_state["df"] = None
-
-                addMessage(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP,  sql, my_question))
+                get_followup_questions(my_question, sql, df)
     else:
         addMessage(Message(RoleType.ASSISTANT, "I wasn't able to generate SQL for that question", MessageType.ERROR, sql, my_question))
         if st.session_state.get("llm_fallback", True):

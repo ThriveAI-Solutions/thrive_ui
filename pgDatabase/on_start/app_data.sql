@@ -45,6 +45,7 @@ CREATE TABLE thrive_message (
 	feedback VARCHAR(50),
 	query TEXT,
 	question VARCHAR(1000),
+	dataframe Text,
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
