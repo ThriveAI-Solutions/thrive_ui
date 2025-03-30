@@ -84,8 +84,9 @@ fig.update_traces(textposition="inside", textinfo="percent+label")
 # Fix the rotated facet labels
 for annotation in fig.layout.annotations:
     #     print(dir(annotation))
-    annotation.text = annotation.text.replace("evaluation_metric=", "")
-    annotation.text = annotation.text.replace("domain=", "")
+    # annotation.text = annotation.text.replace("evaluation_metric=", "")
+    # annotation.text = annotation.text.replace("domain=", "")
+    annotation.text = annotation.text.split("=")[-1]
     annotation.textangle = 0
 
 if domains:
