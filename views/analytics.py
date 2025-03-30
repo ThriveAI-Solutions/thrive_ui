@@ -6,7 +6,7 @@ import streamlit as st
 
 TEST_RESULTS_PATH = Path("analytics")
 try:
-    df = pl.scan_parquet(TEST_RESULTS_PATH / "*.parquet", include_file_paths="run").collect()
+    df = pl.read_parquet(TEST_RESULTS_PATH / "*.parquet", include_file_paths="run")
 except pl.exceptions.ComputeError:
     st.error("Error reading parquet files. Make sure files are in the correct directory.")
     st.stop()
@@ -30,20 +30,33 @@ chart_data = (
     .rename({"additionalMetadata.domain_classification": "domain"})
 )
 
+# Convert options to native Python lists
+domain_options = df.select(pl.col("additionalMetadata.domain_classification").unique()).to_series().to_list()
+metric_options = df.select(pl.col("evaluation_metric").unique()).to_series().to_list()
+run_options = df["run"].unique().to_list()
+
+# Initialize session state only once
+if "selected_domains" not in st.session_state:
+    st.session_state["selected_domains"] = domain_options
+if "selected_metrics" not in st.session_state:
+    st.session_state["selected_metrics"] = ["Correctness (GEval)"]
+if "selected_runs" not in st.session_state:
+    st.session_state["selected_runs"] = [max(run_options)]
+
+# Create multiselect widgets using session state keys
 domains = st.multiselect(
-    label="Show Domains:",
-    options=df.select(pl.col("additionalMetadata.domain_classification").unique()),
-    default=df.select(pl.col("additionalMetadata.domain_classification").unique()),
+    label="Show Domains:", options=domain_options, default=st.session_state["selected_domains"], key="selected_domains"
 )
 
 metrics = st.multiselect(
-    label="Show Metrics:",
-    options=df.select(pl.col("evaluation_metric").unique()),
-    default="Correctness (GEval)",
+    label="Show Metrics:", options=metric_options, default=st.session_state["selected_metrics"], key="selected_metrics"
 )
 
-runs = st.multiselect(label="Select Run(s):", options=df["run"].unique(), default=df["run"].max())
+runs = st.multiselect(
+    label="Select Run(s):", options=run_options, default=st.session_state["selected_runs"], key="selected_runs"
+)
 
+# Use the selections to filter your data
 chart_data_filtered = chart_data.filter(
     pl.col("domain").is_in(domains),
     pl.col("evaluation_metric").is_in(metrics),
@@ -53,7 +66,6 @@ chart_data_filtered = chart_data.filter(
 fig = px.pie(
     chart_data_filtered,
     values="cnt",
-    # width=1000,
     height=500 if (len(metrics) * 250) < 500 else (len(metrics) * 250),
     color="evaluation_success",
     names="evaluation_success",
@@ -67,19 +79,8 @@ fig = px.pie(
     },
 )
 
-# Adjust the trace details for better readability
 fig.update_traces(textposition="inside", textinfo="percent+label")
-# fig.update_layout(
-#     margin=dict(t=50, b=50, l=50, r=50),
-#     uniformtext_minsize=12,
-#     uniformtext_mode="hide",
-# )
-
-# Fix the rotated facet labels
 for annotation in fig.layout.annotations:
-    #     print(dir(annotation))
-    # annotation.text = annotation.text.replace("evaluation_metric=", "")
-    # annotation.text = annotation.text.replace("domain=", "")
     annotation.text = annotation.text.split("=")[-1]
     annotation.textangle = 0
 
@@ -87,7 +88,6 @@ if domains:
     st.plotly_chart(fig)
 
 df_filtered = df.filter(pl.col("run").is_in(runs), pl.col("evaluation_metric").is_in(metrics))
-
 
 event = st.dataframe(
     data=df_filtered,
@@ -98,7 +98,6 @@ event = st.dataframe(
         "run",
         "name",
         "evaluation_metric",
-        # "evaluation_success",
         "input",
         "additionalMetadata.domain_classification",
         "evaluation_score",
@@ -128,4 +127,3 @@ def metric_details(selected_rows):
 selected_rows = event.selection.rows
 if selected_rows:
     metric_details(selected_rows)
-    # selected_rows
