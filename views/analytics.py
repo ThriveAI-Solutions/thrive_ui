@@ -6,13 +6,9 @@ import streamlit as st
 
 TEST_RESULTS_PATH = Path("analytics")
 try:
-    df = pl.scan_parquet(
-        TEST_RESULTS_PATH / "*.parquet", include_file_paths="run"
-    ).collect()
+    df = pl.scan_parquet(TEST_RESULTS_PATH / "*.parquet", include_file_paths="run").collect()
 except pl.exceptions.ComputeError:
-    st.error(
-        "Error reading parquet files. Make sure files are in the correct directory."
-    )
+    st.error("Error reading parquet files. Make sure files are in the correct directory.")
     st.stop()
 except FileNotFoundError:
     st.error("No parquet files found")
@@ -46,9 +42,7 @@ metrics = st.multiselect(
     default="Correctness (GEval)",
 )
 
-runs = st.multiselect(
-    label="Select Run(s):", options=df["run"].unique(), default=df["run"].max()
-)
+runs = st.multiselect(label="Select Run(s):", options=df["run"].unique(), default=df["run"].max())
 
 chart_data_filtered = chart_data.filter(
     pl.col("domain").is_in(domains),
@@ -92,9 +86,7 @@ for annotation in fig.layout.annotations:
 if domains:
     st.plotly_chart(fig)
 
-df_filtered = df.filter(
-    pl.col("run").is_in(runs), pl.col("evaluation_metric").is_in(metrics)
-)
+df_filtered = df.filter(pl.col("run").is_in(runs), pl.col("evaluation_metric").is_in(metrics))
 
 
 event = st.dataframe(

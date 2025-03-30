@@ -10,7 +10,8 @@ from views import analytics
 
 # Initialize the cookie manager
 st.session_state.cookies = EncryptedCookieManager(
-    prefix="thrive_ai_", password=st.secrets["cookie"]["password"]
+    prefix="thrive_ai_",
+    password=st.secrets["cookie"]["password"],
 )
 
 # Ensure the cookie manager is initialized
