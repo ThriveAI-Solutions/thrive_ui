@@ -17,19 +17,6 @@ except Exception as e:
     st.error(f"An unexpected error occurred: {e}")
     st.stop()
 
-chart_data = (
-    df.group_by(
-        [
-            "additionalMetadata.domain_classification",
-            "evaluation_metric",
-            "evaluation_success",
-            "run",
-        ]
-    )
-    .len(name="cnt")
-    .rename({"additionalMetadata.domain_classification": "domain"})
-)
-
 # Convert options to native Python lists
 domain_options = df.select(pl.col("additionalMetadata.domain_classification").unique()).to_series().to_list()
 metric_options = df.select(pl.col("evaluation_metric").unique()).to_series().to_list()
@@ -56,15 +43,26 @@ runs = st.multiselect(
     label="Select Run(s):", options=run_options, default=st.session_state["selected_runs"], key="selected_runs"
 )
 
-# Use the selections to filter your data
-chart_data_filtered = chart_data.filter(
-    pl.col("domain").is_in(domains),
-    pl.col("evaluation_metric").is_in(metrics),
-    pl.col("run").is_in(runs),
+chart_data = (
+    df.filter(
+        pl.col("additionalMetadata.domain_classification").is_in(domains),
+        pl.col("evaluation_metric").is_in(metrics),
+        pl.col("run").is_in(runs),
+    )
+    .group_by(
+        [
+            "additionalMetadata.domain_classification",
+            "evaluation_metric",
+            "evaluation_success",
+            "run",
+        ]
+    )
+    .len(name="cnt")
+    .rename({"additionalMetadata.domain_classification": "domain"})
 )
 
 fig = px.pie(
-    chart_data_filtered,
+    chart_data,
     values="cnt",
     height=500 if (len(metrics) * 250) < 500 else (len(metrics) * 250),
     color="evaluation_success",
