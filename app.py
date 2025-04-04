@@ -1,8 +1,9 @@
 import streamlit as st
 from streamlit_cookies_manager import EncryptedCookieManager
 
+# Set the page configuration to wide mode
+st.set_page_config(layout="wide")
 from utils.auth import check_authenticate
-from views import analytics
 
 # TODO: **Update streamlit_cookies_manager**: The behavior of `st.cache` was updated in Streamlit 1.36 to the new caching
 # logic used by `st.cache_data` and `st.cache_resource`. This might lead to some problems
