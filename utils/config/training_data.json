@@ -1,92 +1,97 @@
 {
-    "sample_queries": [
-        {
-            "question": "Show all information in the patients data?",
-            "query": "select patient_id, first_name, last_name, date_of_birth, gender, phone_number, email, address from public.patients;"
-        },
-        {
-            "question": "Show all information in the medical record data?",
-            "query": "select record_id, patient_id, visit_date, diagnosis, treatment, doctor_name, notes from medical_records;"
-        },
-        {
-            "question": "Show all information in the penguin data?",
-            "query": "select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex, year from penguins;"
-        },
-        {
-            "question": "Show all information in the titanic data.",
-            "query": "select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train;"
-        },
-        {
-            "question": "How many records are there for people that survived?",
-            "query": "SELECT COUNT(*) as Number_of_Records FROM titanic_train WHERE survived = 1;"
-        },
-        {
-            "question": "How many records are there shown by if they survived?",
-            "query": "SELECT survived, COUNT(*) AS Number_of_Records FROM titanic_train GROUP BY survived;"
-        },
-        {
-            "question": "How many passengers survived and did not survive?",
-            "query": "SELECT survived, COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train GROUP BY survived;"
-        },
-        {
-            "question": "How many passengers survived?",
-            "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 1;"
-        },
-        {
-            "question": "How many passengers did not survive?",
-            "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 0;"
-        },
-        {
-            "question": "how many patients see each doctor",
-            "query": "SELECT doctor_name, COUNT(DISTINCT patient_id) AS patient_count\nFROM medical_records\nGROUP BY doctor_name;"
-        },
-        {
-            "question": "how many patients see each doctor\n\n",
-            "query": "SELECT doctor_name, COUNT(DISTINCT patient_id) AS patient_count\nFROM medical_records\nGROUP BY doctor_name;"
-        },
-        {
-            "question": "how many patients were there",
-            "query": "SELECT COUNT(patient_id) AS total_patients FROM patients;"
-        },
-        {
-            "question": "how many patients were sick",
-            "query": "SELECT COUNT(DISTINCT patient_id) as sick_patients\nFROM medical_records\nWHERE diagnosis IS NOT NULL;"
-        },
-        {
-            "question": "how many doctors are there",
-            "query": "SELECT COUNT(DISTINCT doctor_name) AS number_of_doctors FROM medical_records;"
-        },
-        {
-            "question": "What are all of the patients?",
-            "query": "SELECT * FROM patients;"
-        },
-        {
-            "question": "which patients have which diagnosis",
-            "query": "select p.patient_id, p.first_name, p.last_name, m.diagnosis\nfrom patients p\njoin medical_records m on p.patient_id = m.patient_id;\n"
-        },
-        {
-            "question": "Can you show me all the patients who have had an Annual Check-up?",
-            "query": "SELECT p.patient_id, p.first_name, p.last_name\nFROM patients p\nJOIN medical_records mr ON p.patient_id = mr.patient_id\nWHERE mr.diagnosis = 'Annual Check-up';"
-        },
-        {
-            "question": "how many patients are there",
-            "query": "SELECT COUNT(patient_id) AS total_patients FROM patients;"
-        },
-        {
-            "question": "based on sex what were the survival rates",
-            "query": "SELECT sex, survived, COUNT(*) AS count\nFROM titanic_train\nGROUP BY sex, survived\nORDER BY sex, survived;"
-        },
-        {
-            "question": "based on the fare price what were the survival rates",
-            "query": "SELECT fare, AVG(survived) AS survival_rate \nFROM titanic_train \nGROUP BY fare;"
-        },
-        {
-            "question": "how many people on the titanic were male",
-            "query": "SELECT COUNT(*) AS number_of_male_passengers FROM titanic_train WHERE sex = 'male';"
-        },
-        {
-            "question": "how many people survived the titanic",
-            "query": "SELECT COUNT(*) AS total_survived FROM titanic_train WHERE survived = 1;"
-        }
-    ]
+  "sample_queries": [
+    {
+      "question": "Show all information in the patients data?",
+      "query": "select patient_id, first_name, last_name, date_of_birth, gender, phone_number, email, address from public.patients;"
+    },
+    {
+      "question": "Show all information in the medical record data?",
+      "query": "select record_id, patient_id, visit_date, diagnosis, treatment, doctor_name, notes from medical_records;"
+    },
+    {
+      "question": "Show all information in the penguin data?",
+      "query": "select species, island, bill_length_mm, bill_depth_mm, flipper_length_mm, body_mass_g, sex, year from penguins;"
+    },
+    {
+      "question": "Show all information in the titanic data.",
+      "query": "select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train;"
+    },
+    {
+      "question": "How many records are there for people that survived?",
+      "query": "SELECT COUNT(*) as Number_of_Records FROM titanic_train WHERE survived = 1;"
+    },
+    {
+      "question": "How many records are there shown by if they survived?",
+      "query": "SELECT survived, COUNT(*) AS Number_of_Records FROM titanic_train GROUP BY survived;"
+    },
+    {
+      "question": "How many passengers survived and did not survive?",
+      "query": "SELECT survived, COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train GROUP BY survived;"
+    },
+    {
+      "question": "How many passengers survived?",
+      "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 1;"
+    },
+    {
+      "question": "How many passengers did not survive?",
+      "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 0;"
+    },
+    {
+      "question": "how many patients see each doctor",
+      "query": "SELECT doctor_name, COUNT(DISTINCT patient_id) AS patient_count\nFROM medical_records\nGROUP BY doctor_name;"
+    },
+    {
+      "question": "how many patients see each doctor\n\n",
+      "query": "SELECT doctor_name, COUNT(DISTINCT patient_id) AS patient_count\nFROM medical_records\nGROUP BY doctor_name;"
+    },
+    {
+      "question": "how many patients were there",
+      "query": "SELECT COUNT(patient_id) AS total_patients FROM patients;"
+    },
+    {
+      "question": "how many patients were sick",
+      "query": "SELECT COUNT(DISTINCT patient_id) as sick_patients\nFROM medical_records\nWHERE diagnosis IS NOT NULL;"
+    },
+    {
+      "question": "how many doctors are there",
+      "query": "SELECT COUNT(DISTINCT doctor_name) AS number_of_doctors FROM medical_records;"
+    },
+    {
+      "question": "What are all of the patients?",
+      "query": "SELECT * FROM patients;"
+    },
+    {
+      "question": "which patients have which diagnosis",
+      "query": "select p.patient_id, p.first_name, p.last_name, m.diagnosis\nfrom patients p\njoin medical_records m on p.patient_id = m.patient_id;\n"
+    },
+    {
+      "question": "Can you show me all the patients who have had an Annual Check-up?",
+      "query": "SELECT p.patient_id, p.first_name, p.last_name\nFROM patients p\nJOIN medical_records mr ON p.patient_id = mr.patient_id\nWHERE mr.diagnosis = 'Annual Check-up';"
+    },
+    {
+      "question": "how many patients are there",
+      "query": "SELECT COUNT(patient_id) AS total_patients FROM patients;"
+    },
+    {
+      "question": "based on sex what were the survival rates",
+      "query": "SELECT sex, survived, COUNT(*) AS count\nFROM titanic_train\nGROUP BY sex, survived\nORDER BY sex, survived;"
+    },
+    {
+      "question": "based on the fare price what were the survival rates",
+      "query": "SELECT fare, AVG(survived) AS survival_rate \nFROM titanic_train \nGROUP BY fare;"
+    },
+    {
+      "question": "how many people on the titanic were male",
+      "query": "SELECT COUNT(*) AS number_of_male_passengers FROM titanic_train WHERE sex = 'male';"
+    },
+    {
+      "question": "how many people survived the titanic",
+      "query": "SELECT COUNT(*) AS total_survived FROM titanic_train WHERE survived = 1;"
+    }
+  ],
+  "sample_documents": [
+    {
+      "documentation": "The columns asthma, diabetes, hypertension, obesity, prediabetes, tobacco, breast_cancer_screening, cervical_cancer_screening, colorectal_cancer_screening in the wny_health table can only have values 'Y' or 'N'. 'Y' indicates YES or TRUE, while 'N' indicates NO or FALSE."
+    }
+  ]
 }
