@@ -85,7 +85,11 @@ for annotation in fig.layout.annotations:
 if domains:
     st.plotly_chart(fig)
 
-df_filtered = df.filter(pl.col("run").is_in(runs), pl.col("evaluation_metric").is_in(metrics))
+df_filtered = df.filter(
+    pl.col("run").is_in(runs),
+    pl.col("evaluation_metric").is_in(metrics),
+    pl.col("additionalMetadata.domain_classification").is_in(domains),
+)
 
 event = st.dataframe(
     data=df_filtered,
