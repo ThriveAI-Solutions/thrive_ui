@@ -43,18 +43,21 @@ def get_followup_questions(my_question, sql, df):
     addMessage(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP,  sql, my_question))
 
 def get_chart(my_question, sql, df):
+    elapsed_sum  = 0
+    code = None
     if should_generate_chart_cached(question=my_question, sql=sql, df=df):
-        code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
-
+        code, elapsed_time = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
+        elapsed_sum += elapsed_time if elapsed_time is not None else 0
     if st.session_state.get("show_plotly_code", False):
-        addMessage(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question))
+        addMessage(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time))
 
     if code is not None and code != "":
-        fig = generate_plot_cached(code=code, df=df)
+        fig, elapsed_time = generate_plot_cached(code=code, df=df)
+        elapsed_sum += elapsed_time if elapsed_time is not None else 0
         if fig is not None:
-            addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question))
+            addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question, None, elapsed_sum))
         else:
-            addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question))
+            addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question, None, elapsed_sum))
 
 def set_question(question:str, render = True):
     if question is None:
@@ -103,10 +106,14 @@ def renderMessage(message:Message, index:int):
    with st.chat_message(message.role):
         match message.type:
             case MessageType.SQL.value:
+                if st.session_state.get("show_elapsed_time", True):
+                    st.write(f"Elapsed Time: {message.elapsed_time}")
                 st.code(message.content, language="sql", line_numbers=True)
             case MessageType.PYTHON.value:
                 st.code(message.content, language="python", line_numbers=True)
             case MessageType.PLOTLY_CHART.value:
+                if st.session_state.get("show_elapsed_time", True):
+                    st.write(f"Elapsed Time: {message.elapsed_time}")
                 chart = json.loads(message.content)
                 st.plotly_chart(chart, key=f"message_{index}")
             case MessageType.ERROR.value:
@@ -116,6 +123,8 @@ def renderMessage(message:Message, index:int):
                 st.dataframe(df, key=f"message_{index}")
                 # st.markdown(message.content)
             case MessageType.SUMMARY.value:
+                if st.session_state.get("show_elapsed_time", True):
+                    st.write(f"Elapsed Time: {message.elapsed_time}")
                 st.code(message.content, language=None, wrap_lines=True)
                 # Add feedback buttons below the summary
                 cols = st.columns([0.1, 0.1, 0.6])
@@ -199,6 +208,7 @@ with st.sidebar.expander("Settings"):
     st.checkbox("Show Table", key="show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
     st.checkbox("Show Chart", key="show_chart")
+    st.checkbox("Show Elapsed Time", key="show_elapsed_time")
     st.checkbox("Show Question History", key="show_question_history")
     st.checkbox("Voice Input", key="voice_input")
     st.checkbox("Speak Summary", key="speak_summary")
@@ -273,15 +283,15 @@ if chat_input:
 my_question = st.session_state.get("my_question", None)
 
 if my_question:
-    sql = generate_sql_cached(question=my_question)
+    sql, elapsed_time = generate_sql_cached(question=my_question)
     st.session_state.my_question = None
 
     if sql:
         if is_sql_valid_cached(sql=sql):
             if st.session_state.get("show_sql", True):
-                addMessage(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question))
+                addMessage(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
         else:
-            addMessage(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question))
+            addMessage(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):
                 callLLM(my_question)
@@ -301,15 +311,15 @@ if my_question:
                 get_chart(my_question, sql, df)
 
             if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
-                summary = generate_summary_cached(question=my_question, df=df)
+                summary, elapsed_time = generate_summary_cached(question=my_question, df=df)
                 if summary is not None:
                     if st.session_state.get("show_summary", True):
-                        addMessage(Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df))
+                        addMessage(Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time))
                                 
                     if st.session_state.get("speak_summary", True):
                         speak(summary)
                 else:
-                    addMessage(Message(RoleType.ASSISTANT, "Could not generate a summary", MessageType.SUMMARY, sql, my_question, df))
+                    addMessage(Message(RoleType.ASSISTANT, "Could not generate a summary", MessageType.SUMMARY, sql, my_question, df, elapsed_time))
                     if st.session_state.get("speak_summary", True):
                         speak("Could not generate a summary")
 
