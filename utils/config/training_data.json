@@ -10,51 +10,51 @@
         },
         {
             "question": "Show all information in the titanic data.",
-            "query": "select passenger_id, survived, pclass, name, sex, age, sib_sp, parch, ticket, fare, cabin, embarked from titanic_train;"
+            "query": "select passengerid, survived, pclass, name, sex, age, sibsp, parch, ticket, fare, cabin, embarked from titanic;"
         },
         {
             "question": "How many records are there for people that survived?",
-            "query": "SELECT COUNT(*) as Number_of_Records FROM titanic_train WHERE survived = 1;"
+            "query": "SELECT COUNT(*) as Number_of_Records FROM titanic WHERE survived = 1;"
         },
         {
             "question": "How many records are there shown by if they survived?",
-            "query": "SELECT survived, COUNT(*) AS Number_of_Records FROM titanic_train GROUP BY survived;"
+            "query": "SELECT survived, COUNT(*) AS Number_of_Records FROM titanic GROUP BY survived;"
         },
         {
             "question": "How many passengers survived and did not survive?",
-            "query": "SELECT survived, COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train GROUP BY survived;"
+            "query": "SELECT survived, COUNT(distinct passengerid) AS Number_of_Passengers FROM titanic GROUP BY survived;"
         },
         {
             "question": "How many passengers survived?",
-            "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 1;"
+            "query": "SELECT COUNT(distinct passengerid) AS Number_of_Passengers FROM titanic WHERE survived = 1;"
         },
         {
             "question": "How many passengers did not survive?",
-            "query": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 0;"
+            "query": "SELECT COUNT(distinct passengerid) AS Number_of_Passengers FROM titanic WHERE survived = 0;"
         },
         {
             "question": "based on sex what were the survival rates",
-            "query": "SELECT sex, survived, COUNT(*) AS count\nFROM titanic_train\nGROUP BY sex, survived\nORDER BY sex, survived;"
+            "query": "SELECT sex, survived, COUNT(*) AS count FROM titanic GROUP BY sex, survived ORDER BY sex, survived;"
         },
         {
             "question": "based on the fare price what were the survival rates",
-            "query": "SELECT fare, AVG(survived) AS survival_rate \nFROM titanic_train \nGROUP BY fare;"
+            "query": "SELECT fare, AVG(survived) AS survival_rate FROM titanic GROUP BY fare;"
         },
         {
             "question": "how many people on the titanic were male",
-            "query": "SELECT COUNT(*) AS number_of_male_passengers FROM titanic_train WHERE sex = 'male';"
+            "query": "SELECT COUNT(*) AS number_of_male_passengers FROM titanic WHERE sex = 'male';"
         },
         {
             "question": "how many people survived the titanic",
-            "query": "SELECT COUNT(*) AS total_survived FROM titanic_train WHERE survived = 1;"
+            "query": "SELECT COUNT(*) AS total_survived FROM titanic WHERE survived = 1;"
         },
         {
             "question": "how many males vs females were on the titanic",
-            "answer": "SELECT sex, COUNT(*) AS count FROM titanic_train GROUP BY sex"
+            "answer": "SELECT sex, COUNT(*) AS count FROM titanic GROUP BY sex"
         },
         {
             "question": "how many people perished on the titanic?",
-            "answer": "SELECT COUNT(distinct passenger_id) AS Number_of_Passengers FROM titanic_train WHERE survived = 0;"
+            "answer": "SELECT COUNT(distinct passengerid) AS Number_of_Passengers FROM titanic WHERE survived = 0;"
         },
         {
             "question": "what is the biggest penguin",
@@ -70,11 +70,11 @@
         },
         {
             "question": "what was the age range for females on the titanic?",
-            "answer": "SELECT min(age) ,  max(age) FROM titanic_train WHERE sex = 'female'"
+            "answer": "SELECT min(age) ,  max(age) FROM titanic WHERE sex = 'female'"
         },
         {
             "question": "how much did each pclass ticket cost",
-            "answer": "SELECT pclass ,  AVG(fare) FROM titanic_train GROUP BY pclass"
+            "answer": "SELECT pclass ,  AVG(fare) FROM titanic GROUP BY pclass"
         },
         {
             "question": "what is the average amount of visits per patient in wny",
@@ -88,6 +88,9 @@
     "sample_documents": [
         {
             "documentation": "The columns asthma, diabetes, hypertension, obesity, prediabetes, tobacco, breast_cancer_screening, cervical_cancer_screening, colorectal_cancer_screening in the wny_health table can only have values 'Y' or 'N'. 'Y' indicates YES or TRUE, while 'N' indicates NO or FALSE."
+        },
+        {
+            "documentation": "The research_id column indicates multiple visits for the same patient"
         }
     ]
 }
