@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-
+import time
 import psycopg2
 import sqlparse
 import streamlit as st
@@ -12,7 +12,6 @@ from vanna.chromadb import ChromaDB_VectorStore
 from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
-
 
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
     def __init__(self, config=None):
@@ -144,6 +143,7 @@ def generate_questions_cached():
 @st.cache_data(show_spinner="Generating SQL query ...")
 def generate_sql_cached(question: str):
     try:
+        start_time = time.time()
         vn = setup_vanna()
 
         if (
@@ -151,10 +151,16 @@ def generate_sql_cached(question: str):
             and bool(st.secrets.security["allow_llm_to_see_data"]) == True
         ):
             print("Allowing LLM to see data")
-            return check_references(vn.generate_sql(question=question, allow_llm_to_see_data=True))
+            response = check_references(vn.generate_sql(question=question, allow_llm_to_see_data=True))
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            return response, elapsed_time
         else:
             print("NOT allowing LLM to see data")
-            return check_references(vn.generate_sql(question=question))
+            response = check_references(vn.generate_sql(question=question))
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            return response, elapsed_time
     except Exception as e:
         st.error(f"Error generating SQL: {e}")
         print(e)
@@ -193,9 +199,12 @@ def should_generate_chart_cached(question, sql, df):
 @st.cache_data(show_spinner="Generating Plotly code ...")
 def generate_plotly_code_cached(question, sql, df):
     try:
+        start_time = time.time()
         vn = setup_vanna()
         code = vn.generate_plotly_code(question=question, sql=sql, df=df)
-        return code
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        return code, elapsed_time
     except Exception as e:
         st.error(f"Error generating Plotly code: {e}")
         print(e)
@@ -204,8 +213,12 @@ def generate_plotly_code_cached(question, sql, df):
 @st.cache_data(show_spinner="Running Plotly code ...")
 def generate_plot_cached(code, df):
     try:
+        start_time = time.time()
         vn = setup_vanna()
-        return vn.get_plotly_figure(plotly_code=code, df=df)
+        plotly = vn.get_plotly_figure(plotly_code=code, df=df)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        return plotly, elapsed_time
     except Exception as e:
         st.error(f"Error generating Plotly chart: {e}")
         print(e)
@@ -224,8 +237,13 @@ def generate_followup_cached(question, sql, df):
 @st.cache_data(show_spinner="Generating summary ...")
 def generate_summary_cached(question, df):
     try:
+        start_time = time.time()
         vn = setup_vanna()
-        return vn.generate_summary(question=question, df=df)
+        response = vn.generate_summary(question=question, df=df)
+        end_time = time.time()
+
+        elapsed_time = end_time - start_time
+        return response, elapsed_time
     except Exception as e:
         st.error(f"Error generating summary: {e}")
         print(e)

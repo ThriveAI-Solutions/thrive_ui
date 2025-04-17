@@ -31,6 +31,7 @@ CREATE TABLE thrive_user (
 	speak_summary BOOLEAN DEFAULT false,
 	show_suggested BOOLEAN DEFAULT false,
 	show_followup BOOLEAN DEFAULT false,
+	show_elapsed_time BOOLEAN DEFAULT false,
 	llm_fallback BOOLEAN DEFAULT false,
 	min_message_id INTEGER DEFAULT 0
 );
@@ -46,6 +47,7 @@ CREATE TABLE thrive_message (
 	query TEXT,
 	question VARCHAR(1000),
 	dataframe Text,
+	elapsed_time NUMERIC(10, 6),
 	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

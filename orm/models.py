@@ -1,10 +1,11 @@
 import streamlit as st
 import json
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, TIMESTAMP, func
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, TIMESTAMP, Numeric, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from utils.enums import (MessageType, RoleType)
 import pandas as pd
+from decimal import Decimal
 
 # Load database settings from st.secrets
 db_settings = st.secrets["postgres"]
@@ -56,6 +57,7 @@ class User(Base):
     speak_summary = Column(Boolean)
     show_suggested = Column(Boolean)
     show_followup = Column(Boolean)
+    show_elapsed_time = Column(Boolean)
     llm_fallback = Column(Boolean)
     min_message_id = Column(Integer)
 
@@ -78,6 +80,7 @@ class User(Base):
             "speak_summary": self.speak_summary,
             "show_suggested": self.show_suggested,
             "show_followup": self.show_followup,
+            "show_elapsed_time": self.show_elapsed_time,
             "llm_fallback": self.llm_fallback,
             "min_message_id": self.min_message_id
         }
@@ -93,10 +96,11 @@ class Message(Base):
     query = Column(String)
     question = Column(String(1000))
     dataframe = Column(String)
+    elapsed_time = Column(Numeric(10, 6))
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     
-    def __init__(self, role:RoleType, content:str, type:MessageType, query:str=None, question:str=None, dataframe: pd.DataFrame = None):
+    def __init__(self, role:RoleType, content:str, type:MessageType, query:str=None, question:str=None, dataframe: pd.DataFrame = None, elapsed_time:Decimal=None):
         user_id = st.session_state.cookies.get("user_id")
         user_id = json.loads(user_id)
 
@@ -107,6 +111,7 @@ class Message(Base):
         self.feedback = None
         self.query = query
         self.question = question
+        self.elapsed_time = elapsed_time
         
         # Serialize the DataFrame to JSON if provided
         if dataframe is not None:
