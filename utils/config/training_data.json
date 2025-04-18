@@ -83,6 +83,18 @@
         {
             "question": "how many patients who smoke also have diabetes",
             "query": "SELECT count(*) FROM wny_health WHERE tobacco = 'Y' AND diabetes = 'Y'"
+        },
+        {
+            "question": "How many patients are MALE",
+            "query": "SELECT count(*) FROM wny_health WHERE sex = 'MALE'"
+        },
+        {
+            "question": "How many patients are FEMALE",
+            "query": "SELECT count(*) FROM wny_health WHERE sex = 'FEMALE'"
+        },
+        {
+            "question": "how many children survived the titanic",
+            "query": "SELECT COUNT(*) FROM titanic WHERE age < 18 AND survived = 1"
         }
     ],
     "sample_documents": [
