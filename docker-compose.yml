@@ -13,7 +13,29 @@ services:
       - ./pgDatabase/data:/data
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
+    networks:
+      - pgnet
+
+  csvloader:
+    image: python:3.13-slim
+    depends_on:
+      - postgres
+    command: >
+      bash -c "
+        apt-get update &&
+        apt-get install -y --no-install-recommends git &&
+        pip install uv &&
+        uv venv &&
+        uv pip install git+https://github.com/univibe25/csv2pg.git &&
+        uv run csv2pg --url postgresql://postgres:postgres@postgres:5432/postgres
+      "
+    networks:
+      - pgnet
 
 volumes:
   postgres_data:
     driver: local
+
+networks:
+  pgnet:
+    driver: bridge
