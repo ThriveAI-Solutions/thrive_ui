@@ -32,13 +32,7 @@ user_page = st.Page(
     icon="👤",
 )
 
-analytics_page = st.Page(
-    page="views/analytics.py",
-    title="Analytics",
-    icon="📊",
-)
-
-pg = st.navigation(pages=[chat_bot_page, user_page, analytics_page])
+pg = st.navigation(pages=[chat_bot_page, user_page])
 
 check_authenticate()
 
