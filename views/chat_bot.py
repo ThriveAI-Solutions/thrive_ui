@@ -3,6 +3,7 @@ import uuid
 import ast
 import time
 import json
+import utils.ethical_guideline as eg
 from io import StringIO
 from utils.vanna_calls import (
     generate_questions_cached,
@@ -283,7 +284,26 @@ if chat_input:
 my_question = st.session_state.get("my_question", None)
 
 if my_question:
+<<<<<<< HEAD
     sql, elapsed_time = generate_sql_cached(question=my_question)
+=======
+    #check guardrails here
+    guardrail_sentence,guardrail_score = eg.get_ethical_guideline(my_question)
+    if(guardrail_score == 1):
+        addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
+        st.stop()
+    if(guardrail_score == 2):
+        addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
+        callLLM(my_question)
+        st.stop()
+    if(guardrail_score == 3):
+        sql = generate_sql_cached(question=my_question)
+        st.session_state.my_question = None
+    if(guardrail_score == 4):
+        addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
+        st.stop()
+    sql = generate_sql_cached(question=my_question)
+>>>>>>> main
     st.session_state.my_question = None
 
     if sql:
