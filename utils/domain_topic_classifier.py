@@ -1,7 +1,6 @@
 import re
 from rapidfuzz import fuzz
 
-
 # Domain keywords organized for clarity and scalability
 
 DOMAIN_KEYWORDS = {
@@ -136,7 +135,7 @@ TOPIC_KEYWORDS = {
 HOSTILITY_KEYWORDS = {
     "hostility": {
         "bomb", "kill", "shoot", "invade", "weapon", "gun", "hate", "bully", "attack", "murder", "slaughter",
-        "massacre", "stab", "assault", "execute", "terror", "ambush", "raid", "rage", "scum", "vermin",
+        "massacre", "stab", "assault", "execute", "terror", "ambush", "raid", "rage", "scum", "vermin", "loser", "pathetic",
         "exterminate", "genocide", "racist", "bigot", "lynch", "burn", "destroy", "war", "battle", "conflict",
         "combat", "uprising", "rebellion", "hostile", "oppress", "occupation", "moron", "stupid", "idiot", "retarded"
     },
@@ -222,7 +221,13 @@ INNAPROPRIATE_KEYWORDS = {
         "shit", "fuck", "crap", "sucks", "bitch", "asshole", "pussy", "dick", "cunt", "bullshit", "rage", "furious",
         "angry", "curse", "abuse", "harass", "insult", "threat", "violence", "retaliate"
    }     
+}
 
+PHI_KEYWORDS = {
+    "phi": {
+        "date of birth", "full name", "social security number", "address", "phone number", "email address", "patient name",
+        "mrn", "medical record number"
+   }     
 }
 
 SEXISM_KEYWORDS = {
@@ -318,6 +323,9 @@ def topic_classifier(text, use_fuzzy=False, use_stemming=False):
 def hostility_classifier(text, use_fuzzy=False, use_stemming=False):
     return classify_text(text, HOSTILITY_KEYWORDS, use_fuzzy, use_stemming )
 
+def phi_classifier(text, use_fuzzy=False, use_stemming=False):
+    return classify_text(text, PHI_KEYWORDS, use_fuzzy, use_stemming )
+
 def racism_classifier(text, use_fuzzy=False, use_stemming=False):
     return classify_text(text, RACISM_KEYWORDS, use_fuzzy, use_stemming )
 
@@ -329,7 +337,9 @@ def innapropriate_language_classifier(text, use_fuzzy=False, use_stemming=False)
 
 def practicing_medicine_classifier(text, use_fuzzy=False, use_stemming=False):
     return classify_text(text, PRACTICING_MEDICINE_KEYWORDS, use_fuzzy, use_stemming )
-
+    
+def phi_classifier(text, use_fuzzy=False, use_stemming=False):
+    return  classify_text(text, PHI_KEYWORDS, use_fuzzy, use_stemming )
 
 def test_domain_topic_classifier(sample_sentence):
     print(f"Text: {sample_sentence}")
@@ -340,10 +350,9 @@ def test_ethical_guardrail_classifier(sample_sentence):
     print(f"Text: {sample_sentence}")
     print(f"Hostility: {hostility_classifier(sample_sentence)}")
     print(f"Sexism: {sexism_classifier(sample_sentence)}\n")
-    print(f"Racism: {racism_classifier(sample_sentence)}\n")    
-    print(f"Innapropriate Language: {innapropriate_language_classifier(sample_sentence)}\n")
-    print(f"Practicing Medicine: {practicing_medicine_classifier(sample_sentence)}\n")
-    
+    print(f"Racism: {racism_classifier(sample_sentence)}\n")   
+    print(f"PHI: {phi_classifier(sample_sentence)}\n")       
+    print(f"Innapropriate Language: {innapropriate_language_classifier(sample_sentence)}\n")        
  
 def get_sample_questions():
     sentences = [
@@ -374,6 +383,7 @@ def get_sample_questions():
         "Should I take Ozempic to loose weight?.",        
         "Do penguins live in the North Pole?",
         "My grandmother survived the Titanic disaster.",
+        "give me patient janes full name, ssn, and mrn",        
         "I cried all night and couldn’t get out of bed.",
         "Is a stent better than bypass surgery?",
         "What are the symptoms of tuberculosis?",
@@ -392,8 +402,3 @@ def run_ethical_guardrail_sample_test():
     for sentence in sample_sentences:
         test_ethical_guardrail_classifier(sentence)
     return    
-
-
-
-
-
