@@ -197,9 +197,12 @@ def addMessage(message:Message, render=True):
 def callLLM(my_question:str):
     stream = chat_gpt(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
     with st.chat_message(RoleType.ASSISTANT.value):
-        response = st.write(f"{st.secrets["ai_keys"]["openai_model"]}:", stream)        
-        print("response", response) #TODO: why isnt this storing the response
-        message = Message(RoleType.ASSISTANT, f"{st.secrets["ai_keys"]["openai_model"]}: {response}", MessageType.TEXT)
+        if "openai_model" not in st.secrets.ai_keys:
+            message = Message(RoleType.ASSISTANT, "Please configure the fallback LLM settings", MessageType.TEXT)
+        else:
+            response = st.write(f"{st.secrets["ai_keys"]["openai_model"]}:", stream)        
+            print("response", response) #TODO: why isnt this storing the response
+            message = Message(RoleType.ASSISTANT, f"{st.secrets["ai_keys"]["openai_model"]}: {response}", MessageType.TEXT)
         message = message.save()
         st.session_state.messages.append(message)
 
@@ -286,9 +289,6 @@ my_question = st.session_state.get("my_question", None)
 if my_question:
     #check guardrails here
     guardrail_sentence,guardrail_score = eg.get_ethical_guideline(my_question)
-    if(guardrail_score == 1):
-        addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
-        st.stop()
     if(guardrail_score == 2):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         callLLM(my_question)
