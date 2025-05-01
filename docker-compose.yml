@@ -26,8 +26,8 @@ services:
         apt-get install -y --no-install-recommends git &&
         pip install uv &&
         uv venv &&
-        uv pip install git+https://github.com/univibe25/csv2pg.git &&
-        uv run csv2pg --url postgresql://postgres:postgres@postgres:5432/postgres
+        uv pip install git+https://github.com/ThriveAI-Solutions/db_discovery_lib.git &&
+        uv run db-discovery-lib --db-name postgres --username postgres --password postgres --host localhost --port 5432
       "
     networks:
       - pgnet
