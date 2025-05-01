@@ -49,16 +49,17 @@ def get_chart(my_question, sql, df):
     if should_generate_chart_cached(question=my_question, sql=sql, df=df):
         code, elapsed_time = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
         elapsed_sum += elapsed_time if elapsed_time is not None else 0
-    if st.session_state.get("show_plotly_code", False):
-        addMessage(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time))
+        
+        if st.session_state.get("show_plotly_code", False):
+            addMessage(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time))
 
-    if code is not None and code != "":
-        fig, elapsed_time = generate_plot_cached(code=code, df=df)
-        elapsed_sum += elapsed_time if elapsed_time is not None else 0
-        if fig is not None:
-            addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question, None, elapsed_sum))
-        else:
-            addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question, None, elapsed_sum))
+        if code is not None and code != "":
+            fig, elapsed_time = generate_plot_cached(code=code, df=df)
+            elapsed_sum += elapsed_time if elapsed_time is not None else 0
+            if fig is not None:
+                addMessage(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question, None, elapsed_sum))
+            else:
+                addMessage(Message(RoleType.ASSISTANT, "I couldn't generate a chart", MessageType.ERROR, sql, my_question, None, elapsed_sum))
 
 def set_question(question:str, render = True):
     if question is None:
