@@ -27,7 +27,7 @@ services:
         pip install uv &&
         uv venv &&
         uv pip install git+https://github.com/ThriveAI-Solutions/db_discovery_lib.git &&
-        uv run db-discovery-lib --db-name postgres --username postgres --password postgres --host localhost --port 5432
+        uv run db-discovery-lib --db-name postgres --username postgres --password postgres --host postgres --port 5432
       "
     networks:
       - pgnet
