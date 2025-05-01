@@ -3,7 +3,7 @@ import uuid
 import ast
 import time
 import json
-import utils.ethical_guideline as eg
+from  ethical_guardrails_lib import get_ethical_guideline
 from io import StringIO
 from utils.vanna_calls import (
     generate_questions_cached,
@@ -289,7 +289,7 @@ my_question = st.session_state.get("my_question", None)
 
 if my_question:
     #check guardrails here
-    guardrail_sentence,guardrail_score = eg.get_ethical_guideline(my_question)
+    guardrail_sentence,guardrail_score = get_ethical_guideline(my_question)
     if(guardrail_score == 2):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         callLLM(my_question)
