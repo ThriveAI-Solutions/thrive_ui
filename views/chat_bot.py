@@ -290,12 +290,15 @@ my_question = st.session_state.get("my_question", None)
 if my_question:
     #check guardrails here
     guardrail_sentence,guardrail_score = get_ethical_guideline(my_question)
+    print("=========ETHICAL GUARDRAILS===========")
+    print(my_question, guardrail_score, guardrail_sentence)
+    print("=========ETHICAL GUARDRAILS===========")
     if(guardrail_score == 2):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         callLLM(my_question)
         st.stop()
     if(guardrail_score == 3):
-        sql, elapsed_time = generate_sql_cached(question=my_question)
+        addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         st.session_state.my_question = None
     if(guardrail_score == 4):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
