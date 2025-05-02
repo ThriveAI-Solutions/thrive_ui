@@ -299,7 +299,7 @@ if my_question:
         st.stop()
     if(guardrail_score == 3):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
-        st.session_state.my_question = None
+        st.stop()
     if(guardrail_score == 4):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         st.stop()
