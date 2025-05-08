@@ -314,8 +314,21 @@ def write_to_file_and_training(new_entry: dict):
         print(e)
 
 
+def training_plan():
+    vn = setup_vanna()
+
+    # The information schema query may need some tweaking depending on your database. This is a good starting point.
+    df_information_schema = vn.run_sql("SELECT * FROM INFORMATION_SCHEMA.COLUMNS")
+
+    # This will break up the information schema into bite-sized chunks that can be referenced by the LLM
+    plan = vn.get_training_plan_generic(df_information_schema)
+    plan
+
+    # If you like the plan, then uncomment this and run it to train
+    vn.train(plan=plan)
+
+
 # Train Vanna on database schema
-@st.cache_resource
 def train_ddl():
     try:
         vn = setup_vanna()
@@ -382,7 +395,6 @@ def train_ddl():
 
 
 # Train Vanna on database question/query pairs from file
-@st.cache_resource
 def train_file():
     try:
         vn = setup_vanna()

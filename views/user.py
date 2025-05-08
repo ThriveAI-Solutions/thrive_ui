@@ -1,6 +1,6 @@
 import streamlit as st
 from orm.functions import change_password, delete_all_messages
-from utils.vanna_calls import (train_file, train_ddl, setup_vanna)
+from utils.vanna_calls import (train_file, train_ddl, setup_vanna, training_plan)
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
@@ -50,18 +50,20 @@ st.title("User Settings")
 tab1, tab2 = st.tabs(["Training Data", "Change Password"])
 
 with tab1:
-    cols = st.columns((.2, .2, .2, .4, .3))
+    cols = st.columns((.2, .2, .2, .2, .4, .2))
     with cols[0]:
         st.button("Train DDL", on_click=lambda: train_ddl())
     with cols[1]:
-        st.button("Train FIle", on_click=lambda: train_file())
+        st.button("Train Plan", on_click=lambda: training_plan())
     with cols[2]:
+        st.button("Train FIle", on_click=lambda: train_file())
+    with cols[3]:
         if(st.button("Add Sql")):
             pop_train("sql")
-    with cols[3]:
+    with cols[4]:
         if(st.button("Add Documentation")):
             pop_train("documentation")
-    with cols[4]:
+    with cols[5]:
         st.button("Remove All", type='primary', on_click=lambda: delete_all_training())
     
     # st.dataframe(df)

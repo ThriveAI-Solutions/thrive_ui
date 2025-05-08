@@ -1,4 +1,5 @@
 import streamlit as st
+import random
 import uuid
 import ast
 import time
@@ -26,6 +27,19 @@ from orm.models import Message
 import pandas as pd
 
 set_user_preferences_in_session_state()
+
+acknowledgements = [
+    "That's an excellent question. Let me think about that for a moment.",
+    "Interesting point! Let me analyze this for you.",
+    "Great question! Let me dive into that.",
+    "I see where you're coming from. Let me process this.",
+    "That's a thoughtful question. Let me work through it.",
+    "Good question! Let me gather the relevant information.",
+    "I appreciate the depth of your question. Let me consider it carefully.",
+    "That's a valid and insightful question. Let me provide a detailed response.",
+    "You've raised an important point. Let me think this through.",
+    "I like the way you're thinking. Let me explore this further for you."
+]
 
 # Initialize session state variables
 if "messages" not in st.session_state or st.session_state.messages == []:
@@ -303,6 +317,12 @@ if my_question:
     if(guardrail_score == 4):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         st.stop()
+
+    # write an acknowledgment message to 
+    random_acknowledgment = random.choice(acknowledgements)
+    with st.chat_message(RoleType.ASSISTANT.value):
+        st.write(random_acknowledgment)
+
     sql, elapsed_time = generate_sql_cached(question=my_question)
     st.session_state.my_question = None
 
