@@ -342,7 +342,7 @@ if my_question:
         if isinstance(df, pd.DataFrame):
             st.session_state["df"] = df
 
-        if st.session_state.get("df") is not None:
+        if isinstance(st.session_state.get("df"), pd.DataFrame):
             if st.session_state.get("show_table", True):
                 df = st.session_state.get("df")
                 addMessage(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question))
