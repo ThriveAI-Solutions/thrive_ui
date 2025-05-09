@@ -86,14 +86,10 @@ def read_forbidden_from_json():
 
         forbidden_tables = forbidden_data.get("tables", [])
         forbidden_columns = forbidden_data.get("columns", [])
-        return forbidden_tables, forbidden_columns
+        return forbidden_tables, forbidden_columns, ", ".join(f"'{table}'" for table in forbidden_tables)
     except Exception as e:
         print(f"Error reading forbidden_references.json: {e}")
         return [], []
-
-
-forbidden_tables, forbidden_columns = read_forbidden_from_json()
-forbidden_tables_str = ", ".join(f"'{table}'" for table in forbidden_tables)
 
 
 @st.cache_resource(ttl=3600)
@@ -312,28 +308,13 @@ def write_to_file_and_training(new_entry: dict):
     except Exception as e:
         st.error(f"Error writing to training_data.json: {e}")
         print(e)
+        
 
-
-def training_plan():
-    vn = setup_vanna()
-
-    # The information schema query may need some tweaking depending on your database. This is a good starting point.
-    df_information_schema = vn.run_sql("SELECT * FROM INFORMATION_SCHEMA.COLUMNS")
-
-    # This will break up the information schema into bite-sized chunks that can be referenced by the LLM
-    plan = vn.get_training_plan_generic(df_information_schema)
-    plan
-
-    # If you like the plan, then uncomment this and run it to train
-    vn.train(plan=plan)
-
-
-# Train Vanna on database schema
-def train_ddl():
+def get_schema_info():
     try:
-        vn = setup_vanna()
+        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
 
-        # PostgreSQL Connection
+         # PostgreSQL Connection
         conn = psycopg2.connect(
             host=st.secrets["postgres"]["host"],
             port=st.secrets["postgres"]["port"],
@@ -361,7 +342,46 @@ def train_ddl():
             ORDER BY 
                 table_schema, table_name, ordinal_position;
         """)
-        schema_info = cursor.fetchall()
+        response = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        return response
+    except Exception as e:
+        st.error(f"Error getting schema info: {e}")
+        print(e)
+
+def training_plan():
+    vn = setup_vanna()
+
+    forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+
+    # The information schema query may need some tweaking depending on your database. This is a good starting point.
+    df_information_schema = vn.run_sql(f"""
+            SELECT 
+                *
+            FROM 
+                information_schema.columns
+            WHERE 
+                table_schema = 'public'
+            AND 
+                table_name NOT IN ({forbidden_tables_str})
+            ORDER BY 
+                table_schema, table_name, ordinal_position;
+        """)
+
+    # This will break up the information schema into bite-sized chunks that can be referenced by the LLM
+    plan = vn.get_training_plan_generic(df_information_schema)
+
+    vn.train(plan=plan)
+
+
+# Train Vanna on database schema
+def train_ddl():
+    try:
+        vn = setup_vanna()
+
+        schema_info = get_schema_info()
 
         # Format schema for training
         ddl = []
@@ -386,9 +406,6 @@ def train_ddl():
             # Train vanna with schema and queries
             vn.train(ddl=" ".join(ddl))
             ddl = []  # reset ddl for next table
-
-        cursor.close()
-        conn.close()
     except Exception as e:
         st.error(f"Error training DDL: {e}")
         print(e)
@@ -471,6 +488,8 @@ def get_identifiers(parsed):
 
 def check_references(sql):
     try:
+        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+
         # TODO: should I make this role based? or user based?
         parsed = sqlparse.parse(sql)[0]
         tables, columns = get_identifiers(parsed)
