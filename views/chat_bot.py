@@ -339,7 +339,7 @@ if my_question:
 
         df = run_sql_cached(sql=sql)
 
-        if df is not None:
+        if isinstance(df, pd.DataFrame):
             st.session_state["df"] = df
 
         if st.session_state.get("df") is not None:
