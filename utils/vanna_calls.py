@@ -12,6 +12,7 @@ from vanna.chromadb import ChromaDB_VectorStore
 from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
+from pandas import DataFrame
 
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
     def __init__(self, config=None):
@@ -139,7 +140,7 @@ def generate_questions_cached():
 @st.cache_data(show_spinner="Generating SQL query ...")
 def generate_sql_cached(question: str):
     try:
-        start_time = time.time()
+        start_time = time.perf_counter()
         vn = setup_vanna()
 
         if (
@@ -148,13 +149,13 @@ def generate_sql_cached(question: str):
         ):
             print("Allowing LLM to see data")
             response = check_references(vn.generate_sql(question=question, allow_llm_to_see_data=True))
-            end_time = time.time()
+            end_time = time.perf_counter()
             elapsed_time = end_time - start_time
             return response, elapsed_time
         else:
             print("NOT allowing LLM to see data")
             response = check_references(vn.generate_sql(question=question))
-            end_time = time.time()
+            end_time = time.perf_counter()
             elapsed_time = end_time - start_time
             return response, elapsed_time
     except Exception as e:
@@ -195,10 +196,10 @@ def should_generate_chart_cached(question, sql, df):
 @st.cache_data(show_spinner="Generating Plotly code ...")
 def generate_plotly_code_cached(question, sql, df):
     try:
-        start_time = time.time()
+        start_time = time.perf_counter()
         vn = setup_vanna()
         code = vn.generate_plotly_code(question=question, sql=sql, df=df)
-        end_time = time.time()
+        end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         return code, elapsed_time
     except Exception as e:
@@ -209,10 +210,10 @@ def generate_plotly_code_cached(question, sql, df):
 @st.cache_data(show_spinner="Running Plotly code ...")
 def generate_plot_cached(code, df):
     try:
-        start_time = time.time()
+        start_time = time.perf_counter()
         vn = setup_vanna()
         plotly = vn.get_plotly_figure(plotly_code=code, df=df)
-        end_time = time.time()
+        end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         return plotly, elapsed_time
     except Exception as e:
@@ -231,18 +232,19 @@ def generate_followup_cached(question, sql, df):
 
 
 @st.cache_data(show_spinner="Generating summary ...")
-def generate_summary_cached(question, df):
+def generate_summary_cached(question: str, df: DataFrame) -> tuple[str, float]:
     try:
-        start_time = time.time()
+        start_time = time.perf_counter()
         vn = setup_vanna()
         response = vn.generate_summary(question=question, df=df)
-        end_time = time.time()
+        end_time = time.perf_counter()
 
         elapsed_time = end_time - start_time
-        return response, elapsed_time
     except Exception as e:
         st.error(f"Error generating summary: {e}")
-        print(e)
+        return str(e), elapsed_time
+    else:
+        return response, elapsed_time
 
 
 def remove_from_file_training(new_entry: dict):

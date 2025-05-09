@@ -99,6 +99,10 @@
         {
             "question": "how many people in \"niagara\" county are diabetics",
             "query": "SELECT count(*) FROM wny_health WHERE county = 'NIAGARA' AND diabetes = 'Y'"
+        },
+        {
+            "question": "What's the correlation between smoking and hypertension for adults in wny? ?",
+            "query": "with counts as ( select  \tcase when tobacco = 'Y' then 1 else 0 end as tobacco, \tcase when diabetes = 'Y' then 1 else 0 end as diabetes from wny_health where age >= 18 ) select corr(tobacco, diabetes) from counts"
         }
     ],
     "sample_documents": [
