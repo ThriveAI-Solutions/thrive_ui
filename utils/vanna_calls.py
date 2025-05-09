@@ -232,7 +232,7 @@ def generate_followup_cached(question, sql, df):
 
 
 @st.cache_data(show_spinner="Generating summary ...")
-def generate_summary_cached(question: str, df: DataFrame) -> tuple[str, float]:
+def generate_summary_cached(question: str, df: DataFrame) -> tuple[str | None, float]:
     try:
         start_time = time.perf_counter()
         vn = setup_vanna()
@@ -242,7 +242,7 @@ def generate_summary_cached(question: str, df: DataFrame) -> tuple[str, float]:
         elapsed_time = end_time - start_time
     except Exception as e:
         st.error(f"Error generating summary: {e}")
-        return str(e), 0.0
+        return None, 0.0
     else:
         return response, elapsed_time
 
