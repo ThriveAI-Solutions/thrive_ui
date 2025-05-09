@@ -308,48 +308,7 @@ def write_to_file_and_training(new_entry: dict):
     except Exception as e:
         st.error(f"Error writing to training_data.json: {e}")
         print(e)
-        
 
-def get_schema_info():
-    try:
-        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
-
-         # PostgreSQL Connection
-        conn = psycopg2.connect(
-            host=st.secrets["postgres"]["host"],
-            port=st.secrets["postgres"]["port"],
-            database=st.secrets["postgres"]["database"],
-            user=st.secrets["postgres"]["user"],
-            password=st.secrets["postgres"]["password"],
-            cursor_factory=RealDictCursor,
-        )
-
-        # Get database schema
-        cursor = conn.cursor()
-        cursor.execute(f"""
-            SELECT 
-                table_schema,
-                table_name,
-                column_name,
-                data_type,
-                is_nullable
-            FROM 
-                information_schema.columns
-            WHERE 
-                table_schema = 'public'
-            AND 
-                table_name NOT IN ({forbidden_tables_str})
-            ORDER BY 
-                table_schema, table_name, ordinal_position;
-        """)
-        response = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        return response
-    except Exception as e:
-        st.error(f"Error getting schema info: {e}")
-        print(e)
 
 def training_plan():
     vn = setup_vanna()
@@ -381,7 +340,37 @@ def train_ddl():
     try:
         vn = setup_vanna()
 
-        schema_info = get_schema_info()
+        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+
+         # PostgreSQL Connection
+        conn = psycopg2.connect(
+            host=st.secrets["postgres"]["host"],
+            port=st.secrets["postgres"]["port"],
+            database=st.secrets["postgres"]["database"],
+            user=st.secrets["postgres"]["user"],
+            password=st.secrets["postgres"]["password"],
+            cursor_factory=RealDictCursor,
+        )
+
+        # Get database schema
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT 
+                table_schema,
+                table_name,
+                column_name,
+                data_type,
+                is_nullable
+            FROM 
+                information_schema.columns
+            WHERE 
+                table_schema = 'public'
+            AND 
+                table_name NOT IN ({forbidden_tables_str})
+            ORDER BY 
+                table_schema, table_name, ordinal_position;
+        """)
+        schema_info = cursor.fetchall()
 
         # Format schema for training
         ddl = []
@@ -406,6 +395,9 @@ def train_ddl():
             # Train vanna with schema and queries
             vn.train(ddl=" ".join(ddl))
             ddl = []  # reset ddl for next table
+            
+        cursor.close()
+        conn.close()
     except Exception as e:
         st.error(f"Error training DDL: {e}")
         print(e)
