@@ -339,7 +339,10 @@ if my_question:
 
         df = run_sql_cached(sql=sql)
 
-        if isinstance(df, pd.DataFrame):
+        # if sql doesn't return a dataframe, stop 
+        if not isinstance(df, pd.DataFrame):
+            st.stop()
+        else:
             st.session_state["df"] = df
 
         if isinstance(st.session_state.get("df"), pd.DataFrame):
