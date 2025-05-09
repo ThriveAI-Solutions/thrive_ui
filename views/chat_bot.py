@@ -345,29 +345,28 @@ if my_question:
         else:
             st.session_state["df"] = df
 
-        if isinstance(st.session_state.get("df"), pd.DataFrame):
-            if st.session_state.get("show_table", True):
-                df = st.session_state.get("df")
-                addMessage(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question))
+        if st.session_state.get("show_table", True):
+            df = st.session_state.get("df")
+            addMessage(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question))
 
-            if st.session_state.get("show_chart", True):
-                get_chart(my_question, sql, df)
+        if st.session_state.get("show_chart", True):
+            get_chart(my_question, sql, df)
 
-            if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
-                summary, elapsed_time = generate_summary_cached(question=my_question, df=df)
-                if summary is not None:
-                    if st.session_state.get("show_summary", True):
-                        addMessage(Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time))
-                                
-                    if st.session_state.get("speak_summary", True):
-                        speak(summary)
-                else:
-                    addMessage(Message(RoleType.ASSISTANT, "Could not generate a summary", MessageType.SUMMARY, sql, my_question, df, elapsed_time))
-                    if st.session_state.get("speak_summary", True):
-                        speak("Could not generate a summary")
+        if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
+            summary, elapsed_time = generate_summary_cached(question=my_question, df=df)
+            if summary is not None:
+                if st.session_state.get("show_summary", True):
+                    addMessage(Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time))
+                            
+                if st.session_state.get("speak_summary", True):
+                    speak(summary)
+            else:
+                addMessage(Message(RoleType.ASSISTANT, "Could not generate a summary", MessageType.SUMMARY, sql, my_question, df, elapsed_time))
+                if st.session_state.get("speak_summary", True):
+                    speak("Could not generate a summary")
 
-            if st.session_state.get("show_followup", True):
-                get_followup_questions(my_question, sql, df)
+        if st.session_state.get("show_followup", True):
+            get_followup_questions(my_question, sql, df)
     else:
         addMessage(Message(RoleType.ASSISTANT, "I wasn't able to generate SQL for that question", MessageType.ERROR, sql, my_question))
         if st.session_state.get("llm_fallback", True):
