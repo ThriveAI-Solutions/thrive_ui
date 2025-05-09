@@ -242,7 +242,7 @@ def generate_summary_cached(question: str, df: DataFrame) -> tuple[str, float]:
         elapsed_time = end_time - start_time
     except Exception as e:
         st.error(f"Error generating summary: {e}")
-        return str(e), elapsed_time
+        return str(e), 0.0
     else:
         return response, elapsed_time
 
