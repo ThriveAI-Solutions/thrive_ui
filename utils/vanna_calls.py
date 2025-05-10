@@ -102,7 +102,7 @@ def read_forbidden_from_json():
         forbidden_columns = forbidden_data.get("columns", [])
     except Exception as e:
         logger.exception("Error reading forbidden_references.json: %s", e)
-        return [], []
+        return [], [], []
     else:
         return forbidden_tables, forbidden_columns, ", ".join(f"'{table}'" for table in forbidden_tables)
 
