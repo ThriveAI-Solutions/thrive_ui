@@ -286,7 +286,7 @@ class VannaService:
             elapsed_time = end_time - start_time
         except Exception as e:
             st.error(f"Error generating summary: {e}")
-            logger.exception("Error generating summary: %", e)
+            logger.exception("Error generating summary: %s", e)
             return None, 0.0
         else:
             return response, elapsed_time
@@ -428,7 +428,7 @@ def remove_from_file_training(new_entry: dict):
             logging.warning("Entry not found, nothing removed from training_data.json")
     except Exception as e:
         st.error(f"Error removing entry from training_data.json: {e}")
-        logging.exception("Error removing entry from training_data.json: %", e)
+        logging.exception("Error removing entry from training_data.json: %s", e)
 
 
 def write_to_file_and_training(new_entry: dict):
