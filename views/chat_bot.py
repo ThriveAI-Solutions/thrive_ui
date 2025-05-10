@@ -234,7 +234,7 @@ def call_llm(my_question: str):
             message = Message(RoleType.ASSISTANT, "Please configure the fallback LLM settings", MessageType.TEXT)
         else:
             response = st.write(f"{st.secrets['ai_keys']['openai_model']}:", stream)
-            logging.debug("response", response)  # TODO: why isnt this storing the response
+            logging.debug("response", response)  # TODO: why isnt this storing the response - st.write() returns None
             message = Message(
                 RoleType.ASSISTANT, f"{st.secrets['ai_keys']['openai_model']}: {response}", MessageType.TEXT
             )
@@ -327,7 +327,7 @@ my_question = st.session_state.get("my_question", None)
 if my_question:
     # check guardrails here
     guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
-    logger.warning(
+    logger.debug(
         "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
         my_question,
         guardrail_score,
@@ -337,10 +337,7 @@ if my_question:
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         call_llm(my_question)
         st.stop()
-    if guardrail_score == 3:
-        add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
-        st.stop()
-    if guardrail_score == 4:
+    if guardrail_score >= 3:
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         st.stop()
 
