@@ -338,6 +338,7 @@ if my_question:
         call_llm(my_question)
         st.stop()
     if guardrail_score >= 3:
+        logger.warning("Ethical Guardrails triggered: Question=%s Score=%s Response=%s", my_question, guardrail_score, guardrail_sentence)
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         st.stop()
 
