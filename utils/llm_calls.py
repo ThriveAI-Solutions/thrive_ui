@@ -2,7 +2,8 @@ import streamlit as st
 import openai
 from orm.models import Message
 
-def chat_gpt(message:Message):
+
+def chat_gpt(message: Message):
     try:
         if "openai_api" in st.secrets.ai_keys and "openai_model" in st.secrets.ai_keys:
             openai.api_key = st.secrets["ai_keys"]["openai_api"]

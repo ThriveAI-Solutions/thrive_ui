@@ -4,6 +4,7 @@ import hashlib
 from sqlalchemy import func
 from orm.models import User, Message, SessionLocal
 
+
 def verify_user_credentials(username: str, password: str) -> bool:
     try:
         # Create a new database session
@@ -13,8 +14,12 @@ def verify_user_credentials(username: str, password: str) -> bool:
         hashed_password = hashlib.sha256(password.encode()).hexdigest()
 
         # Query to check if the username and hashed password exist in the users table
-        user = session.query(User).filter(func.lower(User.username) == username.lower(), User.password == hashed_password).first()
-        
+        user = (
+            session.query(User)
+            .filter(func.lower(User.username) == username.lower(), User.password == hashed_password)
+            .first()
+        )
+
         st.session_state.cookies["user_id"] = json.dumps(user.id)
 
         # Close the database session
@@ -26,7 +31,8 @@ def verify_user_credentials(username: str, password: str) -> bool:
         st.error(f"Error verifying user credentials: {e}")
         print(e)
         return False
-    
+
+
 def change_password(user_id: int, current_password: str, new_password: str) -> bool:
     try:
         # Create a new database session
@@ -36,9 +42,9 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
         user = session.query(User).filter(User.id == user_id).first()
 
         current_password = hashlib.sha256(current_password.encode()).hexdigest()
-        
+
         # Verify the current password
-        if user and current_password ==  user.password:
+        if user and current_password == user.password:
             # Retrieve the existing user from the database
             user = session.query(User).filter(User.id == user_id).first()
 
@@ -59,11 +65,12 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
         print(e)
         return False
 
+
 def set_user_preferences_in_session_state():
     try:
         user_id = st.session_state.cookies.get("user_id")
         user = get_user(user_id)
-        
+
         if "loaded" not in st.session_state:
             st.session_state.show_sql = user.show_sql
             st.session_state.show_table = user.show_table
@@ -78,18 +85,19 @@ def set_user_preferences_in_session_state():
             st.session_state.show_elapsed_time = user.show_elapsed_time
             st.session_state.llm_fallback = user.llm_fallback
             st.session_state.min_message_id = user.min_message_id
-            st.session_state.loaded = True # dont call after initial load
-        
+            st.session_state.loaded = True  # dont call after initial load
+
         return user
     except Exception as e:
         st.error(f"Error setting user preferences in session state: {e}")
         print(e)
 
+
 def save_user_settings():
     try:
         user_id = st.session_state.cookies.get("user_id")
         user_id = json.loads(user_id)
-        
+
         # Create a new database session
         session = SessionLocal()
 
@@ -110,7 +118,7 @@ def save_user_settings():
             setattr(user, "show_elapsed_time", st.session_state.show_elapsed_time)
             setattr(user, "llm_fallback", st.session_state.llm_fallback)
             setattr(user, "min_message_id", st.session_state.min_message_id)
-            
+
             # Commit the changes to the database
             session.commit()
 
@@ -123,6 +131,7 @@ def save_user_settings():
     except Exception as e:
         st.error(f"Error saving user settings: {e}")
         print(e)
+
 
 def get_user(user_id):
     try:
@@ -140,6 +149,7 @@ def get_user(user_id):
         st.error(f"Error getting user: {e}")
         print(e)
 
+
 def get_recent_messages():
     try:
         max_index = st.session_state.min_message_id
@@ -150,10 +160,13 @@ def get_recent_messages():
         session = SessionLocal()
 
         # Query to get the last 20 messages for the user, excluding those with an index greater than max_index
-        messages = session.query(Message).filter(
-            Message.user_id == user_id,
-            Message.id > max_index
-        ).order_by(Message.created_at.desc()).limit(20).all()
+        messages = (
+            session.query(Message)
+            .filter(Message.user_id == user_id, Message.id > max_index)
+            .order_by(Message.created_at.desc())
+            .limit(20)
+            .all()
+        )
 
         # Close the session
         session.close()
@@ -164,6 +177,7 @@ def get_recent_messages():
     except Exception as e:
         st.error(f"Error getting recent messages: {e}")
         print(e)
+
 
 def delete_all_messages():
     try:
