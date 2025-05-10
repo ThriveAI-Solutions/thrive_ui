@@ -83,6 +83,19 @@ def get_chart(my_question, sql, df):
                         elapsed_sum,
                     )
                 )
+    else:
+        # If a chart should not be generated, inform the user.
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                "I am unable to generate a chart for this data. The data might be unsuitable for visualization (e.g., empty or non-numeric).",
+                MessageType.ERROR,
+                sql,
+                my_question,
+                None,
+                elapsed_sum,  # elapsed_sum would be 0 here
+            )
+        )
 
 
 def set_question(question: str, render=True):
