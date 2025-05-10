@@ -1,7 +1,11 @@
-import streamlit as st
+import logging
+
+import pyperclip
 import pyttsx3
 import speech_recognition as sr
-import pyperclip
+import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 
 def copy_to_clipboard(text: str):
@@ -11,7 +15,7 @@ def copy_to_clipboard(text: str):
         st.toast("Sql copied to clipboard")
     except Exception as e:
         st.error(f"Error copying to clipboard: {e}")
-        print(e)
+        logger.error(f"Error copying to clipboard: {e}")
 
 
 def listen() -> str:

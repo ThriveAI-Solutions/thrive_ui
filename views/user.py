@@ -1,3 +1,5 @@
+import logging
+
 import streamlit as st
 
 from orm.functions import change_password, delete_all_messages
@@ -8,6 +10,8 @@ user_id = st.session_state.cookies.get("user_id")
 vn = VannaService.get_instance()
 df = vn.get_training_data()
 
+logger = logging.getLogger(__name__)
+
 
 def delete_all_training():
     try:
@@ -17,7 +21,7 @@ def delete_all_training():
         st.toast("Training Data Deleted Successfully!")
     except Exception as e:
         st.error(f"An error occurred: {e}")
-        print(e)
+        logger.error(f"An error occurred: {e}")
 
 
 @st.dialog("Cast your vote")
@@ -46,7 +50,7 @@ def pop_train(type):
                         st.rerun()
     except Exception as e:
         st.error(f"An error occurred: {e}")
-        print(e)
+        logger.error(f"An error occurred: {e}")
 
 
 st.title("User Settings")

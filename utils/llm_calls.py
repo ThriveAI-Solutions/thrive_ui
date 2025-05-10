@@ -1,6 +1,11 @@
-import streamlit as st
+import logging
+
 import openai
+import streamlit as st
+
 from orm.models import Message
+
+logger = logging.getLogger(__name__)
 
 
 def chat_gpt(message: Message):
@@ -25,4 +30,4 @@ def chat_gpt(message: Message):
             return "No API key found"
     except Exception as e:
         st.error(f"An error occurred: {e}")
-        print(e)
+        logger.error(f"An error occurred: {e}")

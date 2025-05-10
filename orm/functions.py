@@ -1,8 +1,13 @@
-import streamlit as st
-import json
 import hashlib
+import json
+import logging
+
+import streamlit as st
 from sqlalchemy import func
-from orm.models import User, Message, SessionLocal
+
+from orm.models import Message, SessionLocal, User
+
+logger = logging.getLogger(__name__)
 
 
 def verify_user_credentials(username: str, password: str) -> bool:
@@ -29,7 +34,7 @@ def verify_user_credentials(username: str, password: str) -> bool:
         return user is not None
     except Exception as e:
         st.error(f"Error verifying user credentials: {e}")
-        print(e)
+        logger.error(f"Error verifying user credentials: {e}")
         return False
 
 
@@ -62,7 +67,7 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
             return False
     except Exception as e:
         st.error(f"Error changing password: {e}")
-        print(e)
+        logger.error(f"Error changing password: {e}")
         return False
 
 
@@ -90,7 +95,7 @@ def set_user_preferences_in_session_state():
         return user
     except Exception as e:
         st.error(f"Error setting user preferences in session state: {e}")
-        print(e)
+        logger.error(f"Error setting user preferences in session state: {e}")
 
 
 def save_user_settings():
@@ -130,7 +135,7 @@ def save_user_settings():
         session.close()
     except Exception as e:
         st.error(f"Error saving user settings: {e}")
-        print(e)
+        logger.error(f"Error saving user settings: {e}")
 
 
 def get_user(user_id):
@@ -147,7 +152,7 @@ def get_user(user_id):
         return user
     except Exception as e:
         st.error(f"Error getting user: {e}")
-        print(e)
+        logger.error(f"Error getting user: {e}")
 
 
 def get_recent_messages():
@@ -176,7 +181,7 @@ def get_recent_messages():
         return messages
     except Exception as e:
         st.error(f"Error getting recent messages: {e}")
-        print(e)
+        logger.error(f"Error getting recent messages: {e}")
 
 
 def delete_all_messages():
@@ -197,4 +202,4 @@ def delete_all_messages():
         st.session_state.messages = []
     except Exception as e:
         st.error(f"Error deleting all messages: {e}")
-        print(e)
+        logger.error(f"Error deleting all messages: {e}")

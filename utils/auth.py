@@ -1,6 +1,11 @@
-import streamlit as st
+import logging
 from datetime import datetime, timedelta
-from orm.functions import verify_user_credentials, set_user_preferences_in_session_state
+
+import streamlit as st
+
+from orm.functions import set_user_preferences_in_session_state, verify_user_credentials
+
+logger = logging.getLogger(__name__)
 
 
 def check_authenticate():
@@ -33,7 +38,7 @@ def check_authenticate():
             show_login()
     except Exception as e:
         st.error(f"Error checking authentication: {e}")
-        print(e)
+        logger.error(f"Error checking authentication: {e}")
 
 
 def show_login():
@@ -69,4 +74,4 @@ def show_login():
         st.stop()
     except Exception as e:
         st.error(f"Error showing login: {e}")
-        print(e)
+        logger.error(f"Error showing login: {e}")
