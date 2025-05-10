@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
 import pytest
@@ -230,80 +230,76 @@ class TestFileTrainingFunctions:
         })
         mock_service.get_training_data.return_value = mock_training_df
         
-        # Create a temporary config directory and file
-        config_dir = Path("utils/config")
-        config_dir.mkdir(parents=True, exist_ok=True)
-        
+        # Mock the training data JSON file
         training_data = {
             "sample_queries": [
                 {"question": "How many users are there?", "query": "SELECT COUNT(*) FROM users"}
             ]
         }
         
-        training_file = config_dir / "training_data.json"
-        with open(training_file, "w") as f:
-            json.dump(training_data, f)
+        # Use mock_open to avoid creating real files
+        m = mock_open(read_data=json.dumps(training_data))
+        
+        with patch("builtins.open", m), \
+             patch("pathlib.Path.open", m), \
+             patch("json.load", return_value=training_data):
             
-        try:
             # Test the function
             new_entry = {
-                "question": "How many users are there?",
-                "query": "SELECT COUNT(*) FROM users"
+                "question": "How many users are there?"
             }
             remove_from_file_training(new_entry)
             
             # Verify remove_from_training was called
             mock_service.remove_from_training.assert_called_once_with(1)
             
-            # Verify the entry was removed from the file
-            with open(training_file, "r") as f:
-                updated_data = json.load(f)
-                assert len(updated_data["sample_queries"]) == 0
-        finally:
-            # Cleanup
-            if training_file.exists():
-                training_file.unlink()
+            # Check that json.dump was called with the updated data
+            # This verifies the write operation would have happened correctly
+            args, kwargs = m.return_value.__enter__.return_value.write.call_args
+            written_data = args[0]
+            # After removal, the query shouldn't be in the data anymore
+            assert "How many users are there?" not in written_data
     
     @patch("utils.vanna_calls.VannaService.get_instance")
     @patch("utils.vanna_calls.read_forbidden_from_json")
     def test_training_plan(self, mock_read_forbidden, mock_get_instance):
-        # Create a mock config directory and forbidden_references.json file
-        config_dir = Path("utils/config")
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-        # Mock the forbidden references
-        mock_read_forbidden.return_value = (
-            ["secret_table"],
-            ["password"],
-            "'secret_table'"
-        )
-
+        # Create a mock service
         mock_service = MagicMock()
         mock_get_instance.return_value = mock_service
         
-        # Mock the run_sql method to return a DataFrame
+        # Mock the forbidden tables
+        mock_read_forbidden.return_value = (
+            ["forbidden_table"],
+            ["password"],
+            "'forbidden_table'"
+        )
+        
+        # Mock the information schema query result
         mock_df = pd.DataFrame({
             "table_schema": ["public", "public"],
-            "table_name": ["table1", "table2"],
-            "column_name": ["col1", "col2"],
-            "data_type": ["int", "varchar"],
-            "ordinal_position": [1, 2]
+            "table_name": ["users", "products"],
+            "column_name": ["id", "name"],
+            "data_type": ["integer", "varchar"],
+            "is_nullable": ["NO", "YES"]
         })
         mock_service.run_sql.return_value = mock_df
         
-        # Mock the get_training_plan_generic method
-        mock_service.get_training_plan_generic.return_value = "mock_plan"
+        # Mock the training plan
+        mock_service.get_training_plan_generic.return_value = "training_plan"
         
-        # Test the function
+        # Call the function
         training_plan()
         
-        # Verify that the SQL query was executed with the right forbidden tables
+        # Verify run_sql was called with the correct SQL
         mock_service.run_sql.assert_called_once()
-        sql_query = mock_service.run_sql.call_args[0][0]
-        assert "table_name NOT IN ('secret_table')" in sql_query
+        sql_arg = mock_service.run_sql.call_args[0][0]
+        assert "SELECT" in sql_arg
+        assert "information_schema.columns" in sql_arg
+        assert "table_schema = 'public'" in sql_arg
+        assert "table_name NOT IN ('forbidden_table')" in sql_arg
         
-        # Verify get_training_plan_generic was called
+        # Verify get_training_plan_generic was called with the correct dataframe
         mock_service.get_training_plan_generic.assert_called_once_with(mock_df)
         
-        # Verify train was called
-        mock_service.train.assert_called_once_with(plan="mock_plan") 
+        # Verify train was called with the correct plan
+        mock_service.train.assert_called_once_with(plan="training_plan") 

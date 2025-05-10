@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
 import pytest
@@ -179,30 +179,24 @@ class TestVannaService:
 class TestUtilityFunctions:
     
     def test_read_forbidden_from_json(self):
-        # Create a temporary config directory and file
-        config_dir = Path("utils/config")
-        config_dir.mkdir(parents=True, exist_ok=True)
-        
+        # Instead of creating a real file, mock the open function
         forbidden_data = {
             "tables": ["secret_table", "users_password"],
             "columns": ["password", "ssn"]
         }
         
-        forbidden_file = config_dir / "forbidden_references.json"
-        with open(forbidden_file, "w") as f:
-            json.dump(forbidden_data, f)
+        m = mock_open(read_data=json.dumps(forbidden_data))
+        
+        with patch("builtins.open", m), \
+             patch("pathlib.Path.open", m), \
+             patch("pathlib.Path.exists", return_value=True):
             
-        try:
             # Test the function
             tables, columns, tables_str = read_forbidden_from_json()
             
             assert tables == ["secret_table", "users_password"]
             assert columns == ["password", "ssn"]
             assert tables_str == "'secret_table', 'users_password'"
-        finally:
-            # Cleanup
-            if forbidden_file.exists():
-                forbidden_file.unlink()
     
     # We'll skip this test because it's too complex to mock correctly
     @pytest.mark.skip(reason="Too complex to mock correctly")
@@ -298,79 +292,100 @@ class TestTrainingFunctions:
     
     @patch("utils.vanna_calls.VannaService.get_instance")
     def test_train_file(self, mock_get_instance):
+        # Setup mock service
         mock_service = MagicMock()
         mock_get_instance.return_value = mock_service
         
-        # Create a temporary config directory and file
-        config_dir = Path("utils/config")
-        config_dir.mkdir(parents=True, exist_ok=True)
-        
-        training_data = {
+        # Mock the training data JSON file
+        sample_data = {
             "sample_queries": [
-                {"question": "How many users are there?", "query": "SELECT COUNT(*) FROM users"}
+                {"question": "How many users are there?", "query": "SELECT COUNT(*) FROM users"},
+                {"question": "List all products", "query": "SELECT * FROM products"}
             ],
             "sample_documents": [
-                {"documentation": "This is a sample documentation"}
+                {"documentation": "The users table contains user information"},
+                {"documentation": "The products table contains product information"}
             ]
         }
         
-        training_file = config_dir / "training_data.json"
-        with open(training_file, "w") as f:
-            json.dump(training_data, f)
+        # Use mock_open to avoid creating real files
+        m = mock_open(read_data=json.dumps(sample_data))
+        
+        with patch("builtins.open", m), \
+             patch("pathlib.Path.open", m), \
+             patch("json.load", return_value=sample_data):
             
-        try:
-            # Test the function
+            # Call the function
             train_file()
             
-            # Verify train was called with correct arguments
-            mock_service.train.assert_any_call(
-                question="How many users are there?", 
-                sql="SELECT COUNT(*) FROM users"
-            )
-            mock_service.train.assert_any_call(
-                documentation="This is a sample documentation"
-            )
-        finally:
-            # Cleanup
-            if training_file.exists():
-                training_file.unlink()
+            # Verify train was called for each query and document
+            assert mock_service.train.call_count == 4
+            
+            # Check that each call to train had the correct arguments
+            calls = mock_service.train.call_args_list
+            
+            # First two calls should be for questions/queries
+            assert calls[0][1]["question"] == "How many users are there?"
+            assert calls[0][1]["sql"] == "SELECT COUNT(*) FROM users"
+            
+            assert calls[1][1]["question"] == "List all products"
+            assert calls[1][1]["sql"] == "SELECT * FROM products"
+            
+            # Last two calls should be for documentation
+            assert calls[2][1]["documentation"] == "The users table contains user information"
+            assert calls[3][1]["documentation"] == "The products table contains product information"
     
     @patch("utils.vanna_calls.VannaService.get_instance")
     def test_write_to_file_and_training(self, mock_get_instance):
+        # Setup mock service
         mock_service = MagicMock()
         mock_get_instance.return_value = mock_service
         
-        # Create a temporary config directory and file
-        config_dir = Path("utils/config")
-        config_dir.mkdir(parents=True, exist_ok=True)
-        
-        training_data = {
-            "sample_queries": []
+        # Create a new entry to add
+        new_entry = {
+            "question": "How many orders were placed today?",
+            "query": "SELECT COUNT(*) FROM orders WHERE date = CURRENT_DATE"
         }
         
-        training_file = config_dir / "training_data.json"
-        with open(training_file, "w") as f:
-            json.dump(training_data, f)
+        # Mock the existing training data JSON file
+        existing_data = {
+            "sample_queries": [
+                {"question": "How many users are there?", "query": "SELECT COUNT(*) FROM users"}
+            ],
+            "sample_documents": []
+        }
+        
+        # Expected data after adding new entry
+        expected_data = {
+            "sample_queries": [
+                {"question": "How many users are there?", "query": "SELECT COUNT(*) FROM users"},
+                new_entry
+            ],
+            "sample_documents": []
+        }
+        
+        # Mock json.dump to verify it's called with the right data
+        with patch("utils.vanna_calls.VannaService.get_instance", return_value=mock_service), \
+             patch("builtins.open", mock_open(read_data=json.dumps(existing_data))), \
+             patch("json.load", return_value=existing_data), \
+             patch("json.dump") as mock_json_dump:
             
-        try:
-            # Test the function
-            new_entry = {
-                "question": "How many active users are there?",
-                "query": "SELECT COUNT(*) FROM users WHERE status = 'active'"
-            }
+            # Call the function
             write_to_file_and_training(new_entry)
             
-            # Verify train was called
+            # Verify train was called with the correct arguments
             mock_service.train.assert_called_once_with(
-                question="How many active users are there?",
-                sql="SELECT COUNT(*) FROM users WHERE status = 'active'"
+                question=new_entry["question"], 
+                sql=new_entry["query"]
             )
             
-            # Verify the entry was added to the file
-            with open(training_file, "r") as f:
-                updated_data = json.load(f)
-                assert new_entry in updated_data["sample_queries"]
-        finally:
-            # Cleanup
-            if training_file.exists():
-                training_file.unlink() 
+            # Verify json.dump was called with the updated data
+            # The first argument to json.dump should be the data, second is the file object
+            assert mock_json_dump.call_count == 1
+            args, kwargs = mock_json_dump.call_args
+            updated_data = args[0]
+            
+            # Check that the new entry was added to sample_queries
+            assert len(updated_data["sample_queries"]) == 2
+            assert new_entry in updated_data["sample_queries"]
+            assert updated_data["sample_queries"][0]["question"] == "How many users are there?" 
