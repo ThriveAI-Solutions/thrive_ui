@@ -329,7 +329,13 @@ class TestUtilityFunctionExceptions:
     @patch("streamlit.error")
     def test_write_to_file_and_training_exception(self, mock_st_error):
         """Test that exceptions in write_to_file_and_training are handled properly."""
-        with patch("utils.vanna_calls.VannaService.get_instance") as mock_get_instance:
+        # Mock all file operations to prevent them from affecting real files
+        m = mock_open(read_data='{"sample_queries": [], "sample_documents": []}')
+        
+        with patch("utils.vanna_calls.VannaService.get_instance") as mock_get_instance, \
+             patch("builtins.open", m), \
+             patch("pathlib.Path.open", m), \
+             patch("json.load", return_value={"sample_queries": [], "sample_documents": []}):
             
             # Setup mock to raise exception
             mock_service = MagicMock()
@@ -345,7 +351,13 @@ class TestUtilityFunctionExceptions:
     @patch("streamlit.error")
     def test_remove_from_file_training_exception(self, mock_st_error):
         """Test that exceptions in remove_from_file_training are handled properly."""
-        with patch("utils.vanna_calls.VannaService.get_instance") as mock_get_instance:
+        # Mock all file operations to prevent them from affecting real files
+        m = mock_open(read_data='{"sample_queries": [{"question": "q", "query": "sql"}], "sample_documents": []}')
+        
+        with patch("utils.vanna_calls.VannaService.get_instance") as mock_get_instance, \
+             patch("builtins.open", m), \
+             patch("pathlib.Path.open", m), \
+             patch("json.load", return_value={"sample_queries": [{"question": "q", "query": "sql"}], "sample_documents": []}):
             
             # Setup mock to raise exception
             mock_service = MagicMock()
@@ -478,8 +490,12 @@ class TestTrainingFunctionExceptions:
     @patch("streamlit.error")
     def test_train_file_exception(self, mock_st_error):
         """Test that exceptions in train_file are handled properly."""
+        m = mock_open()
+        m.side_effect = FileNotFoundError("[Errno 2] No such file or directory: 'mock_file'")
+        
         with patch("utils.vanna_calls.VannaService.get_instance"), \
-             patch("pathlib.Path.__truediv__", return_value=Path("/nonexistent/training_data.json")):
+             patch("builtins.open", m), \
+             patch("pathlib.Path.open", m):
             
             # Call the function which should raise when trying to open the file
             train_file()
