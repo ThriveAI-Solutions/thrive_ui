@@ -22,7 +22,11 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.3.5", "watchdog>=6.0.0"]
+dev = [
+    "pytest>=8.3.5",
+    "ruff>=0.11.9",
+    "watchdog>=6.0.0",
+]
 
 [tool.ruff]
 # Allow lines to be as long as 120.

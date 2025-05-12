@@ -1,8 +1,14 @@
-import streamlit as st
+import logging
+
 import openai
+import streamlit as st
+
 from orm.models import Message
 
-def chat_gpt(message:Message):
+logger = logging.getLogger(__name__)
+
+
+def chat_gpt(message: Message):
     try:
         if "openai_api" in st.secrets.ai_keys and "openai_model" in st.secrets.ai_keys:
             openai.api_key = st.secrets["ai_keys"]["openai_api"]
@@ -24,4 +30,4 @@ def chat_gpt(message:Message):
             return "No API key found"
     except Exception as e:
         st.error(f"An error occurred: {e}")
-        print(e)
+        logger.error(f"An error occurred: {e}")

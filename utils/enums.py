@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class MessageType(Enum):
     SQL = "sql"
     PYTHON = "python"
@@ -9,6 +10,7 @@ class MessageType(Enum):
     FOLLOWUP = "followup"
     ERROR = "error"
     TEXT = "text"
+
 
 class RoleType(Enum):
     ASSISTANT = "assistant"

@@ -1,26 +1,33 @@
+import logging
+
 import streamlit as st
+
 from orm.functions import change_password, delete_all_messages
-from utils.vanna_calls import (train_file, train_ddl, setup_vanna, training_plan)
+from utils.vanna_calls import VannaService, train_ddl, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
-vn = setup_vanna()
-df =vn.get_training_data()
+vn = VannaService.get_instance()
+df = vn.get_training_data()
+
+logger = logging.getLogger(__name__)
+
 
 def delete_all_training():
     try:
         training_data = vn.get_training_data()
         for index, row in training_data.iterrows():
-            vn.remove_training_data(row["id"])
+            vn.remove_from_training(row["id"])
         st.toast("Training Data Deleted Successfully!")
     except Exception as e:
         st.error(f"An error occurred: {e}")
-        print(e)
+        logger.error(f"An error occurred: {e}")
+
 
 @st.dialog("Cast your vote")
 def pop_train(type):
     try:
-        if(type == "sql"):
+        if type == "sql":
             with st.form("add_training_data"):
                 question = st.text_input("Question")
                 content1 = st.text_input("Sql")
@@ -43,14 +50,15 @@ def pop_train(type):
                         st.rerun()
     except Exception as e:
         st.error(f"An error occurred: {e}")
-        print(e)
+        logger.error(f"An error occurred: {e}")
+
 
 st.title("User Settings")
 
 tab1, tab2 = st.tabs(["Training Data", "Change Password"])
 
 with tab1:
-    cols = st.columns((.2, .2, .2, .2, .4, .2))
+    cols = st.columns((0.2, 0.2, 0.2, 0.2, 0.4, 0.2))
     with cols[0]:
         st.button("Train DDL", on_click=lambda: train_ddl())
     with cols[1]:
@@ -58,31 +66,31 @@ with tab1:
     with cols[2]:
         st.button("Train FIle", on_click=lambda: train_file())
     with cols[3]:
-        if(st.button("Add Sql")):
+        if st.button("Add Sql"):
             pop_train("sql")
     with cols[4]:
-        if(st.button("Add Documentation")):
+        if st.button("Add Documentation"):
             pop_train("documentation")
     with cols[5]:
-        st.button("Remove All", type='primary', on_click=lambda: delete_all_training())
-    
+        st.button("Remove All", type="primary", on_click=lambda: delete_all_training())
+
     # st.dataframe(df)
 
     colms = st.columns((1, 2, 3, 1))
-    fields = ["Type", "Question", 'Sql', "Action"]
+    fields = ["Type", "Question", "Sql", "Action"]
     for col, field_name in zip(colms, fields):
         # header
         col.write(field_name)
 
     for index, row in df.iterrows():
         col1, col2, col3, col4 = st.columns((1, 2, 3, 1))
-        col1.write(row['training_data_type'])
-        col2.write(row['question'])
-        col3.write(row['content'])
-        button_phold = col4.empty() 
-        do_action = button_phold.button(label="Delete", type='primary', key=f"delete{row['id']}")
+        col1.write(row["training_data_type"])
+        col2.write(row["question"])
+        col3.write(row["content"])
+        button_phold = col4.empty()
+        do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
         if do_action:
-            vn.remove_training_data(row['id'])
+            vn.remove_from_training(row["id"])
             st.toast("Training Data Deleted Successfully!")
             st.rerun()
 with tab2:
@@ -101,4 +109,6 @@ with tab2:
                 else:
                     st.error("Current password is incorrect.")
 
-st.sidebar.button("Delete all message data", on_click=lambda: delete_all_messages(), use_container_width=True, type="primary")
+st.sidebar.button(
+    "Delete all message data", on_click=lambda: delete_all_messages(), use_container_width=True, type="primary"
+)
