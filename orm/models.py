@@ -1,11 +1,13 @@
-import streamlit as st
 import json
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, TIMESTAMP, Numeric, func
+from decimal import Decimal
+
+import pandas as pd
+import streamlit as st
+from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, Numeric, String, create_engine, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
-from utils.enums import (MessageType, RoleType)
-import pandas as pd
-from decimal import Decimal
+
+from utils.enums import MessageType, RoleType
 
 # Load database settings from st.secrets
 db_settings = st.secrets["postgres"]
@@ -22,6 +24,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Create a Base class for the models to inherit from
 Base = declarative_base()
 
+
 def content_to_json(type, content):
     if type == MessageType.DATAFRAME.value and not isinstance(content, str):
         panda_frame = pd.DataFrame(content)
@@ -31,16 +34,18 @@ def content_to_json(type, content):
         return json_content
     return content
 
+
 class UserRole(Base):
-    __tablename__ = 'thrive_user_role'
+    __tablename__ = "thrive_user_role"
     id = Column(Integer, primary_key=True)
     role_name = Column(String(50), nullable=False, unique=True)
     description = Column(String)
 
+
 class User(Base):
-    __tablename__ = 'thrive_user'
+    __tablename__ = "thrive_user"
     id = Column(Integer, primary_key=True)
-    user_role_id = Column(Integer, ForeignKey('thrive_user_role.id'))
+    user_role_id = Column(Integer, ForeignKey("thrive_user_role.id"))
     username = Column(String(50), nullable=False, unique=True)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
@@ -82,13 +87,14 @@ class User(Base):
             "show_followup": self.show_followup,
             "show_elapsed_time": self.show_elapsed_time,
             "llm_fallback": self.llm_fallback,
-            "min_message_id": self.min_message_id
+            "min_message_id": self.min_message_id,
         }
 
+
 class Message(Base):
-    __tablename__ = 'thrive_message'
+    __tablename__ = "thrive_message"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('thrive_user.id'))
+    user_id = Column(Integer, ForeignKey("thrive_user.id"))
     role = Column(String(50), nullable=False)
     content = Column(String, nullable=False)
     type = Column(String(50), nullable=False)
@@ -99,12 +105,21 @@ class Message(Base):
     elapsed_time = Column(Numeric(10, 6))
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
-    
-    def __init__(self, role:RoleType, content:str, type:MessageType, query:str=None, question:str=None, dataframe: pd.DataFrame = None, elapsed_time:Decimal=None):
+
+    def __init__(
+        self,
+        role: RoleType,
+        content: str,
+        type: MessageType,
+        query: str = None,
+        question: str = None,
+        dataframe: pd.DataFrame = None,
+        elapsed_time: Decimal = None,
+    ):
         user_id = st.session_state.cookies.get("user_id")
         user_id = json.loads(user_id)
 
-        self.user_id = user_id 
+        self.user_id = user_id
         self.role = role.value
         self.content = content_to_json(type.value, content)
         self.type = type.value
@@ -112,7 +127,7 @@ class Message(Base):
         self.query = query
         self.question = question
         self.elapsed_time = elapsed_time
-        
+
         # Serialize the DataFrame to JSON if provided
         if dataframe is not None:
             self.dataframe = dataframe.to_json(orient="records")  # Convert DataFrame to JSON
@@ -120,19 +135,15 @@ class Message(Base):
             self.dataframe = None
 
     def to_dict(self):
-        return {
-            "role": self.role,
-            "content": self.content,
-            "question": self.question
-        }
-    
+        return {"role": self.role, "content": self.content, "question": self.question}
+
     def save(self):
         session = SessionLocal()
 
         self.content = content_to_json(self.type, self.content)
 
         # Add the new message to the session and commit
-        if(self.id == None):
+        if self.id is None:
             session.add(self)
             session.commit()
             # Refresh the db_message object to get the auto-generated fields
@@ -140,11 +151,12 @@ class Message(Base):
         else:
             session.merge(self)
             session.commit()
-        
+
         # Close the session
         session.close()
 
         return self
+
 
 # Create tables
 Base.metadata.create_all(bind=engine)
