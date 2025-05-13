@@ -33,7 +33,8 @@ CREATE TABLE thrive_user (
 	show_followup BOOLEAN DEFAULT false,
 	show_elapsed_time BOOLEAN DEFAULT false,
 	llm_fallback BOOLEAN DEFAULT false,
-	min_message_id INTEGER DEFAULT 0
+	min_message_id INTEGER DEFAULT 0,
+	enable_sql_retries BOOLEAN DEFAULT false
 );
 
 --create a table to house all of the message data...

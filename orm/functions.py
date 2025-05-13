@@ -89,6 +89,7 @@ def set_user_preferences_in_session_state():
             st.session_state.show_followup = user.show_followup
             st.session_state.show_elapsed_time = user.show_elapsed_time
             st.session_state.llm_fallback = user.llm_fallback
+            st.session_state.enable_sql_retries = user.enable_sql_retries
             st.session_state.min_message_id = user.min_message_id
             st.session_state.loaded = True  # dont call after initial load
 
@@ -122,6 +123,7 @@ def save_user_settings():
             setattr(user, "show_followup", st.session_state.show_followup)
             setattr(user, "show_elapsed_time", st.session_state.show_elapsed_time)
             setattr(user, "llm_fallback", st.session_state.llm_fallback)
+            setattr(user, "enable_sql_retries", st.session_state.enable_sql_retries)
             setattr(user, "min_message_id", st.session_state.min_message_id)
 
             # Commit the changes to the database

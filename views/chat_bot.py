@@ -310,6 +310,7 @@ with st.sidebar.expander("Settings"):
     st.checkbox("Speak Summary", key="speak_summary")
     st.checkbox("Show Suggested Questions", key="show_suggested")
     st.checkbox("Show Follow-up Questions", key="show_followup")
+    st.checkbox("Enable SQL Retries", value=True, key="enable_sql_retries")
     if "openai_api" in st.secrets.ai_keys and "openai_model" in st.secrets.ai_keys:
         st.checkbox("LLM Fallback on Error", key="llm_fallback")
     st.button("Save", on_click=save_user_settings, use_container_width=True)
@@ -415,6 +416,13 @@ if my_question:
         st.write(random_acknowledgment)
 
     sql, elapsed_time = vn.generate_sql(question=my_question)
+
+    # Store the original question for potential retries in case we need it later
+    # This ensures it's available even after clearing st.session_state.my_question
+    if hasattr(vn.vn, "last_question"):
+        logger.info(f"Saving original question for potential retries: {my_question}")
+        vn.vn.last_question = my_question
+
     st.session_state.my_question = None
 
     if sql:
@@ -428,7 +436,95 @@ if my_question:
                 call_llm(my_question)
             st.stop()
 
-        df = vn.run_sql(sql=sql)
+        # Implement retry logic for SQL execution
+        max_retries = 3
+        retry_count = 0
+        df = None
+
+        # Check if retries are enabled and supported
+        retries_enabled = st.session_state.get("enable_sql_retries", True)
+        retries_supported = vn.supports_retry()
+
+        logger.info(f"SQL RETRY CHECK: enable_sql_retries={retries_enabled}")
+        logger.info(f"SQL RETRY CHECK: retry capability exists={retries_supported}")
+
+        while retry_count <= max_retries:
+            try:
+                # On first attempt, use normal caching; on retries bypass cache
+                bypass_cache = retry_count > 0
+                logger.info(f"SQL EXECUTION ATTEMPT {retry_count + 1}: bypass_cache={bypass_cache}")
+                df = vn.run_sql(sql=sql, bypass_cache=bypass_cache)
+                logger.info("SQL EXECUTION SUCCESS")
+                break  # Success! Exit the loop
+            except Exception as e:
+                error_message = str(e)
+                logger.warning(f"SQL EXECUTION ERROR ATTEMPT {retry_count + 1}: {error_message}")
+
+                # Check if retries are enabled and if the model supports it
+                if retry_count < max_retries and retries_enabled and retries_supported:
+                    retry_count += 1
+                    logger.info(f"SQL RETRY: Starting attempt {retry_count}")
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            f"I encountered an error and am trying a different query approach (attempt {retry_count}/{max_retries}).",
+                            MessageType.TEXT,
+                            sql,
+                            my_question,
+                        )
+                    )
+
+                    # Try to generate a new SQL query
+                    logger.info("SQL RETRY: Calling retry_sql_generation")
+
+                    # Make sure the original question is still available for retry
+                    # It might have been lost when setting st.session_state.my_question = None
+                    if hasattr(vn.vn, "last_question") and not vn.vn.last_question and my_question:
+                        logger.info(f"SQL RETRY: Restoring original question: {my_question}")
+                        vn.vn.last_question = my_question
+
+                    new_sql = vn.vn.retry_sql_generation(error_message)
+
+                    if new_sql:
+                        logger.info(f"SQL RETRY: New SQL generated: {new_sql[:100]}...")
+                        sql = new_sql
+                        # Show the new SQL
+                        if st.session_state.get("show_sql", True):
+                            add_message(
+                                Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time)
+                            )
+                    else:
+                        logger.warning("SQL RETRY: Failed to generate new SQL")
+                        # If we couldn't generate a new SQL query
+                        add_message(
+                            Message(
+                                RoleType.ASSISTANT,
+                                f"I couldn't fix the SQL query. Error: {error_message}",
+                                MessageType.ERROR,
+                                sql,
+                                my_question,
+                            )
+                        )
+                        if st.session_state.get("llm_fallback", True):
+                            call_llm(my_question)
+                        st.stop()
+                else:
+                    logger.info(
+                        f"SQL RETRY: No retry attempt - retry_count={retry_count}, enable_sql_retries={retries_enabled}, has_retry_capability={retries_supported}"
+                    )
+                    # No retries left or retries disabled
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            f"Error executing SQL: {error_message}",
+                            MessageType.ERROR,
+                            sql,
+                            my_question,
+                        )
+                    )
+                    if st.session_state.get("llm_fallback", True):
+                        call_llm(my_question)
+                    st.stop()
 
         # if sql doesn't return a dataframe, stop
         if not isinstance(df, pd.DataFrame):

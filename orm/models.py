@@ -64,6 +64,7 @@ class User(Base):
     show_followup = Column(Boolean)
     show_elapsed_time = Column(Boolean)
     llm_fallback = Column(Boolean)
+    enable_sql_retries = Column(Boolean)
     min_message_id = Column(Integer)
 
     role = relationship("UserRole")
@@ -87,6 +88,7 @@ class User(Base):
             "show_followup": self.show_followup,
             "show_elapsed_time": self.show_elapsed_time,
             "llm_fallback": self.llm_fallback,
+            "enable_sql_retries": self.enable_sql_retries,
             "min_message_id": self.min_message_id,
         }
 

@@ -19,6 +19,130 @@ from vanna.vannadb import VannaDB_VectorStore
 logger = logging.getLogger(__name__)
 
 
+class RetryCapableMixin:
+    """
+    A mixin that adds SQL retry capability to any Vanna class.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_question = None
+        self.last_error = None
+        self.original_prompt = None
+
+    def retry_sql_generation(self, error_message, max_retries=1):
+        """
+        Retry SQL generation with feedback about the error.
+
+        Args:
+            error_message (str): The error message from SQL execution
+            max_retries (int): Maximum retry attempts
+
+        Returns:
+            str: A new SQL query that hopefully fixes the error
+        """
+        logger.debug("RETRY SYSTEM ACTIVATED: Beginning retry_sql_generation")
+
+        # Store the error message
+        self.last_error = error_message
+        logger.debug(f"RETRY SYSTEM: Stored error message: {error_message[:100]}...")
+
+        if not hasattr(self, "last_question") or not self.last_question:
+            logger.warning("Cannot retry SQL generation: no previous question stored")
+            return None
+
+        retries = 0
+        last_sql = None
+
+        logger.debug(f"RETRY SYSTEM: Question exists: '{self.last_question}'")
+        logger.debug(
+            f"RETRY SYSTEM: Original prompt exists: {hasattr(self, 'original_prompt') and self.original_prompt is not None}"
+        )
+
+        while retries < max_retries:
+            # Increment retries first
+            retries += 1
+            logger.debug(f"RETRY SYSTEM: Attempt {retries}/{max_retries}")
+
+            # Create retry prompt with error information
+            retry_message = f"Looks like there was an error when trying to execute SQL: {error_message}. Please review the original question and construct a SQL query that will answer the users question. Here is the original prompt, which includes the users question, for reference: {self.last_question}"
+
+            # If we have the original prompt stored, use it for better context
+            if hasattr(self, "original_prompt") and self.original_prompt:
+                logger.debug("RETRY SYSTEM: Using original prompt context")
+                retry_prompt = [
+                    self.system_message(f"You are a {self.dialect} expert. Please correct the SQL based on the error."),
+                    self.user_message(
+                        f"The following was the original prompt that generated the SQL:\n\n{self.original_prompt}\n\nHowever, there was an error when executing the generated SQL: {error_message}\n\nPlease provide a corrected SQL query that will work and answer the users question: {self.last_question}"
+                    ),
+                ]
+                logger.debug("RETRY SYSTEM: New prompt: %s", retry_prompt)
+            else:
+                # Fallback if original prompt wasn't stored
+                logger.debug("RETRY SYSTEM: Using fallback prompt (no original prompt)")
+                retry_prompt = [
+                    self.system_message(f"You are a {self.dialect} expert. Please correct the SQL based on the error."),
+                    self.user_message(retry_message),
+                ]
+                logger.debug("RETRY SYSTEM: New prompt: %s", retry_prompt)
+            if last_sql:
+                logger.debug("RETRY SYSTEM: Including previous failed attempt in prompt")
+                retry_prompt.append(self.assistant_message(f"My previous attempt was: {last_sql}"))
+                logger.debug("RETRY SYSTEM: New prompt: %s", retry_prompt)
+
+            self.log(title="Retry SQL Prompt", message=retry_prompt)
+            logger.debug("RETRY SYSTEM: Submitting prompt to LLM")
+            llm_response = self.submit_prompt(retry_prompt)
+            self.log(title="Retry LLM Response", message=llm_response)
+
+            # Extract new SQL
+            new_sql = self.extract_sql(llm_response)
+            logger.debug(f"RETRY SYSTEM: Generated new SQL: {new_sql[:100]}...")
+            last_sql = new_sql
+
+            # Return the new SQL for the caller to execute - don't continue retrying here
+            # The caller will retry if this SQL still fails
+            logger.debug("RETRY SYSTEM: Returning corrected SQL")
+            return new_sql
+
+        # This line will never be reached with current implementation
+        # but keeping it as a fallback
+        logger.warning("RETRY SYSTEM: Max retries reached without successful generation")
+        return last_sql
+
+    # Override generate_sql to store the question
+    def generate_sql(self, question: str, *args, **kwargs):
+        logger.debug(f"RETRY SETUP: Storing question for potential retry: '{question}'")
+        self.last_question = question
+
+        # Call the parent's method but capture the intermediates
+        if self.config is not None:
+            initial_prompt = self.config.get("initial_prompt", None)
+        else:
+            initial_prompt = None
+
+        question_sql_list = self.get_similar_question_sql(question, **kwargs)
+        ddl_list = self.get_related_ddl(question, **kwargs)
+        doc_list = self.get_related_documentation(question, **kwargs)
+
+        prompt = self.get_sql_prompt(
+            initial_prompt=initial_prompt,
+            question=question,
+            question_sql_list=question_sql_list,
+            ddl_list=ddl_list,
+            doc_list=doc_list,
+            **kwargs,
+        )
+
+        # Store the original prompt for potential retries
+        self.original_prompt = str(prompt)
+        logger.debug("RETRY SETUP: Original prompt stored successfully")
+
+        # Continue with the parent's implementation
+        logger.debug("RETRY SETUP: Calling parent generate_sql implementation")
+        return super().generate_sql(question, *args, **kwargs)
+
+
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
     def __init__(self, config=None):
         try:
@@ -56,10 +180,12 @@ class MyVannaAnthropicChromaDB(ChromaDB_VectorStore, Anthropic_Chat):
             logger.exception("Error Configuring MyVannaAnthropicChromaDB: %s", e)
 
 
-class MyVannaOllama(VannaDB_VectorStore, Ollama):
+class MyVannaOllama(RetryCapableMixin, VannaDB_VectorStore, Ollama):
     def __init__(self, config=None):
         try:
             logger.info("Using Ollama and VannaDB")
+            # Ensure RetryCapableMixin is initialized first
+            RetryCapableMixin.__init__(self)
             VannaDB_VectorStore.__init__(
                 self,
                 vanna_model=st.secrets["ai_keys"]["vanna_model"],
@@ -75,10 +201,12 @@ class MyVannaOllama(VannaDB_VectorStore, Ollama):
         logger.debug("%s: %s", title, message)
 
 
-class MyVannaOllamaChromaDB(ChromaDB_VectorStore, Ollama):
+class MyVannaOllamaChromaDB(RetryCapableMixin, ChromaDB_VectorStore, Ollama):
     def __init__(self, config=None):
         try:
             logger.info("Using Ollama and ChromaDB")
+            # Ensure RetryCapableMixin is initialized first
+            RetryCapableMixin.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
             ChromaDB_VectorStore.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
             Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
         except Exception as e:
@@ -210,17 +338,41 @@ class VannaService:
         else:
             return is_valid
 
-    @st.cache_data(show_spinner="Running SQL query ...")
-    def run_sql(_self, sql: str) -> DataFrame | None:
-        """Run SQL query and return results as DataFrame."""
-        try:
-            df = _self.vn.run_sql(sql=sql)
-        except Exception as e:
-            st.error(f"Error running SQL: {e}")
-            logger.exception("%s", e)
-            return None
-        else:
-            return df
+    @st.cache_data(show_spinner="Running SQL query ...", ttl=60)
+    def run_sql(_self, sql: str, bypass_cache: bool = False) -> DataFrame | None:
+        """
+        Run SQL query and return results as DataFrame.
+
+        Args:
+            sql (str): The SQL query to execute
+            bypass_cache (bool): If True, bypasses Streamlit caching
+        """
+        # If bypass_cache is True, add a random suffix to make the cache miss
+        # This avoids cached errors during retry operations
+        if bypass_cache:
+            pass
+            # # Add a random comment to force a cache miss
+            # if "/*" not in sql and "*/" not in sql:  # Ensure we're not breaking any existing comments
+            #     # For PostgreSQL, add a simple trailing comment with timestamp to ensure uniqueness
+            #     random_id = f"{time.time()}"
+            #     sql = f"{sql} /* bypass_cache_{random_id} */"
+            #     logger.info(f"CACHE BYPASS: Added unique comment to SQL query with ID {random_id}")
+
+        # Log the SQL but don't catch exceptions - let them propagate up to the
+        # retry loop in the chat_bot.py file
+        logger.info(f"EXECUTING SQL: {sql}...")
+        df = _self.vn.run_sql(sql=sql)
+        logger.info("SQL execution successful")
+        return df
+
+    def supports_retry(self) -> bool:
+        """
+        Check if the current Vanna implementation supports SQL retries.
+
+        Returns:
+            bool: True if retries are supported, False otherwise
+        """
+        return hasattr(self.vn, "retry_sql_generation")
 
     @st.cache_data(show_spinner="Checking if we should generate a chart ...")
     def should_generate_chart(_self, question, sql, df):
