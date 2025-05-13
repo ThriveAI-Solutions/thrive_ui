@@ -151,6 +151,8 @@ def generate_sql_cached(question: str):
             response = check_references(vn.generate_sql(question=question, allow_llm_to_see_data=True))
             end_time = time.time()
             elapsed_time = end_time - start_time
+            print("====================================SQL====================================")
+            print(response)
             return response, elapsed_time
         else:
             print("NOT allowing LLM to see data")
@@ -366,8 +368,8 @@ def train_ddl():
                 table_schema = 'public'
             AND 
                 table_name NOT IN ({forbidden_tables_str})
-            AND
-                table_name LIKE 'wny_health'
+                AND
+                table_name LIKE 'titanic'
             ORDER BY 
                 table_schema, table_name, ordinal_position;
         """)
@@ -410,17 +412,18 @@ def train_ddl_to_rag(conn, table, ddl):
         df = pd.read_sql_query(query, conn)
 
         # Iterate over each column in the DataFrame
-        # for column in df.columns:
-        #     column_data = df[column].tolist()  # Convert the column data to a list
-        #     prompt = f"Describe the column '{column}' with the following sample data: {column_data} here is the DDL for the whole table: {ddl}"
-        #     description = ask(prompt)
-        #     print(f"Column: {column}, Description: {description}")
-        #     ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
+        for column in df.columns:
+            column_data = df[column].tolist()  # Convert the column data to a list
+            prompt = f"You are a PostgreSQL expert. Describe the column '{column}' with the following sample data: {column_data} here is the DDL for the whole table: {ddl}.  The response should be in plain text."
+            description = ask(prompt)
+            print(f"Column: {column}, Description: {description}")
+            # ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
+            vn.train(documentation=description)
 
         # Train Vanna with schema and queries
         vn.train(ddl=" ".join(ddl))
 
-        # prompt = f"You are a secret expert working with a postgresql database.  Describe the table '{table}' with the following sample data: {df.to_dict(orient='records')}. The response should be in plain text.";
+        # prompt = f"You are a PostgreSQL expert.  Describe the table '{table}' with the following sample data: {df.to_dict(orient='records')}. The response should be in plain text.";
         # description = ask(prompt)
         # vn.train(documentation=description)
 
