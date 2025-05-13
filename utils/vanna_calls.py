@@ -172,7 +172,7 @@ class VannaService:
         except Exception as e:
             st.error(f"Error generating questions: {e}")
             logger.exception("%s", e)
-            return None
+            return []  # Return empty list instead of None on error
         else:
             return questions
 
