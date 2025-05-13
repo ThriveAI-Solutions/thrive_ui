@@ -4,7 +4,6 @@ import time
 import psycopg2
 import sqlparse
 import streamlit as st
-from psycopg2.extras import RealDictCursor
 from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import DML, Keyword
 from vanna.anthropic import Anthropic_Chat
@@ -12,6 +11,8 @@ from vanna.chromadb import ChromaDB_VectorStore
 from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
+import pandas as pd
+from utils.llm_calls import ask
 
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
     def __init__(self, config=None):
@@ -342,14 +343,12 @@ def train_ddl():
 
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
 
-         # PostgreSQL Connection
         conn = psycopg2.connect(
             host=st.secrets["postgres"]["host"],
             port=st.secrets["postgres"]["port"],
             database=st.secrets["postgres"]["database"],
             user=st.secrets["postgres"]["user"],
             password=st.secrets["postgres"]["password"],
-            cursor_factory=RealDictCursor,
         )
 
         # Get database schema
@@ -367,6 +366,8 @@ def train_ddl():
                 table_schema = 'public'
             AND 
                 table_name NOT IN ({forbidden_tables_str})
+            AND
+                table_name LIKE 'wny_health'
             ORDER BY 
                 table_schema, table_name, ordinal_position;
         """)
@@ -376,30 +377,55 @@ def train_ddl():
         ddl = []
         current_table = None
         for row in schema_info:
-            if current_table != row["table_name"]:
+            if current_table != row[1]:
                 if current_table is not None:
                     ddl.append(");")
-                    # Train vanna with schema and queries
-                    vn.train(ddl=" ".join(ddl))
+                    train_ddl_to_rag(conn, current_table, ddl)
                     ddl = []  # reset ddl for next table
-                current_table = row["table_name"]
-                ddl.append(f"\nCREATE TABLE {row['table_name']} (")
+                current_table = row[1]
+                ddl.append(f"\nCREATE TABLE {row[1]} (")
             else:
                 ddl.append(",")
 
-            nullable = "NULL" if row["is_nullable"] == "YES" else "NOT NULL"
-            ddl.append(f"\n    {row['column_name']} {row['data_type']} {nullable}")
+            nullable = "NULL" if row[4] == "YES" else "NOT NULL"
+            ddl.append(f"\n    {row[2]} {row[3]} {nullable}")
 
         if ddl:  # Close the last table
             ddl.append(");")
-            # Train vanna with schema and queries
-            vn.train(ddl=" ".join(ddl))
+            train_ddl_to_rag(conn, current_table, ddl)
             ddl = []  # reset ddl for next table
-            
+
         cursor.close()
         conn.close()
     except Exception as e:
         st.error(f"Error training DDL: {e}")
+        print(e)
+
+def train_ddl_to_rag(conn, table, ddl):
+    try:
+        vn = setup_vanna()
+
+        # Query the top 50 rows from the table
+        query = f"SELECT * FROM {table} LIMIT 10;"
+        df = pd.read_sql_query(query, conn)
+
+        # Iterate over each column in the DataFrame
+        # for column in df.columns:
+        #     column_data = df[column].tolist()  # Convert the column data to a list
+        #     prompt = f"Describe the column '{column}' with the following sample data: {column_data} here is the DDL for the whole table: {ddl}"
+        #     description = ask(prompt)
+        #     print(f"Column: {column}, Description: {description}")
+        #     ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
+
+        # Train Vanna with schema and queries
+        vn.train(ddl=" ".join(ddl))
+
+        # prompt = f"You are a secret expert working with a postgresql database.  Describe the table '{table}' with the following sample data: {df.to_dict(orient='records')}. The response should be in plain text.";
+        # description = ask(prompt)
+        # vn.train(documentation=description)
+
+    except Exception as e:
+        st.error(f"Error training Table DDL to RAG: {e}")
         print(e)
 
 
