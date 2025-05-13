@@ -19,8 +19,8 @@ from utils.vanna_calls import (
     write_to_file_and_training,
     remove_from_file_training
 )
-from utils.communicate import (copy_to_clipboard, speak, listen)
-from utils.llm_calls import (chat_gpt)
+from utils.communicate import (speak, listen)
+from utils.llm_calls import (ask_message)
 from utils.enums import (MessageType, RoleType)
 from orm.functions import (save_user_settings, get_recent_messages, set_user_preferences_in_session_state)
 from orm.models import Message
@@ -210,16 +210,11 @@ def addMessage(message:Message, render=True):
         renderMessage(st.session_state.messages[-1], len(st.session_state.messages)-1)
 
 def callLLM(my_question:str):
-    stream = chat_gpt(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
+    response = ask_message(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
     with st.chat_message(RoleType.ASSISTANT.value):
-        if "openai_model" not in st.secrets.ai_keys:
-            message = Message(RoleType.ASSISTANT, "Please configure the fallback LLM settings", MessageType.TEXT)
-        else:
-            response = st.write(f"{st.secrets["ai_keys"]["openai_model"]}:", stream)        
-            print("response", response) #TODO: why isnt this storing the response
-            message = Message(RoleType.ASSISTANT, f"{st.secrets["ai_keys"]["openai_model"]}: {response}", MessageType.TEXT)
+        message = Message(role=RoleType.ASSISTANT, content=response, type=MessageType.TEXT)
         message = message.save()
-        st.session_state.messages.append(message)
+        st.session_state.messages.append(message)#TODO: why isnt it displaying the response the first time?
 
 ######### Sidebar settings #########
 with st.sidebar.expander("Settings"):    
@@ -283,7 +278,7 @@ st.title("Thrive AI")
 
 if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):
-            st.markdown("Ask me a question about your data")
+        st.markdown("Ask me a question about your data")
 
 # Populate messages in the chat message component everytime the streamlit is run
 index = 0
@@ -306,7 +301,6 @@ if my_question:
     guardrail_sentence,guardrail_score = get_ethical_guideline(my_question)
     print("=========ETHICAL GUARDRAILS===========")
     print(my_question, guardrail_score, guardrail_sentence)
-    print("=========ETHICAL GUARDRAILS===========")
     if(guardrail_score == 2):
         addMessage(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
         callLLM(my_question)

@@ -15,6 +15,7 @@ dependencies = [
     "pyaudio>=0.2.14",
     "pyperclip>=1.9.0",
     "pyttsx3>=2.98",
+    "sketch>=0.5.2",
     "speechrecognition>=3.14.1",
     "streamlit>=1.43.2",
     "streamlit-cookies-manager-ext>=0.1.0",
