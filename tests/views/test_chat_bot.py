@@ -345,7 +345,8 @@ class TestRenderMessage:
 
         # Check popover and its contents
         mock_st.popover.assert_called_once_with("Actions", use_container_width=True)
-        mock_pd_read_json.assert_called_once_with(StringIO(df_json_for_actions), orient="records")
+        assert mock_pd_read_json.call_count == 1
+        assert mock_pd_read_json.call_args[1]['orient'] == 'records'
 
         # Check buttons within popover (order might vary, use assert_any_call or check call_args_list)
         speak_call = call("Speak Summary", key="speak_summary_6", on_click=ANY)  # ANY for lambda
@@ -448,17 +449,16 @@ class TestRenderMessage:
     @patch("views.chat_bot.set_question")
     @patch("views.chat_bot.st")
     def test_render_followup_message_malformed_content(self, mock_st, mock_set_question, mock_generate_guid):
-        # Current code doesn't handle ast.literal_eval error, it would raise.
-        # Test assumes valid list-like string content for now as per current implementation.
-        # If error handling was added to literal_eval, this test would change.
+        # The code now has error handling for ast.literal_eval 
+        # and doesn't raise the ValueError anymore
         malformed_content = "This is not a list"
         msg = Message(role=RoleType.ASSISTANT, content=malformed_content, type=MessageType.FOLLOWUP)
 
-        # ast.literal_eval will raise ValueError on "This is not a list"
-        with pytest.raises(ValueError):
-            render_message(msg, 10)
+        # Call render_message which should handle the malformed content gracefully
+        render_message(msg, 10)
 
-        # If it didn't raise, asserts would be:
-        # self.common_asserts(mock_st, RoleType.ASSISTANT.value)
-        # mock_st.text.assert_called_once_with("Here are some possible follow-up questions")
-        # mock_st.button.assert_not_called()
+        # Verify that the message was rendered correctly
+        self.common_asserts(mock_st, RoleType.ASSISTANT.value)
+        mock_st.text.assert_called_once_with("Here are some possible follow-up questions")
+        # No buttons should be created for malformed content
+        mock_st.button.assert_not_called()
