@@ -1,9 +1,25 @@
+import logging
+
 import streamlit as st
+
+from utils.logging_config import setup_logging
 
 # Set the page configuration to wide mode
 st.set_page_config(layout="wide")
 from streamlit_cookies_manager_ext import EncryptedCookieManager
+
 from utils.auth import check_authenticate
+
+# setup logging
+setup_logging(debug=False)
+
+logger = logging.getLogger(__name__)
+
+# silence watchdog warnings
+logging.getLogger("fsevents").setLevel(logging.INFO)
+logging.getLogger("chromadb").setLevel(logging.INFO)
+logging.getLogger("httpcore").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.INFO)
 
 # Initialize the cookie manager
 st.session_state.cookies = EncryptedCookieManager(

@@ -1,10 +1,15 @@
 import streamlit as st
 import requests
 import json
+import logging
 import openai
+import streamlit as st
 from orm.models import Message
 
-def chat_gpt(message:Message):
+logger = logging.getLogger(__name__)
+
+
+def chat_gpt(message: Message):
     try:
         if "openai_api" in st.secrets.ai_keys and "openai_model" in st.secrets.ai_keys:
             openai.api_key = st.secrets["ai_keys"]["openai_api"]
@@ -22,7 +27,7 @@ def chat_gpt(message:Message):
             return "No API key found"
     except Exception as e:
         st.error(f"An error occurred: {e}")
-        print(e)
+        logger.exception(f"An error occurred: {e}")
 
 def ask_message(message:Message):
     try:
@@ -32,7 +37,7 @@ def ask_message(message:Message):
             chat_gpt(message)
     except Exception as e:
         st.error(f"An error occurred converting message to dictionary: {e}")
-        print(e)
+        logger.exception(e)
 
 def ask(message:str):
     try:
@@ -41,7 +46,7 @@ def ask(message:str):
         return ask_dict(message_dict)
     except Exception as e:
         st.error(f"An error occurred converting string to dictionary: {e}")
-        print(e)
+        logger.exception(e)
 
 def ask_dict(message:dict):
     try:
@@ -60,17 +65,17 @@ def ask_dict(message:dict):
             response = requests.post(f"{st.secrets["ai_keys"]["ollama_host"]}/api/generate", json=data)
 
             if(response.status_code != 200):
-                print(f"Error: Received status code {response.status_code}")
+                logger.error(f"Error: Received status code {response.status_code}")
                 return f"Error: Received status code {response.status_code}"
             
             response_json = response.json()
             
             # Print the response
-            print(response_json["response"])
+            logger.info(response_json["response"])
 
             return response_json["response"]
         else:
             return "No Ollama API key found"
     except Exception as e:
         st.error(f"An error occurred asking ollama: {e}")
-        print(e)
+        logger.exception(e)
