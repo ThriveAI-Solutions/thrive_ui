@@ -282,11 +282,7 @@ def add_message(message: Message, render=True):
 
 def call_llm(my_question:str):
     response = ask_message(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
-    with st.chat_message(RoleType.ASSISTANT.value):
-        message = Message(role=RoleType.ASSISTANT, content=response, type=MessageType.TEXT)
-        message = message.save()
-        st.session_state.messages.append(message)#TODO: why isnt it displaying the response the first time?
-
+    add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR))
 
 ######### Sidebar settings #########
 with st.sidebar.expander("Settings"):
