@@ -15,7 +15,7 @@ from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
 import pandas as pd
-from utils.llm_calls import ask
+from orm.models import Message
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,7 @@ class VannaService:
     def _setup_vanna(self):
         """Setup Vanna with appropriate configuration."""
         try:
-            if "ollama_host" in st.secrets.ai_keys and "ollama_model" in st.secrets.ai_keys:
+            if "ollama_model" in st.secrets.ai_keys:
                 if "chroma_path" in st.secrets.rag_model:
                     self.vn = MyVannaOllamaChromaDB()
                 elif "vanna_api" in st.secrets.ai_keys and "vanna_model" in st.secrets.ai_keys:
@@ -290,6 +290,18 @@ class VannaService:
             return None, 0.0
         else:
             return response, elapsed_time
+        
+    def submit_prompt(_self, system_message, user_message):
+        """Submit generic prompt to Vanna."""
+        try:
+            return _self.vn.submit_prompt(prompt=[
+                _self.vn.system_message(system_message),
+                _self.vn.user_message(user_message),
+            ])
+        except Exception as e:
+            st.error(f"Error prompting Vanna: {e}")
+            logger.exception("%s", e)
+            return e
 
     def remove_from_training(self, entry_id):
         """Remove a training entry by ID."""
@@ -572,18 +584,21 @@ def train_ddl(describe_ddl_from_llm: bool = False):
 
 def train_ddl_describe_to_rag(conn, table, ddl):
     try:
-        # Query the top 50 rows from the table
         query = f"SELECT * FROM {table} LIMIT 10;"
         df = pd.read_sql_query(query, conn)
 
         # Iterate over each column in the DataFrame
         for column in df.columns:
+            # Query the top 10 rows from the table
+            # query = f"SELECT * FROM {table} LIMIT 10;"
+            query = f"SELECT DISTINCT ({column}) FROM {table} ORDER BY {column} LIMIT 10;"
+            data = pd.read_sql_query(query, conn)
+
             st.toast(f"Training column: {table}.{column}")
-            column_data = df[column].tolist()  # Convert the column data to a list
-            #prompt = f"You are a PostgreSQL expert. Describe the column '{column}' with the following sample data: {column_data} here is the DDL for the whole table: {ddl}.  The response should be in plain text."
+            column_data = data[column].tolist()  # Convert the column data to a list
             
+            system_message = "You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:"
             prompt = textwrap.dedent(f"""
-                You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:
                 1. First, review the DDL (Data Definition Language) for the entire table:
                 <ddl>
                 {ddl}
@@ -605,14 +620,17 @@ def train_ddl_describe_to_rag(conn, table, ddl):
                 - Potential use or purpose of the column in the context of the table
             
                 5. Provide your analysis in plain text. Your response should include:
-                - A brief description of the column's properties as defined in the DDL
                 - Observations about the sample data
                 - Any insights or inferences you can make about the column's role or importance in the table
                 - Potential considerations for querying or working with this column
             
                 Remember to keep your response concise yet informative, focusing on the most relevant details for a PostgreSQL expert. Do not include any XML tags in your response.
-            """)
-            description = ask(prompt)
+
+                The response should be a maximum of 1000 characters in length.
+            """)#                - A brief description of the column's properties as defined in the DDL
+
+            description = VannaService.get_instance().submit_prompt(system_message=system_message, user_message=prompt)
+            description = str(description)[:1050]
             logger.info(f"Column: {table}.{column}, Description: {description}")
             # ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
             VannaService.get_instance().train(documentation=f"{table}.{column} {description}")

@@ -12,7 +12,6 @@ from orm.functions import get_recent_messages, save_user_settings, set_user_pref
 from orm.models import Message
 from utils.communicate import listen, speak
 from utils.enums import MessageType, RoleType
-from utils.llm_calls import ask_message
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
 logger = logging.getLogger(__name__)
@@ -281,7 +280,7 @@ def add_message(message: Message, render=True):
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
 
 def call_llm(my_question:str):
-    response = ask_message(Message(RoleType.ASSISTANT, my_question, MessageType.SQL))
+    response = vn.submit_prompt("You are a helpful AI assistant trained to provide detailed and accurate responses. Be concise yet informative, and maintain a friendly and professional tone. If asked about controversial topics, provide balanced and well-researched information without expressing personal opinions.", my_question)
     add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR))
 
 ######### Sidebar settings #########
@@ -296,8 +295,7 @@ with st.sidebar.expander("Settings"):
     st.checkbox("Speak Summary", key="speak_summary")
     st.checkbox("Show Suggested Questions", key="show_suggested")
     st.checkbox("Show Follow-up Questions", key="show_followup")
-    if "openai_api" in st.secrets.ai_keys and "openai_model" in st.secrets.ai_keys:
-        st.checkbox("LLM Fallback on Error", key="llm_fallback")
+    st.checkbox("LLM Fallback on Error", key="llm_fallback")
     st.button("Save", on_click=save_user_settings, use_container_width=True)
 
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True, type="primary")
@@ -383,6 +381,7 @@ if my_question:
             guardrail_sentence,
         )
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
+        print("guardrail_score == 2")
         call_llm(my_question)
         st.stop()
     if guardrail_score >= 3:
@@ -408,9 +407,11 @@ if my_question:
             if st.session_state.get("show_sql", True):
                 add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
         else:
+            print('sql is not valid')
             add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):
+                print("fallback to LLM")
                 call_llm(my_question)
             st.stop()
 
@@ -467,5 +468,6 @@ if my_question:
             )
         )
         if st.session_state.get("llm_fallback", True):
+            print("cant generate sql for that question, fallback to LLM")
             call_llm(my_question)
 ######### Handle new chat input #########
