@@ -18,7 +18,6 @@ def mock_streamlit_secrets():
         "streamlit.secrets",
         new={
             "ai_keys": {
-                "ollama_host": "http://localhost:11434",
                 "ollama_model": "qwen2.5-coder:8b",
                 "vanna_api": "mock_vanna_api",
                 "vanna_model": "mock_vanna_model",
