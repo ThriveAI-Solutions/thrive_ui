@@ -121,11 +121,11 @@ class Message(Base):
         if user_id is None:
             try:
                 # Get user_id from session_state cookies if available
-                if hasattr(st.session_state, 'cookies') and st.session_state.cookies is not None:
+                if hasattr(st.session_state, "cookies") and st.session_state.cookies is not None:
                     user_id_str = st.session_state.cookies.get("user_id")
                     if user_id_str:
                         user_id = json.loads(user_id_str)
-                
+
                 # If still None, default to 1 for testing purposes
                 if user_id is None:
                     user_id = 1
