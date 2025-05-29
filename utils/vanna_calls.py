@@ -15,7 +15,7 @@ from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
 import pandas as pd
-from orm.models import Message
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -545,6 +545,8 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                 table_schema = 'public'
             AND 
                 table_name NOT IN ({forbidden_tables_str})
+            AND
+                table_name = 'titanic'
             ORDER BY 
                 table_schema, table_name, ordinal_position;
         """)
@@ -589,51 +591,53 @@ def train_ddl_describe_to_rag(conn, table, ddl):
 
         # Iterate over each column in the DataFrame
         for column in df.columns:
-            # Query the top 10 rows from the table
-            # query = f"SELECT * FROM {table} LIMIT 10;"
-            query = f"SELECT DISTINCT ({column}) FROM {table} ORDER BY {column} LIMIT 10;"
-            data = pd.read_sql_query(query, conn)
+            if(column == "passengerid"):
+                # Query the top 10 rows from the table
+                # query = f"SELECT * FROM {table} LIMIT 10;"
+                query = f"SELECT DISTINCT ({column}) FROM {table} ORDER BY {column} LIMIT 10;"
+                data = pd.read_sql_query(query, conn)
 
-            st.toast(f"Training column: {table}.{column}")
-            column_data = data[column].tolist()  # Convert the column data to a list
-            
-            system_message = "You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:"
-            prompt = textwrap.dedent(f"""
-                1. First, review the DDL (Data Definition Language) for the entire table:
-                <ddl>
-                {ddl}
-                </ddl>
-            
-                2. Now, focus on the specific column you need to describe:
-                Column name: {column}
-            
-                3. Examine the sample data for this column:
-                <sample_data>
-                {column_data}
-                </sample_data>
-            
-                4. Analyze the column based on the DDL and sample data. Consider the following aspects:
-                - Data type
-                - Constraints (e.g., NOT NULL, UNIQUE, PRIMARY KEY)
-                - Default values
-                - Any patterns or characteristics observed in the sample data
-                - Potential use or purpose of the column in the context of the table
-            
-                5. Provide your analysis in plain text. Your response should include:
-                - Observations about the sample data
-                - Any insights or inferences you can make about the column's role or importance in the table
-                - Potential considerations for querying or working with this column
-            
-                Remember to keep your response concise yet informative, focusing on the most relevant details for a PostgreSQL expert. Do not include any XML tags in your response.
+                st.toast(f"Training column: {table}.{column}")
+                column_data = data[column].tolist()  # Convert the column data to a list
+                
+                system_message = "You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:"
+                prompt = textwrap.dedent(f"""
+                    1. First, review the DDL (Data Definition Language) for the entire table:
+                    <ddl>
+                    {ddl}
+                    </ddl>
+                
+                    2. Now, focus on the specific column you need to describe:
+                    Column name: {column}
+                
+                    3. Examine the sample data for this column:
+                    <sample_data>
+                    {column_data}
+                    </sample_data>
+                
+                    4. Analyze the column based on the DDL and sample data. Consider the following aspects:
+                    - Data type
+                    - Constraints (e.g., NOT NULL, UNIQUE, PRIMARY KEY)
+                    - Default values
+                    - Any patterns or characteristics observed in the sample data
+                    - Potential use or purpose of the column in the context of the table
+                
+                    5. Provide your analysis in plain text. Your response should include:
+                    - Observations about the sample data
+                    - Any insights or inferences you can make about the column's role or importance in the table
+                    - Potential considerations for querying or working with this column
+                    - A brief description of the column's properties as defined in the DDL
 
-                The response should be a maximum of 1000 characters in length.
-            """)#                - A brief description of the column's properties as defined in the DDL
+                    Remember to keep your response concise yet informative, focusing on the most relevant details for a PostgreSQL expert. Do not include any XML tags in your response.
+                """)
+                #The response should be a maximum of 1000 characters in length.
 
-            description = VannaService.get_instance().submit_prompt(system_message=system_message, user_message=prompt)
-            description = str(description)[:1050]
-            logger.info(f"Column: {table}.{column}, Description: {description}")
-            # ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
-            VannaService.get_instance().train(documentation=f"{table}.{column} {description}")
+                description = VannaService.get_instance().submit_prompt(system_message=system_message, user_message=prompt)
+                description = re.sub(r"[•●▪️–—\-•·►★✓✔✗✘➔➤➢➣➤➥➦➧➨➩➪➫➬➭➮➯➱➲➳➴➵➶➷➸➹➺➻➼➽➾]", "", description)
+                # description = str(description)[:1050]
+                logger.info(f"Column: {table}.{column}, Description: {description}")
+                # ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
+                VannaService.get_instance().train(documentation=f"{table}.{column} {description}")
 
         # prompt = f"You are a PostgreSQL expert.  Describe the table '{table}' with the following sample data: {df.to_dict(orient='records')}. The response should be in plain text.";
         # description = ask(prompt)
