@@ -15,7 +15,7 @@ from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
 import pandas as pd
-from orm.models import Message
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -623,14 +623,15 @@ def train_ddl_describe_to_rag(conn, table, ddl):
                 - Observations about the sample data
                 - Any insights or inferences you can make about the column's role or importance in the table
                 - Potential considerations for querying or working with this column
+                - A brief description of the column's properties as defined in the DDL
             
                 Remember to keep your response concise yet informative, focusing on the most relevant details for a PostgreSQL expert. Do not include any XML tags in your response.
 
-                The response should be a maximum of 1000 characters in length.
-            """)#                - A brief description of the column's properties as defined in the DDL
+            """)# The response should be a maximum of 1000 characters in length.  
 
             description = VannaService.get_instance().submit_prompt(system_message=system_message, user_message=prompt)
-            description = str(description)[:1050]
+            description = re.sub(r"[•●▪️–—\-•·►★✓✔✗✘➔➤➢➣➤➥➦➧➨➩➪➫➬➭➮➯➱➲➳➴➵➶➷➸➹➺➻➼➽➾]", "", description)
+            # description = str(description)[:1050]
             logger.info(f"Column: {table}.{column}, Description: {description}")
             # ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
             VannaService.get_instance().train(documentation=f"{table}.{column} {description}")
