@@ -279,9 +279,14 @@ def add_message(message: Message, render=True):
     if len(st.session_state.messages) > 0 and render:
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
 
-def call_llm(my_question:str):
-    response = vn.submit_prompt("You are a helpful AI assistant trained to provide detailed and accurate responses. Be concise yet informative, and maintain a friendly and professional tone. If asked about controversial topics, provide balanced and well-researched information without expressing personal opinions.", my_question)
+
+def call_llm(my_question: str):
+    response = vn.submit_prompt(
+        "You are a helpful AI assistant trained to provide detailed and accurate responses. Be concise yet informative, and maintain a friendly and professional tone. If asked about controversial topics, provide balanced and well-researched information without expressing personal opinions.",
+        my_question,
+    )
     add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR))
+
 
 ######### Sidebar settings #########
 with st.sidebar.expander("Settings"):
@@ -407,7 +412,7 @@ if my_question:
             if st.session_state.get("show_sql", True):
                 add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
         else:
-            print('sql is not valid')
+            print("sql is not valid")
             add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):

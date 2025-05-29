@@ -19,6 +19,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
+
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
     def __init__(self, config=None):
         try:
@@ -290,14 +291,16 @@ class VannaService:
             return None, 0.0
         else:
             return response, elapsed_time
-        
+
     def submit_prompt(_self, system_message, user_message):
         """Submit generic prompt to Vanna."""
         try:
-            return _self.vn.submit_prompt(prompt=[
-                _self.vn.system_message(system_message),
-                _self.vn.user_message(user_message),
-            ])
+            return _self.vn.submit_prompt(
+                prompt=[
+                    _self.vn.system_message(system_message),
+                    _self.vn.user_message(user_message),
+                ]
+            )
         except Exception as e:
             st.error(f"Error prompting Vanna: {e}")
             logger.exception("%s", e)
@@ -377,7 +380,9 @@ def generate_sql_cached(question: str):
             and bool(st.secrets.security["allow_llm_to_see_data"]) == True
         ):
             logger.info("Allowing LLM to see data")
-            response = check_references(VannaService.get_instance().generate_sql(question=question, allow_llm_to_see_data=True))
+            response = check_references(
+                VannaService.get_instance().generate_sql(question=question, allow_llm_to_see_data=True)
+            )
             end_time = time.time()
             elapsed_time = end_time - start_time
             return response, elapsed_time
@@ -582,6 +587,7 @@ def train_ddl(describe_ddl_from_llm: bool = False):
         st.error(f"Error training DDL: {e}")
         logger.exception("%s", e)
 
+
 def train_ddl_describe_to_rag(conn, table, ddl):
     try:
         query = f"SELECT * FROM {table} LIMIT 10;"
@@ -596,7 +602,7 @@ def train_ddl_describe_to_rag(conn, table, ddl):
 
             st.toast(f"Training column: {table}.{column}")
             column_data = data[column].tolist()  # Convert the column data to a list
-            
+
             system_message = "You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:"
             prompt = textwrap.dedent(f"""
                 1. First, review the DDL (Data Definition Language) for the entire table:
