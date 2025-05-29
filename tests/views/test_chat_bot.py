@@ -346,7 +346,7 @@ class TestRenderMessage:
         # Check popover and its contents
         mock_st.popover.assert_called_once_with("Actions", use_container_width=True)
         assert mock_pd_read_json.call_count == 1
-        assert mock_pd_read_json.call_args[1]['orient'] == 'records'
+        assert mock_pd_read_json.call_args[1]["orient"] == "records"
 
         # Check buttons within popover (order might vary, use assert_any_call or check call_args_list)
         speak_call = call("Speak Summary", key="speak_summary_6", on_click=ANY)  # ANY for lambda
@@ -449,7 +449,7 @@ class TestRenderMessage:
     @patch("views.chat_bot.set_question")
     @patch("views.chat_bot.st")
     def test_render_followup_message_malformed_content(self, mock_st, mock_set_question, mock_generate_guid):
-        # The code now has error handling for ast.literal_eval 
+        # The code now has error handling for ast.literal_eval
         # and doesn't raise the ValueError anymore
         malformed_content = "This is not a list"
         msg = Message(role=RoleType.ASSISTANT, content=malformed_content, type=MessageType.FOLLOWUP)

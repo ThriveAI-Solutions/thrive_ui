@@ -84,12 +84,12 @@ class TestVannaService:
         # Test that we get the same instance twice by directly accessing the class variable
         # Without patching or mocking, which seems to cause issues
         VannaService._instance = None  # Reset the singleton
-        
+
         # Create a real instance to store as the singleton
         test_instance = VannaService()
         # Manually set it
         VannaService._instance = test_instance
-        
+
         # Now get the instance twice and check they're the same
         instance1 = VannaService.get_instance()
         instance2 = VannaService.get_instance()
@@ -175,7 +175,7 @@ class TestVannaService:
         # Override the StreamLit caching decorator
         original_generate_questions = service.generate_questions
         service.generate_questions = lambda: service._test_generate_questions_with_error()
-        
+
         # Add a test method that simulates the error handling without the decorator
         def _test_generate_questions_with_error():
             try:
@@ -184,7 +184,7 @@ class TestVannaService:
                 # No st.error call in test
                 return []
             return questions
-            
+
         service._test_generate_questions_with_error = _test_generate_questions_with_error
 
         # Call the function
