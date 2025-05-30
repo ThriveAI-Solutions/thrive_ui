@@ -1,4 +1,5 @@
 import json
+import logging
 from decimal import Decimal
 
 import pandas as pd
@@ -9,11 +10,15 @@ from sqlalchemy.orm import relationship, sessionmaker
 
 from utils.enums import MessageType, RoleType
 
+logger = logging.getLogger(__name__)
+
 # Load database settings from st.secrets
-db_settings = st.secrets["postgres"]
+# db_settings = st.secrets["postgres"]
+db_settings = st.secrets.get("sqlite", {"database": "./pgDatabase/db.sqlite3"})
 
 # Construct the database URL
-DATABASE_URL = f"postgresql://{db_settings['user']}:{db_settings['password']}@{db_settings['host']}:{db_settings['port']}/{db_settings['database']}"
+# DATABASE_URL = f"postgresql://{db_settings['user']}:{db_settings['password']}@{db_settings['host']}:{db_settings['port']}/{db_settings['database']}"
+DATABASE_URL = f"sqlite:///{db_settings['database']}"
 
 # Create the SQLAlchemy engine
 engine = create_engine(DATABASE_URL)
@@ -52,19 +57,19 @@ class User(Base):
     password = Column(String(255), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
-    show_sql = Column(Boolean)
-    show_table = Column(Boolean)
-    show_plotly_code = Column(Boolean)
-    show_chart = Column(Boolean)
-    show_question_history = Column(Boolean)
-    show_summary = Column(Boolean)
-    voice_input = Column(Boolean)
-    speak_summary = Column(Boolean)
-    show_suggested = Column(Boolean)
-    show_followup = Column(Boolean)
-    show_elapsed_time = Column(Boolean)
-    llm_fallback = Column(Boolean)
-    min_message_id = Column(Integer)
+    show_sql = Column(Boolean, default=True)
+    show_table = Column(Boolean, default=True)
+    show_plotly_code = Column(Boolean, default=False)
+    show_chart = Column(Boolean, default=False)
+    show_question_history = Column(Boolean, default=True)
+    show_summary = Column(Boolean, default=True)
+    voice_input = Column(Boolean, default=False)
+    speak_summary = Column(Boolean, default=False)
+    show_suggested = Column(Boolean, default=False)
+    show_followup = Column(Boolean, default=False)
+    show_elapsed_time = Column(Boolean, default=True)
+    llm_fallback = Column(Boolean, default=False)
+    min_message_id = Column(Integer, default=0)
 
     role = relationship("UserRole")
 
@@ -180,5 +185,75 @@ class Message(Base):
         return self
 
 
+def seed_initial_data(session):
+    # Seed User Roles
+    roles_to_seed = [
+        {"role_name": "Admin", "description": "Administrator with full access"},
+        {"role_name": "Doctor", "description": "A physician who has the rights to view some individual patient data"},
+        {"role_name": "Patient", "description": "Patient access, only has access to see their own data or population data"},
+    ]
+
+    for role_data in roles_to_seed:
+        role = session.query(UserRole).filter_by(role_name=role_data["role_name"]).first()
+        if not role:
+            new_role = UserRole(**role_data)
+            session.add(new_role)
+
+    session.commit() # Commit roles before users to ensure role IDs are available
+
+    # Seed Users
+    users_to_seed = [
+        {
+            "username": "thriveai-kr", "first_name": "Kyle", "last_name": "Root", 
+            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
+            "role_name": "Patient" 
+        },
+        {
+            "username": "thriveai-je", "first_name": "Joseph", "last_name": "Eberle", 
+            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
+            "role_name": "Patient"
+        },
+        {
+            "username": "thriveai-as", "first_name": "Al", "last_name": "Seoud", 
+            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
+            "role_name": "Patient"
+        },
+        {
+            "username": "thriveai-fm", "first_name": "Frankly", "last_name": "Metty", 
+            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
+            "role_name": "Patient"
+        },
+        {
+            "username": "thriveai-dr", "first_name": "Dr.", "last_name": "Smith", 
+            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
+            "role_name": "Doctor"
+        },
+        {
+            "username": "thriveai-re", "first_name": "Rob", "last_name": "Enderle", 
+            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
+            "role_name": "Patient"
+        },
+    ]
+
+    for user_data in users_to_seed:
+        user = session.query(User).filter_by(username=user_data["username"]).first()
+        if not user:
+            role_name = user_data.pop("role_name") # Remove role_name from user_data
+            role = session.query(UserRole).filter_by(role_name=role_name).first()
+            if role: # Ensure role exists
+                new_user = User(**user_data, user_role_id=role.id)
+                session.add(new_user)
+            else:
+                logger.warning(f"Role '{role_name}' not found for user '{user_data['username']}'. User not created.")
+
+
+    session.commit()
+
+
 # Create tables
 Base.metadata.create_all(bind=engine)
+
+# Seed initial data
+db_session = SessionLocal()
+seed_initial_data(db_session)
+db_session.close()
