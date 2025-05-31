@@ -63,21 +63,21 @@ def set_user_preferences_in_session_state():
         user_id = st.session_state.cookies.get("user_id")
         user = get_user(user_id)
 
-        if "loaded" not in st.session_state:
-            st.session_state.show_sql = user.show_sql
-            st.session_state.show_table = user.show_table
-            st.session_state.show_plotly_code = user.show_plotly_code
-            st.session_state.show_chart = user.show_chart
-            st.session_state.show_question_history = user.show_question_history
-            st.session_state.show_summary = user.show_summary
-            st.session_state.voice_input = user.voice_input
-            st.session_state.speak_summary = user.speak_summary
-            st.session_state.show_suggested = user.show_suggested
-            st.session_state.show_followup = user.show_followup
-            st.session_state.show_elapsed_time = user.show_elapsed_time
-            st.session_state.llm_fallback = user.llm_fallback
-            st.session_state.min_message_id = user.min_message_id
-            st.session_state.loaded = True  # dont call after initial load
+        # if "loaded" not in st.session_state:
+        st.session_state.show_sql = user.show_sql
+        st.session_state.show_table = user.show_table
+        st.session_state.show_plotly_code = user.show_plotly_code
+        st.session_state.show_chart = user.show_chart
+        st.session_state.show_question_history = user.show_question_history
+        st.session_state.show_summary = user.show_summary
+        st.session_state.voice_input = user.voice_input
+        st.session_state.speak_summary = user.speak_summary
+        st.session_state.show_suggested = user.show_suggested
+        st.session_state.show_followup = user.show_followup
+        st.session_state.show_elapsed_time = user.show_elapsed_time
+        st.session_state.llm_fallback = user.llm_fallback
+        st.session_state.min_message_id = user.min_message_id
+        st.session_state.loaded = True  # dont call after initial load
 
         return user
     except Exception as e:
