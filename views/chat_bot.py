@@ -5,9 +5,11 @@ import random
 import time
 import uuid
 from io import StringIO
+
 import pandas as pd
 import streamlit as st
 from ethical_guardrails_lib import get_ethical_guideline
+
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
 from utils.communicate import listen, speak
@@ -17,7 +19,7 @@ from utils.vanna_calls import VannaService, remove_from_file_training, write_to_
 logger = logging.getLogger(__name__)
 
 # Initialize VannaService singleton
-vn = VannaService.get_instance()
+vn = VannaService.from_streamlit_session()
 
 set_user_preferences_in_session_state()
 

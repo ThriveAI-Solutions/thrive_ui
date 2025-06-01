@@ -176,3 +176,5 @@ cython_debug/
 # ruff type checker / formatter
 .ruff_cache
 INSTRUCTIONS.md
+
+tmp/

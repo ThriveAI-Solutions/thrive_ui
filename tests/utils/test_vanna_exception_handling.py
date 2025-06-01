@@ -57,19 +57,19 @@ class TestVannaServiceExceptions:
             "utils.vanna_calls.VannaDB_VectorStore.__init__", side_effect=Exception("VannaDB initialization error")
         ):
             # Should catch the exception and log it
-            instance = MyVannaAnthropic()
-            # We're not verifying the logging call directly, just checking that no exception was raised
-            assert instance is not None
+            with pytest.raises(Exception, match="VannaDB initialization error"):
+                instance = MyVannaAnthropic()
+            # Further assertions can be made on mock_logger if needed
 
     def test_init_exception_anthropic_chromadb(self):
         """Test that exceptions during VannaAnthropicChromaDB initialization are handled properly."""
         with patch(
-            "utils.vanna_calls.ChromaDB_VectorStore.__init__", side_effect=Exception("ChromaDB initialization error")
+            "utils.chromadb_vector.ChromaDB_VectorStore.__init__", side_effect=Exception("ChromaDB initialization error")
         ):
             # Should catch the exception and log it
-            instance = MyVannaAnthropicChromaDB()
-            # We're not verifying the logging call directly, just checking that no exception was raised
-            assert instance is not None
+            with pytest.raises(Exception, match="ChromaDB initialization error"):
+                instance = MyVannaAnthropicChromaDB(user_role=0)
+            # Further assertions can be made on mock_logger if needed
 
     def test_init_exception_ollama(self):
         """Test that exceptions during VannaOllama initialization are handled properly."""
@@ -77,45 +77,35 @@ class TestVannaServiceExceptions:
             "utils.vanna_calls.VannaDB_VectorStore.__init__", side_effect=Exception("VannaDB initialization error")
         ):
             # Should catch the exception and log it
-            instance = MyVannaOllama()
-            # We're not verifying the logging call directly, just checking that no exception was raised
-            assert instance is not None
+            with pytest.raises(Exception, match="VannaDB initialization error"):
+                instance = MyVannaOllama()
+            # Further assertions can be made on mock_logger if needed
 
     def test_init_exception_ollama_chromadb(self):
         """Test that exceptions during VannaOllamaChromaDB initialization are handled properly."""
         with patch(
-            "utils.vanna_calls.ChromaDB_VectorStore.__init__", side_effect=Exception("ChromaDB initialization error")
+            "utils.chromadb_vector.ChromaDB_VectorStore.__init__", side_effect=Exception("ChromaDB initialization error")
         ):
             # Should catch the exception and log it
-            instance = MyVannaOllamaChromaDB()
-            # We're not verifying the logging call directly, just checking that no exception was raised
-            assert instance is not None
+            with pytest.raises(Exception, match="ChromaDB initialization error"):
+                instance = MyVannaOllamaChromaDB(user_role=0)
+            # Further assertions can be made on mock_logger if needed
 
     @patch("streamlit.error")
     def test_setup_vanna_exception(self, mock_st_error):
         """Test that exceptions during VannaService._setup_vanna are caught, logged, but then re-raised."""
-        # Reset the singleton instance to ensure we start fresh
         VannaService._instance = None
+        service = VannaService() # self.vn is None, self.user_role is 0
 
-        # Create a service instance
-        service = VannaService()
+        # service.vn is already None from __init__
+        # Force a configuration that will cause an exception in _setup_vanna
+        with patch.dict(st.secrets, {"ai_keys": {}}): # Makes st.secrets.ai_keys an empty dict
+            with pytest.raises(KeyError): # Expecting a KeyError from accessing st.secrets["ai_keys"]["vanna_api"]
+                service._setup_vanna(user_role=0) # Pass a user_role as the method expects
 
-        # Instead of patching the whole _setup_vanna method, patch a function that it calls
-        # which will cause a real exception to be thrown inside the method
-        with patch.object(VannaService, "__init__", return_value=None):
-            # Make the vn attribute None so it will fail when trying to use it
-            service.vn = None
-
-            # Force a configuration that will cause an exception in the real code
-            with patch.dict(st.secrets, {"ai_keys": {}}):
-                # The method re-raises exceptions after logging them, so we expect it to propagate
-                with pytest.raises(Exception):
-                    service._setup_vanna()
-
-                # Verify the error was logged via streamlit
-                mock_st_error.assert_called_once()
-                # Make sure the error message starts correctly
-                assert "Error setting up Vanna:" in mock_st_error.call_args[0][0]
+        # Verify the error was logged via streamlit
+        mock_st_error.assert_called_once()
+        assert "Error setting up Vanna:" in mock_st_error.call_args[0][0]
 
     @pytest.mark.skip(reason="Streamlit caching interferes with this test")
     @patch("streamlit.error")
@@ -307,7 +297,8 @@ class TestVannaServiceExceptions:
         with patch.object(VannaService, "_setup_vanna"):
             service = VannaService()
             service.vn = MagicMock()
-            service.vn.train.side_effect = Exception("Failed to train")
+            # Make the actually called method raise the exception
+            service.vn.add_question_sql.side_effect = Exception("Failed to train via add_question_sql") 
 
             result = service.train(question="q", sql="sql")
 

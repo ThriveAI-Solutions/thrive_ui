@@ -3,14 +3,16 @@ import logging
 import streamlit as st
 
 from orm.functions import change_password, delete_all_messages
+from orm.models import RoleTypeEnum
 from utils.vanna_calls import VannaService, train_ddl, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
-# Get the current user role
-user_role = st.session_state.cookies.get("user_role", 0)
-vn = VannaService.get_instance()
-df = vn.get_training_data(metadata={"user_role": {"$gte": user_role}})
+# Get the current user role from session state (not cookies) and default to least privileged
+user_role = st.session_state.get("user_role", RoleTypeEnum.PATIENT.value)
+vn = VannaService.from_streamlit_session()
+# Don't get training data at module load time - get it when rendering the page
+# df = vn.get_training_data()
 
 logging.debug(f"{st.session_state.to_dict()=}")
 
@@ -19,7 +21,8 @@ logger = logging.getLogger(__name__)
 
 def delete_all_training():
     try:
-        training_data = vn.get_training_data(metadata={"user_role": {"$gte": user_role}})
+        # Get training data with role-based filtering - users can only delete what they can see
+        training_data = vn.get_training_data()
         for index, row in training_data.iterrows():
             vn.remove_from_training(row["id"])
         st.toast("Training Data Deleted Successfully!")
@@ -79,6 +82,9 @@ with tab1:
             pop_train("documentation")
     with cols[6]:
         st.button("Remove All", type="primary", on_click=delete_all_training)
+
+    # Get training data with current user's role-based filtering
+    df = vn.get_training_data()
 
     # st.dataframe(df)
 
