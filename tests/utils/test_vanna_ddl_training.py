@@ -1,19 +1,20 @@
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import chromadb
 import pandas as pd
 import pytest
 import streamlit as st
 
-import chromadb
 from orm.models import RoleTypeEnum  # Assuming RoleTypeEnum is here for user_role values
 from utils.chromadb_vector import ThriveAI_ChromaDB
 from utils.vanna_calls import VannaService, train_ddl, train_ddl_describe_to_rag
 
 
 # Mock the streamlit secrets for testing
-@pytest.fixture(scope="module") # Scope to module as secrets don't change per test
-def mock_streamlit_secrets_ddl():
+@pytest.fixture(scope="function")  # Changed from module to function
+def mock_streamlit_secrets_ddl(test_chromadb_path):
+    """Mock streamlit secrets using temporary ChromaDB path."""
     with patch(
         "streamlit.secrets",
         new={
@@ -21,7 +22,7 @@ def mock_streamlit_secrets_ddl():
                 "ollama_model": "test_ollama_model", # Simplified for DDL tests
                 # Add other keys if MyVanna*ChromaDB classes require them for init, even if not used for DDL
             },
-            "rag_model": {"chroma_path": "./test_chromadb_ddl"}, # Should be ignored by in-memory
+            "rag_model": {"chroma_path": test_chromadb_path}, # Use temporary path
             "postgres": {
                 "host": "localhost",
                 "port": 5432,
@@ -40,7 +41,7 @@ def in_memory_chroma_client():
     return chromadb.Client()
 
 @pytest.fixture
-def thrive_ai_chromadb_in_memory(in_memory_chroma_client):
+def thrive_ai_chromadb_in_memory(in_memory_chromadb_client):
     """Provides a ThriveAI_ChromaDB instance using an in-memory client."""
     
     # Create a concrete class that implements the abstract methods for testing purposes
@@ -61,7 +62,7 @@ def thrive_ai_chromadb_in_memory(in_memory_chroma_client):
             return "dummy llm response to: " + str(prompt) # Changed from Any to str to match VannaBase
 
     # user_role can be any valid RoleTypeEnum value, e.g., ADMIN
-    return ConcreteThriveAIChromaDB(user_role=RoleTypeEnum.ADMIN.value, client=in_memory_chroma_client)
+    return ConcreteThriveAIChromaDB(user_role=RoleTypeEnum.ADMIN.value, client=in_memory_chromadb_client)
 
 @pytest.fixture
 def mock_vanna_service_with_in_memory_chroma(thrive_ai_chromadb_in_memory):
@@ -98,20 +99,6 @@ def mock_vanna_service_with_in_memory_chroma(thrive_ai_chromadb_in_memory):
 
             # Manually set vn and user_role on the instance after it's created and its _setup_vanna (mock_setup) has been called.
             service_instance.vn = thrive_ai_chromadb_in_memory
-            # user_role should be set by _initialize_instance -> _setup_vanna. 
-            # Our mock_setup doesn't set user_role on self, but _initialize_instance sets it on the instance object before calling _setup_vanna.
-            # Let's ensure service_instance.user_role is correctly derived from the mocked st.session_state
-            # VannaService._initialize_instance does: 
-            #   user_role_from_session = st.session_state.get("user_role", 0) 
-            #   instance = cls() 
-            #   instance._setup_vanna(user_role=user_role_from_session)
-            # So, the user_role passed to mock_setup (our _setup_vanna) is from session state.
-            # The VannaService instance itself also has a self.user_role attribute initialized in _setup_vanna typically.
-            # Let's ensure service_instance.user_role reflects the one from the (mocked) session_state.
-            service_instance.user_role = mock_st_session_state.get.return_value
-            
-            if hasattr(service_instance.vn, 'connect_to_postgres'):
-                service_instance.vn.connect_to_postgres = MagicMock()
 
             yield service_instance
 

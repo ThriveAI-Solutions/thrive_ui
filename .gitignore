@@ -1,6 +1,14 @@
 # Chromadb local stuff
 chromadb/
 
+# Test artifacts and temporary directories
+test_chroma*/
+test_chromadb*/
+chroma.sqlite3
+**/tmp/
+/tmp/
+thrive_test_*/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

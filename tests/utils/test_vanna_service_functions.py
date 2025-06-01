@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from utils.vanna_calls import (
+    UserContext,
     VannaService,
     generate_plot_cached,
     generate_plotly_code_cached,
@@ -18,7 +19,7 @@ from utils.vanna_calls import (
 
 # Mock the streamlit secrets for testing
 @pytest.fixture
-def mock_streamlit_secrets():
+def mock_streamlit_secrets(test_chromadb_path):
     with patch(
         "streamlit.secrets",
         new={
@@ -29,7 +30,7 @@ def mock_streamlit_secrets():
                 "anthropic_api": "mock_anthropic_api",
                 "anthropic_model": "claude-3-sonnet-20240229",
             },
-            "rag_model": {"chroma_path": "./chromadb"},
+            "rag_model": {"chroma_path": test_chromadb_path},
             "postgres": {
                 "host": "localhost",
                 "port": 5432,
@@ -43,13 +44,40 @@ def mock_streamlit_secrets():
         yield
 
 
+@pytest.fixture
+def mock_vanna_service(test_chromadb_path):
+    """Create a VannaService instance with mocked _setup_vanna for testing."""
+    user_context = UserContext(user_id="test_user", user_role=1)
+    config = {
+        "ai_keys": {
+            "ollama_model": "llama3",
+            "vanna_api": "mock_vanna_api",
+            "vanna_model": "mock_vanna_model",
+            "anthropic_api": "mock_anthropic_api",
+            "anthropic_model": "claude-3-sonnet-20240229",
+        },
+        "rag_model": {"chroma_path": test_chromadb_path},
+        "postgres": {
+            "host": "localhost",
+            "port": 5432,
+            "database": "thrive",
+            "user": "postgres",
+            "password": "postgres",
+        },
+        "security": {"allow_llm_to_see_data": False},
+    }
+    
+    with patch.object(VannaService, "_setup_vanna"):
+        service = VannaService(user_context, config)
+        service.vn = MagicMock()  # Mock the Vanna backend
+        yield service
+
+
 # Test for additional VannaService methods
 @pytest.mark.usefixtures("mock_streamlit_secrets")
 class TestVannaServiceAdditional:
-    @patch("utils.vanna_calls.VannaService._setup_vanna")
-    def test_is_sql_valid(self, mock_setup_vanna):
-        service = VannaService()
-        service.vn = MagicMock()
+    def test_is_sql_valid(self, mock_vanna_service):
+        service = mock_vanna_service
         service.vn.is_sql_valid.return_value = True
 
         result = service.is_sql_valid("SELECT * FROM test_table")
@@ -57,10 +85,8 @@ class TestVannaServiceAdditional:
         assert result is True
         service.vn.is_sql_valid.assert_called_once_with(sql="SELECT * FROM test_table")
 
-    @patch("utils.vanna_calls.VannaService._setup_vanna")
-    def test_run_sql(self, mock_setup_vanna):
-        service = VannaService()
-        service.vn = MagicMock()
+    def test_run_sql(self, mock_vanna_service):
+        service = mock_vanna_service
         mock_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
         service.vn.run_sql.return_value = mock_df
 
@@ -69,10 +95,8 @@ class TestVannaServiceAdditional:
         assert result.equals(mock_df)
         service.vn.run_sql.assert_called_once_with(sql="SELECT * FROM test_table")
 
-    @patch("utils.vanna_calls.VannaService._setup_vanna")
-    def test_should_generate_chart(self, mock_setup_vanna):
-        service = VannaService()
-        service.vn = MagicMock()
+    def test_should_generate_chart(self, mock_vanna_service):
+        service = mock_vanna_service
         service.vn.should_generate_chart.return_value = True
 
         mock_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
@@ -81,10 +105,8 @@ class TestVannaServiceAdditional:
         assert result is True
         service.vn.should_generate_chart.assert_called_once_with(df=mock_df)
 
-    @patch("utils.vanna_calls.VannaService._setup_vanna")
-    def test_generate_plotly_code(self, mock_setup_vanna):
-        service = VannaService()
-        service.vn = MagicMock()
+    def test_generate_plotly_code(self, mock_vanna_service):
+        service = mock_vanna_service
         service.vn.generate_plotly_code.return_value = "mock_plotly_code"
 
         mock_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
@@ -96,10 +118,8 @@ class TestVannaServiceAdditional:
             question="Test question", sql="SELECT * FROM test_table", df=mock_df
         )
 
-    @patch("utils.vanna_calls.VannaService._setup_vanna")
-    def test_generate_plot(self, mock_setup_vanna):
-        service = VannaService()
-        service.vn = MagicMock()
+    def test_generate_plot(self, mock_vanna_service):
+        service = mock_vanna_service
         service.vn.get_plotly_figure.return_value = "mock_plotly_figure"
 
         mock_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
@@ -109,10 +129,8 @@ class TestVannaServiceAdditional:
         assert isinstance(elapsed_time, float)
         service.vn.get_plotly_figure.assert_called_once_with(plotly_code="mock_code", df=mock_df)
 
-    @patch("utils.vanna_calls.VannaService._setup_vanna")
-    def test_generate_followup_questions(self, mock_setup_vanna):
-        service = VannaService()
-        service.vn = MagicMock()
+    def test_generate_followup_questions(self, mock_vanna_service):
+        service = mock_vanna_service
         service.vn.generate_followup_questions.return_value = ["Question 1", "Question 2"]
 
         mock_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
@@ -123,10 +141,8 @@ class TestVannaServiceAdditional:
             question="Test question", sql="SELECT * FROM test_table", df=mock_df
         )
 
-    @patch("utils.vanna_calls.VannaService._setup_vanna")
-    def test_generate_summary(self, mock_setup_vanna):
-        service = VannaService()
-        service.vn = MagicMock()
+    def test_generate_summary(self, mock_vanna_service):
+        service = mock_vanna_service
         service.vn.generate_summary.return_value = "This is a summary"
 
         mock_df = pd.DataFrame({"col1": [1, 2], "col2": ["a", "b"]})
