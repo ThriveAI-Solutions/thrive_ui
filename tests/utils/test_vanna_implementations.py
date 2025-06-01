@@ -70,9 +70,9 @@ class TestMyVannaAnthropicChromaDB:
             patch("utils.vanna_calls.Anthropic_Chat.__init__", return_value=None) as mock_anthropic_init,
         ):
             # Test initialization
-            user_role_test = 1 # Example user_role
-            test_config = {"path": "./chromadb"} # Define a test config
-            vanna_anthropic = MyVannaAnthropicChromaDB(user_role=user_role_test, config=test_config) # Pass config
+            user_role_test = 1  # Example user_role
+            test_config = {"path": "./chromadb"}  # Define a test config
+            vanna_anthropic = MyVannaAnthropicChromaDB(user_role=user_role_test, config=test_config)  # Pass config
 
             # Verify ChromaDB_VectorStore (via ThriveAI_ChromaDB) was initialized with the right config
             mock_chromadb_init.assert_called_once()

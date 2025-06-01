@@ -13,7 +13,7 @@ def pytest_addoption(parser):
         "--no-auto-cleanup",
         action="store_true",
         default=False,
-        help="Disable automatic cleanup of test artifacts after test session"
+        help="Disable automatic cleanup of test artifacts after test session",
     )
 
 
@@ -43,6 +43,7 @@ def test_temp_dir():
 def in_memory_chromadb_client():
     """Provides an in-memory ChromaDB client that doesn't persist to disk."""
     import chromadb
+
     return chromadb.Client()
 
 
@@ -61,7 +62,7 @@ def test_chromadb_path(test_temp_dir):
 def mock_streamlit_secrets_with_temp_paths(test_chromadb_path):
     """Mock streamlit secrets using temporary paths for ChromaDB."""
     from unittest.mock import patch
-    
+
     with patch(
         "streamlit.secrets",
         new={
@@ -132,12 +133,12 @@ def backup_restore_config_files(test_temp_dir):
 def test_environment():
     """Set up test environment variables to prevent artifacts in project root."""
     original_env = os.environ.copy()
-    
+
     # Set environment variables that might affect where files are created
     os.environ["PYTEST_RUNNING"] = "1"
-    
+
     yield
-    
+
     # Restore original environment
     os.environ.clear()
     os.environ.update(original_env)
@@ -147,35 +148,39 @@ def test_environment():
 def cleanup_after_tests(request):
     """Run cleanup after all tests complete."""
     yield  # This runs before the test session starts
-    
+
     # Check if user disabled auto-cleanup
     if request.config.getoption("--no-auto-cleanup"):
-        if hasattr(request.config, 'get_terminal_writer'):
+        if hasattr(request.config, "get_terminal_writer"):
             terminal_writer = request.config.get_terminal_writer()
-            terminal_writer.line("\n🔍 Auto-cleanup disabled. Use 'python scripts/cleanup_test_artifacts.py' to clean manually.", yellow=True)
+            terminal_writer.line(
+                "\n🔍 Auto-cleanup disabled. Use 'python scripts/cleanup_test_artifacts.py' to clean manually.",
+                yellow=True,
+            )
         else:
             print("\n🔍 Auto-cleanup disabled. Use 'python scripts/cleanup_test_artifacts.py' to clean manually.")
         return
-    
+
     # This runs after the test session ends
     import sys
     from pathlib import Path
-    
+
     # Import and run our cleanup function directly
     try:
         # Add the scripts directory to path temporarily
         scripts_dir = Path(__file__).parent.parent / "scripts"
         if str(scripts_dir) not in sys.path:
             sys.path.insert(0, str(scripts_dir))
-        
+
         # Import and run the cleanup function
         from cleanup_test_artifacts import cleanup_test_artifacts
+
         cleaned_items = cleanup_test_artifacts()
-        
+
         # Use pytest's terminal writer for proper output
-        if hasattr(request.config, 'get_terminal_writer'):
+        if hasattr(request.config, "get_terminal_writer"):
             terminal_writer = request.config.get_terminal_writer()
-            
+
             if cleaned_items:
                 terminal_writer.line(f"\n🧹 Post-test cleanup: Removed {len(cleaned_items)} artifact(s)", green=True)
                 for item in cleaned_items[:3]:  # Show first 3 items
@@ -194,9 +199,9 @@ def cleanup_after_tests(request):
                     print(f"  ... and {len(cleaned_items) - 3} more items")
             else:
                 print("\n✅ Post-test cleanup: No artifacts found to clean")
-            
+
     except Exception as e:
-        if hasattr(request.config, 'get_terminal_writer'):
+        if hasattr(request.config, "get_terminal_writer"):
             terminal_writer = request.config.get_terminal_writer()
             terminal_writer.line(f"\n⚠️  Post-test cleanup failed: {e}", red=True)
         else:

@@ -66,7 +66,7 @@ def mock_vanna_service(test_chromadb_path):
         },
         "security": {"allow_llm_to_see_data": False},
     }
-    
+
     with patch.object(VannaService, "_setup_vanna"):
         service = VannaService(user_context, config)
         service.vn = MagicMock()  # Mock the Vanna backend

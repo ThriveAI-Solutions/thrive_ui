@@ -121,6 +121,4 @@ with tab2:
                 else:
                     st.error("Current password is incorrect.")
 
-st.sidebar.button(
-    "Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary"
-)
+st.sidebar.button("Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary")
