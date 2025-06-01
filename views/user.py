@@ -7,15 +7,19 @@ from utils.vanna_calls import VannaService, train_ddl, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
+# Get the current user role
+user_role = st.session_state.cookies.get("user_role", 0)
 vn = VannaService.get_instance()
-df = vn.get_training_data()
+df = vn.get_training_data(metadata={"user_role": {"$gte": user_role}})
+
+logging.debug(f"{st.session_state.to_dict()=}")
 
 logger = logging.getLogger(__name__)
 
 
 def delete_all_training():
     try:
-        training_data = vn.get_training_data()
+        training_data = vn.get_training_data(metadata={"user_role": {"$gte": user_role}})
         for index, row in training_data.iterrows():
             vn.remove_from_training(row["id"])
         st.toast("Training Data Deleted Successfully!")
@@ -66,7 +70,7 @@ with tab1:
     with cols[2]:
         st.button("Train Plan", on_click=training_plan)
     with cols[3]:
-        st.button("Train FIle", on_click=train_file)
+        st.button("Train File", on_click=train_file)
     with cols[4]:
         if st.button("Add Sql"):
             pop_train("sql")

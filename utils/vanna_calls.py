@@ -1,8 +1,12 @@
 import json
 import logging
+import re
+import textwrap
 import time
 from pathlib import Path
-import textwrap
+from typing import Any
+
+import pandas as pd
 import psycopg2
 import sqlparse
 import streamlit as st
@@ -10,12 +14,11 @@ from pandas import DataFrame
 from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import DML, Keyword
 from vanna.anthropic import Anthropic_Chat
-from vanna.chromadb import ChromaDB_VectorStore
 from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
-import pandas as pd
-import re
+
+from utils.chromadb_vector import ThriveAI_ChromaDB
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +44,11 @@ class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
             logger.exception("Error Configuring MyVannaAnthropic: %s", e)
 
 
-class MyVannaAnthropicChromaDB(ChromaDB_VectorStore, Anthropic_Chat):
+class MyVannaAnthropicChromaDB(ThriveAI_ChromaDB, Anthropic_Chat):
     def __init__(self, config=None):
         try:
             logger.info("Using Anthropic and chromaDB")
-            ChromaDB_VectorStore.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
+            ThriveAI_ChromaDB.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
             Anthropic_Chat.__init__(
                 self,
                 config={
@@ -76,11 +79,11 @@ class MyVannaOllama(VannaDB_VectorStore, Ollama):
         logger.debug("%s: %s", title, message)
 
 
-class MyVannaOllamaChromaDB(ChromaDB_VectorStore, Ollama):
+class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, Ollama):
     def __init__(self, config=None):
         try:
             logger.info("Using Ollama and ChromaDB")
-            ChromaDB_VectorStore.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
+            ThriveAI_ChromaDB.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
             Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllamaChromaDB: %s", e)
@@ -317,10 +320,10 @@ class VannaService:
         else:
             return True
 
-    def get_training_data(self):
+    def get_training_data(self, metadata: dict[str, Any] | None = None):
         """Get all training data."""
         try:
-            return self.vn.get_training_data()
+            return self.vn.get_training_data(metadata=metadata)
         except Exception as e:
             st.error(f"Error getting training data: {e}")
             logger.exception("%s", e)

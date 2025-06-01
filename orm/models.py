@@ -1,3 +1,4 @@
+import enum
 import json
 import logging
 from decimal import Decimal
@@ -5,6 +6,7 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, Numeric, String, create_engine, func
+from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
@@ -40,11 +42,20 @@ def content_to_json(type, content):
     return content
 
 
+class RoleTypeEnum(enum.IntEnum):
+    ADMIN = 0
+    DOCTOR = 1
+    NURSE = 2
+    PATIENT = 3
+
+
 class UserRole(Base):
     __tablename__ = "thrive_user_role"
     id = Column(Integer, primary_key=True)
     role_name = Column(String(50), nullable=False, unique=True)
     description = Column(String)
+    role = Column(SqlEnum(RoleTypeEnum), nullable=False)
+    users = relationship("User", back_populates="role")
 
 
 class User(Base):
@@ -71,7 +82,7 @@ class User(Base):
     llm_fallback = Column(Boolean, default=False)
     min_message_id = Column(Integer, default=0)
 
-    role = relationship("UserRole")
+    role = relationship("UserRole", back_populates="users")
 
     def to_dict(self):
         return {
@@ -188,9 +199,10 @@ class Message(Base):
 def seed_initial_data(session):
     # Seed User Roles
     roles_to_seed = [
-        {"role_name": "Admin", "description": "Administrator with full access"},
-        {"role_name": "Doctor", "description": "A physician who has the rights to view some individual patient data"},
-        {"role_name": "Patient", "description": "Patient access, only has access to see their own data or population data"},
+        {"role_name": "Admin", "description": "Administrator with full access", "role": RoleTypeEnum.ADMIN},
+        {"role_name": "Doctor", "description": "A physician who has the rights to view some individual patient data", "role": RoleTypeEnum.DOCTOR},
+        {"role_name": "Nurse", "description": "A nurse with access to patient data relevant to their duties", "role": RoleTypeEnum.NURSE},
+        {"role_name": "Patient", "description": "Patient access, only has access to see their own data or population data", "role": RoleTypeEnum.PATIENT},
     ]
 
     for role_data in roles_to_seed:
