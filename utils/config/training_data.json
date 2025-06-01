@@ -111,6 +111,10 @@
         {
             "question": "How many unique individuals from WNY that live in Erie county have high blood pressure?",
             "query": "SELECT count(DISTINCT research_id) FROM wny_health WHERE county = 'ERIE' AND hypertension = 'Y'"
+        },
+        {
+            "question": "What is the average number of penguins per island?",
+            "query": "SELECT AVG(penguin_count) AS avg_penguins_per_island\nFROM (\n    SELECT COUNT(*) AS penguin_count\n    FROM penguin\n    GROUP BY island\n) AS subquery"
         }
     ],
     "sample_documents": [

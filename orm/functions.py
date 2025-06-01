@@ -132,12 +132,7 @@ def get_user(user_id):
         # Create a new database session
         with SessionLocal() as session:
             # Query to get the user by ID, eagerly loading the role
-            user = (
-                session.query(User)
-                .options(joinedload(User.role))
-                .filter(User.id == user_id)
-                .one_or_none()
-            )
+            user = session.query(User).options(joinedload(User.role)).filter(User.id == user_id).one_or_none()
             return user
     except Exception as e:
         st.error(f"Error getting user: {e}")

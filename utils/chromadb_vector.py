@@ -15,19 +15,19 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
             # If a client is provided, we assume collections will be managed externally or by super init with a config that doesn't specify a path
             # To ensure super() doesn't override with a persistent client, pass a config without a path
             super_config = config.copy() if config else {}
-            super_config.pop("path", None) 
+            super_config.pop("path", None)
             super().__init__(config=super_config)
         elif config and config.get("in_memory"):
-            self.client = chromadb.Client() # Create in-memory client
+            self.client = chromadb.Client()  # Create in-memory client
             # Pass a config to super that won't create a persistent client
             super_config = config.copy()
-            super_config.pop("path", None) # Ensure no path is sent to super if we want in-memory
-            super().__init__(config=super_config) 
+            super_config.pop("path", None)  # Ensure no path is sent to super if we want in-memory
+            super().__init__(config=super_config)
         else:
             # Default behavior: use path from config or default path for PersistentClient
             # Let super().__init__ handle client creation in this case
             super().__init__(config=config)
-        
+
         self.user_role = user_role
         # Ensure collections are created if not by super (e.g. if client was passed and super_config was minimal)
         # The super().__init__ already calls self._create_collections
@@ -56,10 +56,7 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
     def add_ddl(self, ddl: str, metadata: dict[str, Any] | None = None, **kwargs) -> str:
         id = deterministic_uuid(ddl) + "-ddl"
         self.ddl_collection.add(
-            documents=ddl,
-            embeddings=self.generate_embedding(ddl),
-            ids=id,
-            metadatas=self._prepare_metadata(metadata)
+            documents=ddl, embeddings=self.generate_embedding(ddl), ids=id, metadatas=self._prepare_metadata(metadata)
         )
         return id
 
@@ -137,7 +134,7 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
             df = pd.concat([df, df_doc])
 
         return df
-    
+
     def get_similar_question_sql(self, question: str, metadata: dict[str, Any] | None = None, **kwargs) -> list:
         return self._extract_documents(
             self.sql_collection.query(

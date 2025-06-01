@@ -27,11 +27,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class UserContext:
     """User context containing authentication and authorization information."""
+
     user_id: str
     user_role: int
-    
+
     @classmethod
-    def from_streamlit_session(cls) -> 'UserContext':
+    def from_streamlit_session(cls) -> "UserContext":
         """Factory method to create UserContext from Streamlit session/cookies."""
         return extract_user_context_from_streamlit()
 
@@ -49,18 +50,19 @@ def extract_user_context_from_streamlit() -> UserContext:
     except Exception as e:
         logger.warning(f"Error getting user_id from cookies: {e}")
         user_id = None
-    
+
     if user_id is None:
         user_id = "anonymous"
         logger.warning("user_id not found in session state cookies - using anonymous user")
-    
-    # Get user_role from session state  
+
+    # Get user_role from session state
     user_role = st.session_state.get("user_role", None)
     if user_role is None:
         from orm.models import RoleTypeEnum
+
         user_role = RoleTypeEnum.PATIENT.value
         logger.warning(f"user_role not found in session state for user {user_id} - defaulting to PATIENT role")
-    
+
     return UserContext(user_id=user_id, user_role=user_role)
 
 
@@ -70,7 +72,7 @@ def extract_vanna_config_from_secrets() -> dict:
         "ai_keys": dict(st.secrets["ai_keys"]),
         "rag_model": dict(st.secrets["rag_model"]),
         "postgres": dict(st.secrets["postgres"]),
-        "security": dict(st.secrets.get("security", {}))
+        "security": dict(st.secrets.get("security", {})),
     }
 
 
@@ -185,18 +187,18 @@ class VannaService:
         # If no user_context provided, extract from Streamlit (backwards compatibility)
         if user_context is None:
             user_context = UserContext.from_streamlit_session()
-        
+
         # If no config provided, extract from secrets (backwards compatibility)
         if config is None:
             config = extract_vanna_config_from_secrets()
-        
+
         # Create cache key that includes both user_id and user_role
         cache_key = f"vanna_service_{user_context.user_id}_{user_context.user_role}"
-        
+
         # Check if we already have an instance for this specific user
         if user_context.user_id not in cls._instances:
             cls._instances[user_context.user_id] = cls._create_instance_for_user(user_context, config, cache_key)
-        
+
         return cls._instances[user_context.user_id]
 
     @classmethod
@@ -213,6 +215,7 @@ class VannaService:
         # Validate that user_role is a valid role value
         try:
             from orm.models import RoleTypeEnum
+
             if user_context.user_role not in [role.value for role in RoleTypeEnum]:
                 logger.error(f"Invalid user_role value: {user_context.user_role}. Defaulting to PATIENT role.")
                 st.error(f"Invalid user role detected: {user_context.user_role}. Using restricted access.")
@@ -221,13 +224,15 @@ class VannaService:
             logger.error(f"Error validating user_role: {e}. Defaulting to PATIENT role.")
             st.error("Error validating user permissions. Using restricted access.")
             user_context.user_role = RoleTypeEnum.PATIENT.value
-        
+
         return cls(user_context, config)
 
     def _setup_vanna(self):
         """Setup Vanna with appropriate configuration."""
         try:
-            chroma_config = {"path": self.config["rag_model"]["chroma_path"]} if "chroma_path" in self.config["rag_model"] else None
+            chroma_config = (
+                {"path": self.config["rag_model"]["chroma_path"]} if "chroma_path" in self.config["rag_model"] else None
+            )
 
             if "ollama_model" in self.config["ai_keys"]:
                 if chroma_config:
@@ -297,7 +302,7 @@ class VannaService:
             else:
                 logger.info("NOT allowing LLM to see data")
                 sql_response = _self.vn.generate_sql(question=question)
-            
+
             response = _self.check_references(sql_response)
 
             end_time = time.perf_counter()
@@ -436,7 +441,7 @@ class VannaService:
         try:
             # If using ChromaDB backend, it will automatically apply role-based filtering
             # For other backends, we need to ensure appropriate filtering
-            if hasattr(self.vn, '_prepare_retrieval_metadata'):
+            if hasattr(self.vn, "_prepare_retrieval_metadata"):
                 # ChromaDB backend - let it handle the role-based filtering
                 effective_metadata = self.vn._prepare_retrieval_metadata(metadata)
                 return self.vn.get_training_data(metadata=effective_metadata)
@@ -450,7 +455,9 @@ class VannaService:
             logger.exception("%s", e)
             return DataFrame()
 
-    def train(self, question=None, sql=None, documentation=None, ddl=None, plan=None, metadata: dict[str, Any] | None = None):
+    def train(
+        self, question=None, sql=None, documentation=None, ddl=None, plan=None, metadata: dict[str, Any] | None = None
+    ):
         """Train Vanna with various types of data, ensuring user_role is in metadata."""
         try:
             effective_metadata = metadata.copy() if metadata is not None else {}
@@ -692,9 +699,9 @@ def train_ddl(describe_ddl_from_llm: bool = False):
         ddl = []
         current_table = None
         tables_trained = 0
-        
+
         vanna_service = VannaService.from_streamlit_session()
-        
+
         for row in schema_info:
             if current_table != row[1]:
                 if current_table is not None:
@@ -724,13 +731,13 @@ def train_ddl(describe_ddl_from_llm: bool = False):
 
         cursor.close()
         conn.close()
-        
+
         # Show final success message
         if tables_trained > 0:
             st.success(f"🎉 DDL Training completed successfully! Trained {tables_trained} table(s).")
         else:
             st.warning("No tables found to train DDL on.")
-            
+
     except Exception as e:
         st.error(f"Error training DDL: {e}")
         logger.exception("%s", e)
@@ -756,23 +763,24 @@ def train_ddl_describe_to_rag(table: str, ddl: list):
             # However, a simpler way for just quoting is to use psycopg2's quoting or f-string with careful quoting.
             # Given sqlparse is already a dependency, let's try to use it correctly or fall back.
             # For now, let's assume the direct use of Identifier on a string was problematic, and rely on psycopg2's parameterization or SQL object composition.
-            # Psycopg2 itself doesn't directly substitute table/column names in `execute`. 
+            # Psycopg2 itself doesn't directly substitute table/column names in `execute`.
             # `sqlparse.sql.Identifier` is for manipulating parsed SQL structures.
             # A common way to safely quote identifiers is using `psycopg2.sql.Identifier`
             try:
                 from psycopg2 import sql as psycopg2_sql  # Import it conditionally or at top if always used
+
                 safe_table_ident = psycopg2_sql.Identifier(table)
                 query_string = psycopg2_sql.SQL("SELECT * FROM {} LIMIT 1;").format(safe_table_ident)
                 cur.execute(query_string)
             except ImportError:
-                 # Fallback if psycopg2.sql is not available or for some other reason, though it should be with psycopg2
-                 # This might still be unsafe if table name contains quotes, but Identifier was also causing issues.
-                 # The original code was: cur.execute(f"SELECT * FROM {sqlparse.sql.Identifier(table)} LIMIT 1;")
-                 # The issue was `sqlparse.sql.Identifier(table)` when table is a string.
-                 # For a direct f-string, one would need to ensure `table` is validated and sanitized.
-                 # Let's revert to a simpler quoting for the purpose of the fix, assuming `table` is a simple name.
-                 # A better fix would be to use psycopg2.sql.Identifier consistently.
-                 cur.execute(f'SELECT * FROM "{table}" LIMIT 1;') # Simple quoting, assumes table is valid
+                # Fallback if psycopg2.sql is not available or for some other reason, though it should be with psycopg2
+                # This might still be unsafe if table name contains quotes, but Identifier was also causing issues.
+                # The original code was: cur.execute(f"SELECT * FROM {sqlparse.sql.Identifier(table)} LIMIT 1;")
+                # The issue was `sqlparse.sql.Identifier(table)` when table is a string.
+                # For a direct f-string, one would need to ensure `table` is validated and sanitized.
+                # Let's revert to a simpler quoting for the purpose of the fix, assuming `table` is a simple name.
+                # A better fix would be to use psycopg2.sql.Identifier consistently.
+                cur.execute(f'SELECT * FROM "{table}" LIMIT 1;')  # Simple quoting, assumes table is valid
 
             if cur.description is None:
                 logger.warning(f"Skipping DDL description for table {table} as it might be empty or not found.")
@@ -780,32 +788,33 @@ def train_ddl_describe_to_rag(table: str, ddl: list):
             colnames = [desc[0] for desc in cur.description]
 
         vanna_service = VannaService.from_streamlit_session()
-        
+
         for column in colnames:
             # Properly quote column name for the query
             # Similar issue here as with table name for sqlparse.sql.Identifier
             # Using psycopg2.sql.Identifier is preferred.
             try:
                 from psycopg2 import sql as psycopg2_sql
+
                 safe_table_ident = psycopg2_sql.Identifier(table)
                 safe_column_ident = psycopg2_sql.Identifier(column)
                 query_string = psycopg2_sql.SQL("SELECT DISTINCT {col} FROM {tab} ORDER BY {col} LIMIT 10;").format(
                     col=safe_column_ident, tab=safe_table_ident
                 )
-                data = pd.read_sql_query(query_string.as_string(conn), conn) # as_string(conn) for psycopg2 >2.8
+                data = pd.read_sql_query(query_string.as_string(conn), conn)  # as_string(conn) for psycopg2 >2.8
             except ImportError:
                 # Fallback for pd.read_sql_query, which can also take a SQL string directly
                 query = f'SELECT DISTINCT "{column}" FROM "{table}" ORDER BY "{column}" LIMIT 10;'
                 data = pd.read_sql_query(query, conn)
             except psycopg2.Error as col_query_err:
                 logger.warning(f"Could not query column {column} from table {table}. Skipping. Error: {col_query_err}")
-                continue # Skip this column if it can't be queried (e.g., complex type not directly usable in DISTINCT/ORDER BY)
+                continue  # Skip this column if it can't be queried (e.g., complex type not directly usable in DISTINCT/ORDER BY)
 
             st.toast(f"Describing column: {table}.{column}")
             column_data = data[column].tolist()
 
             system_message = "You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:"
-            ddl_string = " ".join(ddl) # Convert list of ddl parts to a string
+            ddl_string = " ".join(ddl)  # Convert list of ddl parts to a string
             prompt = textwrap.dedent(f"""
                 1. First, review the DDL (Data Definition Language) for the entire table:
                 <ddl>
@@ -849,7 +858,7 @@ def train_ddl_describe_to_rag(table: str, ddl: list):
         logger.exception(f"Error training Table DDL to RAG for {table}: %s", e)
     finally:
         if conn:
-            conn.close() # Ensure connection is closed
+            conn.close()  # Ensure connection is closed
 
 
 # Train Vanna on database question/query pairs from file

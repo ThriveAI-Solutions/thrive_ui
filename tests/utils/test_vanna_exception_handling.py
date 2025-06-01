@@ -71,7 +71,7 @@ def mock_vanna_service(test_chromadb_path):
         },
         "security": {"allow_llm_to_see_data": True},
     }
-    
+
     with patch.object(VannaService, "_setup_vanna"):
         service = VannaService(user_context, config)
         service.vn = MagicMock()  # Mock the Vanna backend
@@ -93,7 +93,8 @@ class TestVannaServiceExceptions:
     def test_init_exception_anthropic_chromadb(self):
         """Test that exceptions during VannaAnthropicChromaDB initialization are handled properly."""
         with patch(
-            "utils.chromadb_vector.ChromaDB_VectorStore.__init__", side_effect=Exception("ChromaDB initialization error")
+            "utils.chromadb_vector.ChromaDB_VectorStore.__init__",
+            side_effect=Exception("ChromaDB initialization error"),
         ):
             # Should catch the exception and log it
             with pytest.raises(Exception, match="ChromaDB initialization error"):
@@ -113,7 +114,8 @@ class TestVannaServiceExceptions:
     def test_init_exception_ollama_chromadb(self):
         """Test that exceptions during VannaOllamaChromaDB initialization are handled properly."""
         with patch(
-            "utils.chromadb_vector.ChromaDB_VectorStore.__init__", side_effect=Exception("ChromaDB initialization error")
+            "utils.chromadb_vector.ChromaDB_VectorStore.__init__",
+            side_effect=Exception("ChromaDB initialization error"),
         ):
             # Should catch the exception and log it
             with pytest.raises(Exception, match="ChromaDB initialization error"):
@@ -125,7 +127,7 @@ class TestVannaServiceExceptions:
         """Test that exceptions during VannaService._setup_vanna are caught, logged, but then re-raised."""
         user_context = UserContext(user_id="test_user", user_role=1)
         config = {"ai_keys": {"ollama_model": "test_model"}}  # Missing rag_model to cause exception
-        
+
         # Create service but expect exception in _setup_vanna
         with pytest.raises(KeyError, match="rag_model"):
             VannaService(user_context, config)
@@ -146,9 +148,7 @@ class TestVannaServiceExceptions:
         original_method = service.generate_questions
 
         # We need to directly test without caching, so patch the method to call through to the wrapped function
-        with patch.object(
-            VannaService, "generate_questions", side_effect=lambda: original_method.__wrapped__(service)
-        ):
+        with patch.object(VannaService, "generate_questions", side_effect=lambda: original_method.__wrapped__(service)):
             result = service.generate_questions()
 
             # Verify the exception was logged via streamlit
@@ -231,12 +231,12 @@ class TestVannaServiceExceptions:
     def test_generate_plot_exception(self, mock_st_error, mock_vanna_service):
         """Test that exceptions in generate_plot are handled properly."""
         service = mock_vanna_service
-        
+
         # Mock the underlying vn.get_plotly_figure method to raise an exception
         service.vn.get_plotly_figure.side_effect = Exception("Plot generation error")
-        
+
         # Call the underlying method directly to avoid caching issues
-        with patch.object(service, 'generate_plot', wraps=service.generate_plot.__wrapped__):
+        with patch.object(service, "generate_plot", wraps=service.generate_plot.__wrapped__):
             result, elapsed_time = service.generate_plot("code", DataFrame())
 
             # Should return None and display error
