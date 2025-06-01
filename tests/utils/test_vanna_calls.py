@@ -22,7 +22,8 @@ from utils.vanna_calls import (
 
 # Mock the streamlit secrets for testing
 @pytest.fixture
-def mock_streamlit_secrets():
+def mock_streamlit_secrets(test_chromadb_path):
+    """Mock streamlit secrets using temporary ChromaDB path."""
     with patch(
         "streamlit.secrets",
         new={
@@ -33,7 +34,7 @@ def mock_streamlit_secrets():
                 "anthropic_api": "mock_anthropic_api",
                 "anthropic_model": "claude-3-sonnet-20240229",
             },
-            "rag_model": {"chroma_path": "./chromadb"},
+            "rag_model": {"chroma_path": test_chromadb_path},
             "postgres": {
                 "host": "localhost",
                 "port": 5432,
@@ -50,20 +51,20 @@ def mock_streamlit_secrets():
 # Test for MyVannaOllamaChromaDB class
 @pytest.mark.usefixtures("mock_streamlit_secrets")
 class TestMyVannaOllamaChromaDB:
-    def test_init(self):
+    def test_init(self, test_chromadb_path):
         with (
             patch("utils.vanna_calls.ThriveAI_ChromaDB.__init__") as mock_thriveai_chromadb_init,
             patch("utils.vanna_calls.Ollama.__init__", return_value=None) as mock_ollama_init,
         ):
             # Test initialization
             user_role_test = 1
-            vanna_ollama = MyVannaOllamaChromaDB(user_role=user_role_test, config={"path": "./chromadb"})
+            vanna_ollama = MyVannaOllamaChromaDB(user_role=user_role_test, config={"path": test_chromadb_path})
 
             # Verify ThriveAI_ChromaDB was initialized with the right user_role and config
             assert mock_thriveai_chromadb_init.call_count == 1
             called_args, called_kwargs = mock_thriveai_chromadb_init.call_args
             assert called_kwargs.get("user_role") == user_role_test
-            assert called_kwargs.get("config") == {"path": "./chromadb"}
+            assert called_kwargs.get("config") == {"path": test_chromadb_path}
             
             # Verify Ollama was initialized with the right config
             mock_ollama_init.assert_called_once()
@@ -91,7 +92,7 @@ class TestThriveAIChromaDBMetadata:
         return collection_mock
 
     @pytest.fixture
-    def thrive_ai_chromadb_instance(self, mock_chromadb_collection):
+    def thrive_ai_chromadb_instance(self, mock_chromadb_collection, test_chromadb_path):
         # Instantiate ThriveAI_ChromaDB first
         # Provide dummy implementations for abstract methods for isolated testing if needed
         class ConcreteThriveAI(ThriveAI_ChromaDB):
@@ -106,7 +107,7 @@ class TestThriveAIChromaDBMetadata:
             def submit_prompt(self, prompt, **kwargs):
                 return "Dummy prompt response" # Dummy
 
-        instance = ConcreteThriveAI(user_role=1, config={"path": "./test_chroma"}) # Example role: Doctor
+        instance = ConcreteThriveAI(user_role=1, config={"path": test_chromadb_path}) # Example role: Doctor
         
         # Now, patch the collections on the instance
         instance.sql_collection = mock_chromadb_collection
@@ -114,7 +115,7 @@ class TestThriveAIChromaDBMetadata:
         instance.documentation_collection = mock_chromadb_collection
         yield instance
 
-    def test_init_sets_user_role(self):
+    def test_init_sets_user_role(self, test_chromadb_path):
         test_role = 2 # Example: Nurse
         # Use the same ConcreteThriveAI as in the fixture to avoid abstract method errors
         class ConcreteThriveAI(ThriveAI_ChromaDB):
@@ -124,7 +125,7 @@ class TestThriveAIChromaDBMetadata:
             def assistant_message(self, message: str): return f"ASSISTANT: {message}"
             def submit_prompt(self, prompt, **kwargs): return "Dummy prompt response"
 
-        db = ConcreteThriveAI(user_role=test_role, config={"path": "./test_chroma"})
+        db = ConcreteThriveAI(user_role=test_role, config={"path": test_chromadb_path})
         assert db.user_role == test_role
 
     def test_add_question_sql_with_user_role_metadata(self, thrive_ai_chromadb_instance, mock_chromadb_collection):
@@ -396,18 +397,27 @@ class TestVannaService:
             # Verify setup was called only once (singleton behavior)
             mock_setup.assert_called_once()
 
-    def test_setup_vanna_ollama_chromadb(self):
-        # Test the setup process with explicit config
-        user_context = UserContext(user_id="test_user", user_role=1)
+    def test_setup_vanna_ollama_chromadb(self, test_chromadb_path):
+        """Test setup_vanna with OllamaChromaDB backend"""
         config = {
-            "ai_keys": {"ollama_model": "llama3"},
-            "rag_model": {"chroma_path": "./test_chroma"},
-            "postgres": {"host": "localhost", "database": "thrive", "user": "postgres", "password": "postgres", "port": 5432},
-            "security": {"allow_llm_to_see_data": False}
+            "ai_keys": {
+                "ollama_model": "llama3",
+                "vanna_api": "mock_vanna_api",
+                "vanna_model": "mock_vanna_model",
+            },
+            "rag_model": {"chroma_path": test_chromadb_path},
+            "postgres": {
+                "host": "localhost",
+                "port": 5432,
+                "database": "thrive",
+                "user": "postgres",
+                "password": "postgres",
+            },
+            "security": {"allow_llm_to_see_data": False},
         }
         
         with patch.object(VannaService, "_setup_vanna"):
-            service = VannaService(user_context, config)
+            service = VannaService(user_context=UserContext(user_id="test_user", user_role=1), config=config)
             
             # Manually mock what we want to test
             service.vn = MagicMock()
