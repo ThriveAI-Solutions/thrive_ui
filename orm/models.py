@@ -39,6 +39,8 @@ def content_to_json(type, content):
     if type == MessageType.PLOTLY_CHART.value and not isinstance(content, str):
         json_content = content.to_json()
         return json_content
+    if type == MessageType.FOLLOWUP.value and isinstance(content, list):
+        return json.dumps(content)
     return content
 
 
@@ -243,7 +245,7 @@ def seed_initial_data(session):
         {
             "username": "thriveai-re", "first_name": "Rob", "last_name": "Enderle", 
             "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
-            "role_name": "Patient"
+            "role_name": "Admin"
         },
     ]
 

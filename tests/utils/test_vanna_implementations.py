@@ -66,15 +66,17 @@ class TestMyVannaAnthropic:
 class TestMyVannaAnthropicChromaDB:
     def test_init(self):
         with (
-            patch("utils.vanna_calls.ChromaDB_VectorStore.__init__", return_value=None) as mock_chromadb_init,
+            patch("utils.chromadb_vector.ChromaDB_VectorStore.__init__", return_value=None) as mock_chromadb_init,
             patch("utils.vanna_calls.Anthropic_Chat.__init__", return_value=None) as mock_anthropic_init,
         ):
             # Test initialization
-            vanna_anthropic = MyVannaAnthropicChromaDB()
+            user_role_test = 1 # Example user_role
+            test_config = {"path": "./chromadb"} # Define a test config
+            vanna_anthropic = MyVannaAnthropicChromaDB(user_role=user_role_test, config=test_config) # Pass config
 
-            # Verify ChromaDB_VectorStore was initialized with the right config
+            # Verify ChromaDB_VectorStore (via ThriveAI_ChromaDB) was initialized with the right config
             mock_chromadb_init.assert_called_once()
-            assert mock_chromadb_init.call_args[1]["config"]["path"] == "./chromadb"
+            assert mock_chromadb_init.call_args.kwargs["config"] == test_config
 
             # Verify Anthropic_Chat was initialized with the right parameters
             mock_anthropic_init.assert_called_once()
@@ -132,36 +134,12 @@ class TestTrainDDL:
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
-        # Mock the cursor fetchall method to return schema info
+        # Mock the cursor fetchall method to return schema info as tuples
         mock_cursor.fetchall.return_value = [
-            {
-                "table_schema": "public",
-                "table_name": "users",
-                "column_name": "id",
-                "data_type": "integer",
-                "is_nullable": "NO",
-            },
-            {
-                "table_schema": "public",
-                "table_name": "users",
-                "column_name": "name",
-                "data_type": "varchar",
-                "is_nullable": "YES",
-            },
-            {
-                "table_schema": "public",
-                "table_name": "posts",
-                "column_name": "id",
-                "data_type": "integer",
-                "is_nullable": "NO",
-            },
-            {
-                "table_schema": "public",
-                "table_name": "posts",
-                "column_name": "title",
-                "data_type": "varchar",
-                "is_nullable": "NO",
-            },
+            ("public", "users", "id", "integer", "NO"),
+            ("public", "users", "name", "varchar", "YES"),
+            ("public", "posts", "id", "integer", "NO"),
+            ("public", "posts", "title", "varchar", "NO"),
         ]
 
         # Mock the VannaService instance
@@ -179,7 +157,6 @@ class TestTrainDDL:
         assert call_args["database"] == "thrive"
         assert call_args["user"] == "postgres"
         assert call_args["password"] == "postgres"
-        assert call_args["cursor_factory"] == RealDictCursor
 
         # Verify cursor.execute was called
         mock_cursor.execute.assert_called_once()

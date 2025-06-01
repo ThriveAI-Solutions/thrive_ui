@@ -3,6 +3,7 @@ import logging
 import re
 import textwrap
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,56 @@ from vanna.vannadb import VannaDB_VectorStore
 from utils.chromadb_vector import ThriveAI_ChromaDB
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class UserContext:
+    """User context containing authentication and authorization information."""
+    user_id: str
+    user_role: int
+    
+    @classmethod
+    def from_streamlit_session(cls) -> 'UserContext':
+        """Factory method to create UserContext from Streamlit session/cookies."""
+        return extract_user_context_from_streamlit()
+
+
+def extract_user_context_from_streamlit() -> UserContext:
+    """Extract user context from Streamlit session and cookies."""
+    # Get user_id from cookies (where it's actually stored)
+    user_id = None
+    try:
+        user_id_str = st.session_state.cookies.get("user_id")
+        if user_id_str:
+            user_id = json.loads(user_id_str)
+            # Convert to string for consistent use
+            user_id = str(user_id)
+    except Exception as e:
+        logger.warning(f"Error getting user_id from cookies: {e}")
+        user_id = None
+    
+    if user_id is None:
+        user_id = "anonymous"
+        logger.warning("user_id not found in session state cookies - using anonymous user")
+    
+    # Get user_role from session state  
+    user_role = st.session_state.get("user_role", None)
+    if user_role is None:
+        from orm.models import RoleTypeEnum
+        user_role = RoleTypeEnum.PATIENT.value
+        logger.warning(f"user_role not found in session state for user {user_id} - defaulting to PATIENT role")
+    
+    return UserContext(user_id=user_id, user_role=user_role)
+
+
+def extract_vanna_config_from_secrets() -> dict:
+    """Extract Vanna configuration from Streamlit secrets."""
+    return {
+        "ai_keys": dict(st.secrets["ai_keys"]),
+        "rag_model": dict(st.secrets["rag_model"]),
+        "postgres": dict(st.secrets["postgres"]),
+        "security": dict(st.secrets.get("security", {}))
+    }
 
 
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
@@ -42,13 +93,14 @@ class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
             )
         except Exception as e:
             logger.exception("Error Configuring MyVannaAnthropic: %s", e)
+            raise
 
 
 class MyVannaAnthropicChromaDB(ThriveAI_ChromaDB, Anthropic_Chat):
-    def __init__(self, config=None):
+    def __init__(self, user_role: int, config=None):
         try:
             logger.info("Using Anthropic and chromaDB")
-            ThriveAI_ChromaDB.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
+            ThriveAI_ChromaDB.__init__(self, user_role=user_role, config=config)
             Anthropic_Chat.__init__(
                 self,
                 config={
@@ -58,6 +110,10 @@ class MyVannaAnthropicChromaDB(ThriveAI_ChromaDB, Anthropic_Chat):
             )
         except Exception as e:
             logger.exception("Error Configuring MyVannaAnthropicChromaDB: %s", e)
+            raise
+
+    def log(self, message: str, title: str = "Info"):
+        logger.debug("%s: %s", title, message)
 
 
 class MyVannaOllama(VannaDB_VectorStore, Ollama):
@@ -73,6 +129,7 @@ class MyVannaOllama(VannaDB_VectorStore, Ollama):
             Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllama: %s", e)
+            raise
 
     # override the log function to stop vannas annoying print statements
     def log(self, message: str, title: str = "Info"):
@@ -80,13 +137,14 @@ class MyVannaOllama(VannaDB_VectorStore, Ollama):
 
 
 class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, Ollama):
-    def __init__(self, config=None):
+    def __init__(self, user_role: int, config=None):
         try:
             logger.info("Using Ollama and ChromaDB")
-            ThriveAI_ChromaDB.__init__(self, config={"path": st.secrets["rag_model"]["chroma_path"]})
+            ThriveAI_ChromaDB.__init__(self, user_role=user_role, config=config)
             Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllamaChromaDB: %s", e)
+            raise
 
     # override the log function to stop vannas annoying print statements
     def log(self, message: str, title: str = "Info"):
@@ -112,61 +170,107 @@ def read_forbidden_from_json():
 
 
 class VannaService:
-    _instance = None
+    _instances = {}  # Store instances by user_id instead of just user_role
+
+    def __init__(self, user_context: UserContext, config: dict):
+        """Initialize VannaService with explicit dependencies."""
+        self.user_context = user_context
+        self.config = config
+        self.vn = None
+        self._setup_vanna()
 
     @classmethod
-    def get_instance(cls):
-        if cls._instance is None:
-            cls._instance = cls._initialize_instance()
-        return cls._instance
+    def get_instance(cls, user_context: UserContext = None, config: dict = None):
+        """Get or create VannaService instance for the given user context."""
+        # If no user_context provided, extract from Streamlit (backwards compatibility)
+        if user_context is None:
+            user_context = UserContext.from_streamlit_session()
+        
+        # If no config provided, extract from secrets (backwards compatibility)
+        if config is None:
+            config = extract_vanna_config_from_secrets()
+        
+        # Create cache key that includes both user_id and user_role
+        cache_key = f"vanna_service_{user_context.user_id}_{user_context.user_role}"
+        
+        # Check if we already have an instance for this specific user
+        if user_context.user_id not in cls._instances:
+            cls._instances[user_context.user_id] = cls._create_instance_for_user(user_context, config, cache_key)
+        
+        return cls._instances[user_context.user_id]
+
+    @classmethod
+    def from_streamlit_session(cls):
+        """Factory method to create VannaService from Streamlit session (convenience method)."""
+        user_context = UserContext.from_streamlit_session()
+        config = extract_vanna_config_from_secrets()
+        return cls.get_instance(user_context, config)
 
     @classmethod
     @st.cache_resource(ttl=3600)
-    def _initialize_instance(cls):
-        """Initialize the VannaService instance with appropriate configuration."""
-        instance = cls()
-        instance._setup_vanna()
-        return instance
-
-    def __init__(self):
-        """Private constructor for singleton pattern."""
-        self.vn = None
+    def _create_instance_for_user(cls, user_context: UserContext, config: dict, cache_key: str):
+        """Create VannaService instance for specific user. Cached by user_id and user_role."""
+        # Validate that user_role is a valid role value
+        try:
+            from orm.models import RoleTypeEnum
+            if user_context.user_role not in [role.value for role in RoleTypeEnum]:
+                logger.error(f"Invalid user_role value: {user_context.user_role}. Defaulting to PATIENT role.")
+                st.error(f"Invalid user role detected: {user_context.user_role}. Using restricted access.")
+                user_context.user_role = RoleTypeEnum.PATIENT.value
+        except Exception as e:
+            logger.error(f"Error validating user_role: {e}. Defaulting to PATIENT role.")
+            st.error("Error validating user permissions. Using restricted access.")
+            user_context.user_role = RoleTypeEnum.PATIENT.value
+        
+        return cls(user_context, config)
 
     def _setup_vanna(self):
         """Setup Vanna with appropriate configuration."""
         try:
-            if "ollama_model" in st.secrets.ai_keys:
-                if "chroma_path" in st.secrets.rag_model:
-                    self.vn = MyVannaOllamaChromaDB()
-                elif "vanna_api" in st.secrets.ai_keys and "vanna_model" in st.secrets.ai_keys:
+            chroma_config = {"path": self.config["rag_model"]["chroma_path"]} if "chroma_path" in self.config["rag_model"] else None
+
+            if "ollama_model" in self.config["ai_keys"]:
+                if chroma_config:
+                    self.vn = MyVannaOllamaChromaDB(user_role=self.user_context.user_role, config=chroma_config)
+                elif "vanna_api" in self.config["ai_keys"] and "vanna_model" in self.config["ai_keys"]:
                     self.vn = MyVannaOllama()
                 else:
                     raise ValueError("Missing ollama Configuration Values")
-            elif "anthropic_api" in st.secrets.ai_keys and "anthropic_model" in st.secrets.ai_keys:
-                if "chroma_path" in st.secrets.rag_model:
-                    self.vn = MyVannaAnthropicChromaDB()
-                elif "vanna_api" in st.secrets.ai_keys and "vanna_model" in st.secrets.ai_keys:
+            elif "anthropic_api" in self.config["ai_keys"] and "anthropic_model" in self.config["ai_keys"]:
+                if chroma_config:
+                    self.vn = MyVannaAnthropicChromaDB(user_role=self.user_context.user_role, config=chroma_config)
+                elif "vanna_api" in self.config["ai_keys"] and "vanna_model" in self.config["ai_keys"]:
                     self.vn = MyVannaAnthropic()
                 else:
                     raise ValueError("Missing anthropic Configuration Values")
             else:
                 logger.info("Using Default")
                 self.vn = VannaDefault(
-                    api_key=st.secrets["ai_keys"]["vanna_api"],
-                    model=st.secrets["ai_keys"]["vanna_model"],
+                    api_key=self.config["ai_keys"]["vanna_api"],
+                    model=self.config["ai_keys"]["vanna_model"],
                 )
 
             self.vn.connect_to_postgres(
-                host=st.secrets["postgres"]["host"],
-                dbname=st.secrets["postgres"]["database"],
-                user=st.secrets["postgres"]["user"],
-                password=st.secrets["postgres"]["password"],
-                port=st.secrets["postgres"]["port"],
+                host=self.config["postgres"]["host"],
+                dbname=self.config["postgres"]["database"],
+                user=self.config["postgres"]["user"],
+                password=self.config["postgres"]["password"],
+                port=self.config["postgres"]["port"],
             )
         except Exception as e:
             st.error(f"Error setting up Vanna: {e}")
             logger.exception("%s", e)
             raise
+
+    @property
+    def user_id(self) -> str:
+        """Get the user ID."""
+        return self.user_context.user_id
+
+    @property
+    def user_role(self) -> int:
+        """Get the user role."""
+        return self.user_context.user_role
 
     @st.cache_data(show_spinner="Generating sample questions ...")
     def generate_questions(_self):
@@ -176,7 +280,7 @@ class VannaService:
         except Exception as e:
             st.error(f"Error generating questions: {e}")
             logger.exception("%s", e)
-            return []  # Return empty list instead of None on error
+            return []
         else:
             return questions
 
@@ -185,16 +289,21 @@ class VannaService:
         """Generate SQL from a natural language question."""
         try:
             start_time = time.perf_counter()
+            allow_see_data = _self.config["security"].get("allow_llm_to_see_data", False)
 
-            if "allow_llm_to_see_data" in st.secrets.security and bool(st.secrets.security["allow_llm_to_see_data"]):
-                logging.info("Allowing LLM to see data")
-                response = check_references(_self.vn.generate_sql(question=question, allow_llm_to_see_data=True))
+            if allow_see_data:
+                logger.info("Allowing LLM to see data")
+                sql_response = _self.vn.generate_sql(question=question, allow_llm_to_see_data=True)
             else:
-                logging.info("NOT allowing LLM to see data")
-                response = check_references(_self.vn.generate_sql(question=question))
+                logger.info("NOT allowing LLM to see data")
+                sql_response = _self.vn.generate_sql(question=question)
+            
+            response = _self.check_references(sql_response)
 
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
+            logger.info("Response is %s", response)
+            logger.info("Elapsed time is %s", elapsed_time)
         except Exception as e:
             st.error(f"Error generating SQL: {e}")
             logger.exception("%s", e)
@@ -246,6 +355,7 @@ class VannaService:
             code = _self.vn.generate_plotly_code(question=question, sql=sql, df=df)
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
+            logger.info("Plotly code generation elapsed time is %s", elapsed_time)
         except Exception as e:
             st.error(f"Error generating Plotly code: {e}")
             logger.exception("%s", e)
@@ -258,15 +368,16 @@ class VannaService:
         """Generate Plotly figure from code and data."""
         try:
             start_time = time.perf_counter()
-            plotly = _self.vn.get_plotly_figure(plotly_code=code, df=df)
+            plotly_fig = _self.vn.get_plotly_figure(plotly_code=code, df=df)
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
+            logger.info("Plotly figure generation elapsed time is %s", elapsed_time)
         except Exception as e:
-            st.error(f"Error generating Plotly chart: {e}")
+            st.error(f"Error generating plot: {e}")
             logger.exception("%s", e)
             return None, 0
         else:
-            return plotly, elapsed_time
+            return plotly_fig, elapsed_time
 
     @st.cache_data(show_spinner="Generating followup questions ...")
     def generate_followup_questions(_self, question, sql, df):
@@ -288,20 +399,21 @@ class VannaService:
             response = _self.vn.generate_summary(question=question, df=df)
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
+            logger.info("Summary generation elapsed time is %s", elapsed_time)
         except Exception as e:
             st.error(f"Error generating summary: {e}")
-            logger.exception("Error generating summary: %s", e)
-            return None, 0.0
+            logger.exception("%s", e)
+            return None, 0
         else:
             return response, elapsed_time
 
-    def submit_prompt(_self, system_message, user_message):
+    def submit_prompt(self, system_message, user_message):
         """Submit generic prompt to Vanna."""
         try:
-            return _self.vn.submit_prompt(
+            return self.vn.submit_prompt(
                 prompt=[
-                    _self.vn.system_message(system_message),
-                    _self.vn.user_message(user_message),
+                    self.vn.system_message(system_message),
+                    self.vn.user_message(user_message),
                 ]
             )
         except Exception as e:
@@ -313,39 +425,50 @@ class VannaService:
         """Remove a training entry by ID."""
         try:
             self.vn.remove_training_data(entry_id)
+            return True
         except Exception as e:
             st.error(f"Error removing training data: {e}")
             logger.exception("%s", e)
             return False
-        else:
-            return True
 
     def get_training_data(self, metadata: dict[str, Any] | None = None):
-        """Get all training data."""
+        """Get training data with role-based filtering applied."""
         try:
-            return self.vn.get_training_data(metadata=metadata)
+            # If using ChromaDB backend, it will automatically apply role-based filtering
+            # For other backends, we need to ensure appropriate filtering
+            if hasattr(self.vn, '_prepare_retrieval_metadata'):
+                # ChromaDB backend - let it handle the role-based filtering
+                effective_metadata = self.vn._prepare_retrieval_metadata(metadata)
+                return self.vn.get_training_data(metadata=effective_metadata)
+            else:
+                # Other backends - apply basic role-based filtering
+                effective_metadata = metadata.copy() if metadata is not None else {}
+                effective_metadata["user_role"] = {"$gte": self.user_role}
+                return self.vn.get_training_data(metadata=effective_metadata)
         except Exception as e:
             st.error(f"Error getting training data: {e}")
             logger.exception("%s", e)
             return DataFrame()
 
-    def train(self, question=None, sql=None, documentation=None, ddl=None, plan=None):
-        """Train Vanna with various types of data."""
+    def train(self, question=None, sql=None, documentation=None, ddl=None, plan=None, metadata: dict[str, Any] | None = None):
+        """Train Vanna with various types of data, ensuring user_role is in metadata."""
         try:
+            effective_metadata = metadata.copy() if metadata is not None else {}
+            effective_metadata["user_role"] = self.user_role
+
             if question and sql:
-                self.vn.train(question=question, sql=sql)
+                self.vn.add_question_sql(question=question, sql=sql, metadata=effective_metadata)
             elif documentation:
-                self.vn.train(documentation=documentation)
+                self.vn.add_documentation(documentation=documentation, metadata=effective_metadata)
             elif ddl:
-                self.vn.train(ddl=ddl)
+                self.vn.add_ddl(ddl=ddl, metadata=effective_metadata)
             elif plan:
                 self.vn.train(plan=plan)
+            return True
         except Exception as e:
             st.error(f"Error training Vanna: {e}")
             logger.exception("%s", e)
             return False
-        else:
-            return True
 
     def get_training_plan_generic(self, df_information_schema):
         """Get a generic training plan."""
@@ -358,6 +481,34 @@ class VannaService:
         else:
             return plan
 
+    def check_references(self, sql):
+        """Check SQL for forbidden references."""
+        try:
+            forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+
+            # TODO: should I make this role based? or user based?
+            parsed = sqlparse.parse(sql)[0]
+            tables, columns = get_identifiers(parsed)
+
+            # Check for forbidden references
+            referenced_tables = set(forbidden_tables).intersection(set(tables))
+            referenced_columns = set(forbidden_columns).intersection(set(columns))
+            if referenced_tables:
+                raise ValueError(f"Referenced forbidden tables: {referenced_tables}")
+            if referenced_columns:
+                raise ValueError(f"Referenced forbidden columns: {referenced_columns}")
+        except Exception as e:
+            st.error(f"Error checking references: {e}")
+            logger.exception("%s", e)
+        else:
+            return sql
+
+    @classmethod
+    def _initialize_instance(cls):
+        """Initialize the VannaService instance with appropriate configuration."""
+        # This method is now just a wrapper around get_instance for backwards compatibility
+        return cls.get_instance()
+
 
 # Backward compatibility functions that use the VannaService singleton
 def setup_vanna():
@@ -365,79 +516,57 @@ def setup_vanna():
     Legacy function for backward compatibility.
     Returns the Vanna instance from the VannaService singleton.
     """
-    return VannaService.get_instance().vn
+    return VannaService.from_streamlit_session().vn
 
 
 @st.cache_data(show_spinner="Generating sample questions ...")
 def generate_questions_cached():
-    return VannaService.get_instance().generate_questions()
+    return VannaService.from_streamlit_session().generate_questions()
 
 
 @st.cache_data(show_spinner="Generating SQL query ...")
 def generate_sql_cached(question: str):
-    try:
-        start_time = time.time()
-
-        if (
-            "allow_llm_to_see_data" in st.secrets.security
-            and bool(st.secrets.security["allow_llm_to_see_data"]) == True
-        ):
-            logger.info("Allowing LLM to see data")
-            response = check_references(
-                VannaService.get_instance().generate_sql(question=question, allow_llm_to_see_data=True)
-            )
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            return response, elapsed_time
-        else:
-            logger.info("NOT allowing LLM to see data")
-            response = check_references(VannaService.get_instance().generate_sql(question=question))
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            return response, elapsed_time
-    except Exception as e:
-        st.error(f"Error generating SQL: {e}")
-        logger.exception(e)
+    return VannaService.from_streamlit_session().generate_sql(question=question)
 
 
 @st.cache_data(show_spinner="Checking for valid SQL ...")
 def is_sql_valid_cached(sql: str):
-    return VannaService.get_instance().is_sql_valid(sql)
+    return VannaService.from_streamlit_session().is_sql_valid(sql)
 
 
 @st.cache_data(show_spinner="Running SQL query ...")
 def run_sql_cached(sql: str) -> DataFrame:
-    return VannaService.get_instance().run_sql(sql)
+    return VannaService.from_streamlit_session().run_sql(sql)
 
 
 @st.cache_data(show_spinner="Checking if we should generate a chart ...")
 def should_generate_chart_cached(question, sql, df):
-    return VannaService.get_instance().should_generate_chart(question, sql, df)
+    return VannaService.from_streamlit_session().should_generate_chart(question, sql, df)
 
 
 @st.cache_data(show_spinner="Generating Plotly code ...")
 def generate_plotly_code_cached(question, sql, df):
-    return VannaService.get_instance().generate_plotly_code(question, sql, df)
+    return VannaService.from_streamlit_session().generate_plotly_code(question, sql, df)
 
 
 @st.cache_data(show_spinner="Running Plotly code ...")
 def generate_plot_cached(code, df):
-    return VannaService.get_instance().generate_plot(code, df)
+    return VannaService.from_streamlit_session().generate_plot(code, df)
 
 
 @st.cache_data(show_spinner="Generating followup questions ...")
 def generate_followup_cached(question, sql, df):
-    return VannaService.get_instance().generate_followup_questions(question, sql, df)
+    return VannaService.from_streamlit_session().generate_followup_questions(question, sql, df)
 
 
 @st.cache_data(show_spinner="Generating summary ...")
 def generate_summary_cached(question: str, df: DataFrame) -> tuple[str | None, float]:
-    return VannaService.get_instance().generate_summary(question, df)
+    return VannaService.from_streamlit_session().generate_summary(question, df)
 
 
 def remove_from_file_training(new_entry: dict):
     try:
-        vanna_service = VannaService.get_instance()
+        vanna_service = VannaService.from_streamlit_session()
         training_data = vanna_service.get_training_data()
 
         for index, row in training_data.iterrows():
@@ -473,7 +602,7 @@ def remove_from_file_training(new_entry: dict):
 
 def write_to_file_and_training(new_entry: dict):
     try:
-        vanna_service = VannaService.get_instance()
+        vanna_service = VannaService.from_streamlit_session()
         vanna_service.train(question=new_entry["question"], sql=new_entry["query"])
 
         # Path to the training_data.json file
@@ -502,7 +631,7 @@ def write_to_file_and_training(new_entry: dict):
 
 
 def training_plan():
-    vanna_service = VannaService.get_instance()
+    vanna_service = VannaService.from_streamlit_session()
     forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
 
     # The information schema query may need some tweaking depending on your database. This is a good starting point.
@@ -527,6 +656,7 @@ def training_plan():
 # Train Vanna on database schema
 def train_ddl(describe_ddl_from_llm: bool = False):
     try:
+        st.toast("🚀 Starting DDL training...")
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
 
         # PostgreSQL Connection
@@ -561,14 +691,20 @@ def train_ddl(describe_ddl_from_llm: bool = False):
         # Format schema for training
         ddl = []
         current_table = None
+        tables_trained = 0
+        
+        vanna_service = VannaService.from_streamlit_session()
+        
         for row in schema_info:
             if current_table != row[1]:
                 if current_table is not None:
                     ddl.append(");")
-                    VannaService.get_instance().train(ddl=" ".join(ddl))
+                    vanna_service.train(ddl=" ".join(ddl))
+                    st.toast(f"✓ Trained DDL for table: {current_table}")
                     if describe_ddl_from_llm:
-                        train_ddl_describe_to_rag(conn, current_table, ddl)
+                        train_ddl_describe_to_rag(current_table, ddl)
                     ddl = []  # reset ddl for next table
+                    tables_trained += 1
                 current_table = row[1]
                 ddl.append(f"\nCREATE TABLE {row[1]} (")
             else:
@@ -579,38 +715,101 @@ def train_ddl(describe_ddl_from_llm: bool = False):
 
         if ddl:  # Close the last table
             ddl.append(");")
-            VannaService.get_instance().train(ddl=" ".join(ddl))
+            vanna_service.train(ddl=" ".join(ddl))
+            st.toast(f"✓ Trained DDL for table: {current_table}")
             if describe_ddl_from_llm:
-                train_ddl_describe_to_rag(conn, current_table, ddl)
+                train_ddl_describe_to_rag(current_table, ddl)
             ddl = []  # reset ddl for next table
+            tables_trained += 1
 
         cursor.close()
         conn.close()
+        
+        # Show final success message
+        if tables_trained > 0:
+            st.success(f"🎉 DDL Training completed successfully! Trained {tables_trained} table(s).")
+        else:
+            st.warning("No tables found to train DDL on.")
+            
     except Exception as e:
         st.error(f"Error training DDL: {e}")
         logger.exception("%s", e)
 
 
-def train_ddl_describe_to_rag(conn, table, ddl):
+def train_ddl_describe_to_rag(table: str, ddl: list):
+    conn = None  # Initialize conn for the finally block
     try:
-        query = f"SELECT * FROM {table} LIMIT 10;"
-        df = pd.read_sql_query(query, conn)
+        # Establish a new connection for this function
+        conn = psycopg2.connect(
+            host=st.secrets["postgres"]["host"],
+            port=st.secrets["postgres"]["port"],
+            database=st.secrets["postgres"]["database"],
+            user=st.secrets["postgres"]["user"],
+            password=st.secrets["postgres"]["password"],
+        )
 
-        # Iterate over each column in the DataFrame
-        for column in df.columns:
-            # Query the top 10 rows from the table
-            # query = f"SELECT * FROM {table} LIMIT 10;"
-            query = f"SELECT DISTINCT ({column}) FROM {table} ORDER BY {column} LIMIT 10;"
-            data = pd.read_sql_query(query, conn)
+        # Use a cursor to get column names to avoid issues if table is empty or doesn't exist
+        with conn.cursor() as cur:
+            # Use sqlparse.sql.Identifier for safe table name formatting in query
+            # To correctly use Identifier for a plain string table name, wrap it in a TokenList
+            # containing a single Token of type Name.
+            # However, a simpler way for just quoting is to use psycopg2's quoting or f-string with careful quoting.
+            # Given sqlparse is already a dependency, let's try to use it correctly or fall back.
+            # For now, let's assume the direct use of Identifier on a string was problematic, and rely on psycopg2's parameterization or SQL object composition.
+            # Psycopg2 itself doesn't directly substitute table/column names in `execute`. 
+            # `sqlparse.sql.Identifier` is for manipulating parsed SQL structures.
+            # A common way to safely quote identifiers is using `psycopg2.sql.Identifier`
+            try:
+                from psycopg2 import sql as psycopg2_sql  # Import it conditionally or at top if always used
+                safe_table_ident = psycopg2_sql.Identifier(table)
+                query_string = psycopg2_sql.SQL("SELECT * FROM {} LIMIT 1;").format(safe_table_ident)
+                cur.execute(query_string)
+            except ImportError:
+                 # Fallback if psycopg2.sql is not available or for some other reason, though it should be with psycopg2
+                 # This might still be unsafe if table name contains quotes, but Identifier was also causing issues.
+                 # The original code was: cur.execute(f"SELECT * FROM {sqlparse.sql.Identifier(table)} LIMIT 1;")
+                 # The issue was `sqlparse.sql.Identifier(table)` when table is a string.
+                 # For a direct f-string, one would need to ensure `table` is validated and sanitized.
+                 # Let's revert to a simpler quoting for the purpose of the fix, assuming `table` is a simple name.
+                 # A better fix would be to use psycopg2.sql.Identifier consistently.
+                 cur.execute(f'SELECT * FROM "{table}" LIMIT 1;') # Simple quoting, assumes table is valid
 
-            st.toast(f"Training column: {table}.{column}")
-            column_data = data[column].tolist()  # Convert the column data to a list
+            if cur.description is None:
+                logger.warning(f"Skipping DDL description for table {table} as it might be empty or not found.")
+                return
+            colnames = [desc[0] for desc in cur.description]
+
+        vanna_service = VannaService.from_streamlit_session()
+        
+        for column in colnames:
+            # Properly quote column name for the query
+            # Similar issue here as with table name for sqlparse.sql.Identifier
+            # Using psycopg2.sql.Identifier is preferred.
+            try:
+                from psycopg2 import sql as psycopg2_sql
+                safe_table_ident = psycopg2_sql.Identifier(table)
+                safe_column_ident = psycopg2_sql.Identifier(column)
+                query_string = psycopg2_sql.SQL("SELECT DISTINCT {col} FROM {tab} ORDER BY {col} LIMIT 10;").format(
+                    col=safe_column_ident, tab=safe_table_ident
+                )
+                data = pd.read_sql_query(query_string.as_string(conn), conn) # as_string(conn) for psycopg2 >2.8
+            except ImportError:
+                # Fallback for pd.read_sql_query, which can also take a SQL string directly
+                query = f'SELECT DISTINCT "{column}" FROM "{table}" ORDER BY "{column}" LIMIT 10;'
+                data = pd.read_sql_query(query, conn)
+            except psycopg2.Error as col_query_err:
+                logger.warning(f"Could not query column {column} from table {table}. Skipping. Error: {col_query_err}")
+                continue # Skip this column if it can't be queried (e.g., complex type not directly usable in DISTINCT/ORDER BY)
+
+            st.toast(f"Describing column: {table}.{column}")
+            column_data = data[column].tolist()
 
             system_message = "You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:"
+            ddl_string = " ".join(ddl) # Convert list of ddl parts to a string
             prompt = textwrap.dedent(f"""
                 1. First, review the DDL (Data Definition Language) for the entire table:
                 <ddl>
-                {ddl}
+                {ddl_string}
                 </ddl>
             
                 2. Now, focus on the specific column you need to describe:
@@ -635,29 +834,28 @@ def train_ddl_describe_to_rag(conn, table, ddl):
                 - A brief description of the column's properties as defined in the DDL
             
                 Remember to keep your response concise yet informative, focusing on the most relevant details for a PostgreSQL expert. Do not include any XML tags in your response.
+            """)
 
-            """)# The response should be a maximum of 1000 characters in length.  
-
-            description = VannaService.get_instance().submit_prompt(system_message=system_message, user_message=prompt)
+            description = vanna_service.submit_prompt(system_message=system_message, user_message=prompt)
             description = re.sub(r"[•●▪️–—\-•·►★✓✔✗✘➔➤➢➣➤➥➦➧➨➩➪➫➬➭➮➯➱➲➳➴➵➶➷➸➹➺➻➼➽➾]", "", description)
-            # description = str(description)[:1050]
             logger.info(f"Column: {table}.{column}, Description: {description}")
-            # ddl.append(f"COMMENT ON COLUMN {table}.{column} IS '{description}';")
-            VannaService.get_instance().train(documentation=f"{table}.{column} {description}")
+            vanna_service.train(documentation=f"{table}.{column} {description}")
 
-        # prompt = f"You are a PostgreSQL expert.  Describe the table '{table}' with the following sample data: {df.to_dict(orient='records')}. The response should be in plain text.";
-        # description = ask(prompt)
-        # vn.train(documentation=description)
-
+    except psycopg2.Error as db_err:
+        st.error(f"Database error during DDL description for {table}: {db_err}")
+        logger.exception(f"Database error during DDL description for {table}: %s", db_err)
     except Exception as e:
-        st.error(f"Error training Table DDL to RAG: {e}")
-        logger.exception(e)
+        st.error(f"Error training Table DDL to RAG for {table}: {e}")
+        logger.exception(f"Error training Table DDL to RAG for {table}: %s", e)
+    finally:
+        if conn:
+            conn.close() # Ensure connection is closed
 
 
 # Train Vanna on database question/query pairs from file
 def train_file():
     try:
-        vanna_service = VannaService.get_instance()
+        vanna_service = VannaService.from_streamlit_session()
 
         # Load training queries from JSON
         training_file = Path(__file__).parent / "config" / "training_data.json"
@@ -728,25 +926,3 @@ def get_identifiers(parsed):
         logger.exception("%s", e)
     else:
         return tables, columns
-
-
-def check_references(sql):
-    try:
-        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
-
-        # TODO: should I make this role based? or user based?
-        parsed = sqlparse.parse(sql)[0]
-        tables, columns = get_identifiers(parsed)
-
-        # Check for forbidden references
-        referenced_tables = set(forbidden_tables).intersection(set(tables))
-        referenced_columns = set(forbidden_columns).intersection(set(columns))
-        if referenced_tables:
-            raise ValueError(f"Referenced forbidden tables: {referenced_tables}")
-        if referenced_columns:
-            raise ValueError(f"Referenced forbidden columns: {referenced_columns}")
-    except Exception as e:
-        st.error(f"Error checking references: {e}")
-        logger.exception("%s", e)
-    else:
-        return sql
