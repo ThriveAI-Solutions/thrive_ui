@@ -4,6 +4,7 @@ import logging
 
 import streamlit as st
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 from orm.models import Message, SessionLocal, User
 
@@ -77,6 +78,7 @@ def set_user_preferences_in_session_state():
         st.session_state.show_elapsed_time = user.show_elapsed_time
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.min_message_id = user.min_message_id
+        st.session_state.user_role = user.role.role.value
         st.session_state.loaded = True  # dont call after initial load
 
         return user
@@ -129,8 +131,13 @@ def get_user(user_id):
     try:
         # Create a new database session
         with SessionLocal() as session:
-            # Query to get the user by ID
-            user = session.query(User).filter(User.id == user_id).first()
+            # Query to get the user by ID, eagerly loading the role
+            user = (
+                session.query(User)
+                .options(joinedload(User.role))
+                .filter(User.id == user_id)
+                .one_or_none()
+            )
             return user
     except Exception as e:
         st.error(f"Error getting user: {e}")
