@@ -60,13 +60,13 @@ tab1, tab2 = st.tabs(["Training Data", "Change Password"])
 with tab1:
     cols = st.columns((0.2, 0.3, 0.2, 0.2, 0.2, 0.3, 0.2))
     with cols[0]:
-        st.button("Train DDL", on_click=lambda: train_ddl())
+        st.button("Train DDL", on_click=train_ddl)
     with cols[1]:
         st.button("DDL Describe", type="primary", on_click=lambda: train_ddl(describe_ddl_from_llm=True))
     with cols[2]:
-        st.button("Train Plan", on_click=lambda: training_plan())
+        st.button("Train Plan", on_click=training_plan)
     with cols[3]:
-        st.button("Train FIle", on_click=lambda: train_file())
+        st.button("Train FIle", on_click=train_file)
     with cols[4]:
         if st.button("Add Sql"):
             pop_train("sql")
@@ -74,7 +74,7 @@ with tab1:
         if st.button("Add Documentation"):
             pop_train("documentation")
     with cols[6]:
-        st.button("Remove All", type="primary", on_click=lambda: delete_all_training())
+        st.button("Remove All", type="primary", on_click=delete_all_training)
 
     # st.dataframe(df)
 
@@ -112,5 +112,5 @@ with tab2:
                     st.error("Current password is incorrect.")
 
 st.sidebar.button(
-    "Delete all message data", on_click=lambda: delete_all_messages(), use_container_width=True, type="primary"
+    "Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary"
 )
