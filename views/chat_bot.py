@@ -154,10 +154,44 @@ def _render_python(message: Message, index: int):
     st.code(message.content, language="python", line_numbers=True)
 
 
+def _render_line_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.line_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+
+
+def _render_bar_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.bar_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+
+
+def _render_area_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.area_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+
+
+def _render_scatter_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.scatter_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+
+
 def _render_plotly_chart(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
+    message.content = message.content.replace("#000001", "#0b5258")  # Replace color code for consistency
     chart = json.loads(message.content)
+    print(message.content)
     st.plotly_chart(chart, key=f"message_{index}")
 
 
@@ -183,13 +217,51 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
             df_json_content = my_df.to_json(orient="records")
             add_message(
-                Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question)
+                Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question), False
             )
-        st.button(
-            "Generate Graph",
-            key=f"graph_{index}",
-            on_click=lambda: get_chart(message.question, message.query, my_df),
-        )
+        
+        df = pd.read_json(StringIO(message.dataframe))
+        if len(df.columns) >= 2:
+            cols = st.columns((1, 1, 1, 1, 1))
+            with cols[0]:
+                st.button(
+                    "Generate Plotly",
+                    key=f"graph_{index}",
+                    on_click=lambda: get_chart(message.question, message.query, my_df),
+                )
+            with cols[1]:
+                if st.button(
+                    "Line Chart",
+                    key=f"line_chart_{index}"
+                ):
+                    add_message(
+                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_LINE_CHART, message.query, message.question, message.dataframe, 0), False
+                    )
+            with cols[2]:
+                if st.button(
+                    "Bar Chart",
+                    key=f"bar_chart_{index}"
+                ):
+                    add_message(
+                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_BAR_CHART, message.query, message.question, message.dataframe, 0), False
+                    )
+            with cols[3]:
+                if st.button(
+                    "Area Chart",
+                    key=f"area_chart_{index}"
+                ):
+                    add_message(
+                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_AREA_CHART, message.query, message.question, message.dataframe, 0), False
+                    )
+            with cols[4]:
+                if st.button(
+                    "Scatter Chart",
+                    key=f"scatter_chart_{index}"
+                ):
+                    add_message(
+                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_SCATTER_CHART, message.query, message.question, message.dataframe, 0), False
+                    )
+
         with st.expander("Show SQL"):
             st.code(message.query, language="sql", line_numbers=True)
 
@@ -259,6 +331,10 @@ MESSAGE_RENDERERS = {
     MessageType.SQL.value: _render_sql,
     MessageType.PYTHON.value: _render_python,
     MessageType.PLOTLY_CHART.value: _render_plotly_chart,
+    MessageType.ST_LINE_CHART.value: _render_line_chart,
+    MessageType.ST_BAR_CHART.value: _render_bar_chart,
+    MessageType.ST_AREA_CHART.value: _render_area_chart,
+    MessageType.ST_SCATTER_CHART.value: _render_scatter_chart,
     MessageType.ERROR.value: _render_error,
     MessageType.DATAFRAME.value: _render_dataframe,
     MessageType.SUMMARY.value: _render_summary,
@@ -289,6 +365,11 @@ def call_llm(my_question: str):
 
 
 ######### Sidebar settings #########
+st.logo(
+    image="assets/logo.png",
+    size="medium",
+    icon_image="assets/icon.jpg"
+)
 with st.sidebar.expander("Settings"):
     st.checkbox("Show SQL", key="show_sql")
     st.checkbox("Show Table", key="show_table")
@@ -347,7 +428,7 @@ if st.session_state.get("show_question_history", True):
 # st.sidebar.write(st.session_state)
 ######### Sidebar settings #########
 
-st.title("Thrive AI")
+#st.title("Thrive AI")
 
 if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):
@@ -439,6 +520,7 @@ if my_question:
             summary, elapsed_time = vn.generate_summary(question=my_question, df=df)
             if summary is not None:
                 if st.session_state.get("show_summary", True):
+                    print(df)
                     add_message(
                         Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time)
                     )
