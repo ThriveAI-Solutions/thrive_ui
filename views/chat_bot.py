@@ -159,7 +159,9 @@ def _render_line_chart(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     df = pd.read_json(StringIO(message.dataframe))
     columns = df.columns.tolist()
-    st.line_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+    st.line_chart(
+        df, x=columns[0], y=columns[1], color="#0b5258"
+    )  # Assuming first column is x-axis and rest are y-axis
 
 
 def _render_bar_chart(message: Message, index: int):
@@ -175,7 +177,9 @@ def _render_area_chart(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     df = pd.read_json(StringIO(message.dataframe))
     columns = df.columns.tolist()
-    st.area_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+    st.area_chart(
+        df, x=columns[0], y=columns[1], color="#0b5258"
+    )  # Assuming first column is x-axis and rest are y-axis
 
 
 def _render_scatter_chart(message: Message, index: int):
@@ -183,7 +187,9 @@ def _render_scatter_chart(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     df = pd.read_json(StringIO(message.dataframe))
     columns = df.columns.tolist()
-    st.scatter_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+    st.scatter_chart(
+        df, x=columns[0], y=columns[1], color="#0b5258"
+    )  # Assuming first column is x-axis and rest are y-axis
 
 
 def _render_plotly_chart(message: Message, index: int):
@@ -217,9 +223,10 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
             df_json_content = my_df.to_json(orient="records")
             add_message(
-                Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question), False
+                Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question),
+                False,
             )
-        
+
         df = pd.read_json(StringIO(message.dataframe))
         if len(df.columns) >= 2:
             cols = st.columns((1, 1, 1, 1, 1))
@@ -230,36 +237,60 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
                     on_click=lambda: get_chart(message.question, message.query, my_df),
                 )
             with cols[1]:
-                if st.button(
-                    "Line Chart",
-                    key=f"line_chart_{index}"
-                ):
+                if st.button("Line Chart", key=f"line_chart_{index}"):
                     add_message(
-                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_LINE_CHART, message.query, message.question, message.dataframe, 0), False
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_LINE_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
                     )
             with cols[2]:
-                if st.button(
-                    "Bar Chart",
-                    key=f"bar_chart_{index}"
-                ):
+                if st.button("Bar Chart", key=f"bar_chart_{index}"):
                     add_message(
-                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_BAR_CHART, message.query, message.question, message.dataframe, 0), False
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_BAR_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
                     )
             with cols[3]:
-                if st.button(
-                    "Area Chart",
-                    key=f"area_chart_{index}"
-                ):
+                if st.button("Area Chart", key=f"area_chart_{index}"):
                     add_message(
-                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_AREA_CHART, message.query, message.question, message.dataframe, 0), False
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_AREA_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
                     )
             with cols[4]:
-                if st.button(
-                    "Scatter Chart",
-                    key=f"scatter_chart_{index}"
-                ):
+                if st.button("Scatter Chart", key=f"scatter_chart_{index}"):
                     add_message(
-                        Message(RoleType.ASSISTANT, message.dataframe, MessageType.ST_SCATTER_CHART, message.query, message.question, message.dataframe, 0), False
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_SCATTER_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
                     )
 
         with st.expander("Show SQL"):
@@ -365,11 +396,7 @@ def call_llm(my_question: str):
 
 
 ######### Sidebar settings #########
-st.logo(
-    image="assets/logo.png",
-    size="medium",
-    icon_image="assets/icon.jpg"
-)
+st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
 with st.sidebar.expander("Settings"):
     st.checkbox("Show SQL", key="show_sql")
     st.checkbox("Show Table", key="show_table")
@@ -428,7 +455,7 @@ if st.session_state.get("show_question_history", True):
 # st.sidebar.write(st.session_state)
 ######### Sidebar settings #########
 
-#st.title("Thrive AI")
+# st.title("Thrive AI")
 
 if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):

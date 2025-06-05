@@ -633,7 +633,7 @@ def train_ddl_describe_to_rag(conn, table, ddl):
             
                 Remember to keep your response concise yet informative, focusing on the most relevant details for a PostgreSQL expert. Do not include any XML tags in your response.
 
-            """)# The response should be a maximum of 1000 characters in length.  
+            """)  # The response should be a maximum of 1000 characters in length.
 
             description = VannaService.get_instance().submit_prompt(system_message=system_message, user_message=prompt)
             description = re.sub(r"[•●▪️–—\-•·►★✓✔✗✘➔➤➢➣➤➥➦➧➨➩➪➫➬➭➮➯➱➲➳➴➵➶➷➸➹➺➻➼➽➾]", "", description)

@@ -59,7 +59,6 @@ def show_login():
         st.title("🔓 Log In")
 
         with st.form("login_form"):
-            
             username = st.text_input("Username")
             password = st.text_input("Password", type="password")
             submit_button = st.form_submit_button("Login", type="primary")

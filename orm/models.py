@@ -190,7 +190,10 @@ def seed_initial_data(session):
     roles_to_seed = [
         {"role_name": "Admin", "description": "Administrator with full access"},
         {"role_name": "Doctor", "description": "A physician who has the rights to view some individual patient data"},
-        {"role_name": "Patient", "description": "Patient access, only has access to see their own data or population data"},
+        {
+            "role_name": "Patient",
+            "description": "Patient access, only has access to see their own data or population data",
+        },
     ]
 
     for role_data in roles_to_seed:
@@ -199,53 +202,70 @@ def seed_initial_data(session):
             new_role = UserRole(**role_data)
             session.add(new_role)
 
-    session.commit() # Commit roles before users to ensure role IDs are available
+    session.commit()  # Commit roles before users to ensure role IDs are available
 
     # Seed Users
     users_to_seed = [
         {
-            "username": "thriveai-kr", "first_name": "Kyle", "last_name": "Root", 
-            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
-            "role_name": "Patient" 
+            "username": "thriveai-kr",
+            "first_name": "Kyle",
+            "last_name": "Root",
+            "show_summary": True,
+            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "role_name": "Patient",
         },
         {
-            "username": "thriveai-je", "first_name": "Joseph", "last_name": "Eberle", 
-            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
-            "role_name": "Patient"
+            "username": "thriveai-je",
+            "first_name": "Joseph",
+            "last_name": "Eberle",
+            "show_summary": True,
+            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "role_name": "Patient",
         },
         {
-            "username": "thriveai-as", "first_name": "Al", "last_name": "Seoud", 
-            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
-            "role_name": "Patient"
+            "username": "thriveai-as",
+            "first_name": "Al",
+            "last_name": "Seoud",
+            "show_summary": True,
+            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "role_name": "Patient",
         },
         {
-            "username": "thriveai-fm", "first_name": "Frankly", "last_name": "Metty", 
-            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
-            "role_name": "Patient"
+            "username": "thriveai-fm",
+            "first_name": "Frankly",
+            "last_name": "Metty",
+            "show_summary": True,
+            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "role_name": "Patient",
         },
         {
-            "username": "thriveai-dr", "first_name": "Dr.", "last_name": "Smith", 
-            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
-            "role_name": "Doctor"
+            "username": "thriveai-dr",
+            "first_name": "Dr.",
+            "last_name": "Smith",
+            "show_summary": True,
+            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "role_name": "Doctor",
         },
         {
-            "username": "thriveai-re", "first_name": "Rob", "last_name": "Enderle", 
-            "show_summary": True, "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", 
-            "role_name": "Patient"
+            "username": "thriveai-re",
+            "first_name": "Rob",
+            "last_name": "Enderle",
+            "show_summary": True,
+            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "role_name": "Patient",
         },
     ]
 
     for user_data in users_to_seed:
         user = session.query(User).filter_by(username=user_data["username"]).first()
         if not user:
-            role_name = user_data.pop("role_name") # Remove role_name from user_data
+            role_name = user_data.pop("role_name")  # Remove role_name from user_data
             role = session.query(UserRole).filter_by(role_name=role_name).first()
-            if role: # Ensure role exists
+            if role:  # Ensure role exists
                 new_user = User(**user_data, user_role_id=role.id)
                 session.add(new_user)
             else:
                 logger.warning(f"Role '{role_name}' not found for user '{user_data['username']}'. User not created.")
-
 
     session.commit()
 
