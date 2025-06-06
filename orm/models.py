@@ -235,7 +235,7 @@ def seed_initial_data(session):
             "last_name": "Root",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-            "role_name": "Patient",
+            "role_name": "Admin",
         },
         {
             "username": "thriveai-je",
@@ -243,7 +243,7 @@ def seed_initial_data(session):
             "last_name": "Eberle",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-            "role_name": "Patient",
+            "role_name": "Admin",
         },
         {
             "username": "thriveai-as",
@@ -251,7 +251,7 @@ def seed_initial_data(session):
             "last_name": "Seoud",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-            "role_name": "Patient",
+            "role_name": "Admin",
         },
         {
             "username": "thriveai-fm",
@@ -259,7 +259,7 @@ def seed_initial_data(session):
             "last_name": "Metty",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
-            "role_name": "Patient",
+            "role_name": "Admin",
         },
         {
             "username": "thriveai-dr",

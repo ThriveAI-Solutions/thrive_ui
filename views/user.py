@@ -65,28 +65,27 @@ st.title("User Settings")
 tab1, tab2 = st.tabs(["Training Data", "Change Password"])
 
 with tab1:
-    cols = st.columns((0.2, 0.3, 0.2, 0.2, 0.2, 0.3, 0.2))
-    with cols[0]:
-        st.button("Train DDL", on_click=train_ddl)
-    with cols[1]:
-        st.button("DDL Describe", type="primary", on_click=lambda: train_ddl(describe_ddl_from_llm=True))
-    with cols[2]:
-        st.button("Train Plan", on_click=training_plan)
-    with cols[3]:
-        st.button("Train File", on_click=train_file)
-    with cols[4]:
-        if st.button("Add Sql"):
-            pop_train("sql")
-    with cols[5]:
-        if st.button("Add Documentation"):
-            pop_train("documentation")
-    with cols[6]:
-        st.button("Remove All", type="primary", on_click=delete_all_training)
+    if st.session_state.cookies.get("role_name") == "admin":
+        cols = st.columns((0.2, 0.3, 0.2, 0.2, 0.2, 0.3, 0.2))
+        with cols[0]:
+            st.button("Train DDL", on_click=train_ddl)
+        with cols[1]:
+            st.button("DDL Describe", type="primary", on_click=lambda: train_ddl(describe_ddl_from_llm=True))
+        with cols[2]:
+            st.button("Train Plan", on_click=training_plan)
+        with cols[3]:
+            st.button("Train FIle", on_click=train_file)
+        with cols[4]:
+            if st.button("Add Sql"):
+                pop_train("sql")
+        with cols[5]:
+            if st.button("Add Documentation"):
+                pop_train("documentation")
+        with cols[6]:
+            st.button("Remove All", type="primary", on_click=delete_all_training)
 
     # Get training data with current user's role-based filtering
     df = vn.get_training_data()
-
-    # st.dataframe(df)
 
     colms = st.columns((1, 2, 3, 1))
     fields = ["Type", "Question", "Sql", "Action"]
@@ -99,12 +98,13 @@ with tab1:
         col1.write(row["training_data_type"])
         col2.write(row["question"])
         col3.write(row["content"])
-        button_phold = col4.empty()
-        do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
-        if do_action:
-            vn.remove_from_training(row["id"])
-            st.toast("Training Data Deleted Successfully!")
-            st.rerun()
+        if st.session_state.cookies.get("role_name") == "admin":
+            button_phold = col4.empty()
+            do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
+            if do_action:
+                vn.remove_from_training(row["id"])
+                st.toast("Training Data Deleted Successfully!")
+                st.rerun()
 with tab2:
     with st.form("change_password_form"):
         current_password = st.text_input("Current Password", type="password")
@@ -121,4 +121,5 @@ with tab2:
                 else:
                     st.error("Current password is incorrect.")
 
-st.sidebar.button("Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary")
+if st.session_state.cookies.get("role_name") == "admin":
+    st.sidebar.button("Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary")
