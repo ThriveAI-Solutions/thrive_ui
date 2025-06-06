@@ -5,9 +5,11 @@ import random
 import time
 import uuid
 from io import StringIO
+
 import pandas as pd
 import streamlit as st
 from ethical_guardrails_lib import get_ethical_guideline
+
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
 from utils.communicate import listen, speak
@@ -227,8 +229,8 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
                 False,
             )
 
-        df = pd.read_json(StringIO(message.dataframe))
-        if len(df.columns) >= 2:
+        # Use the already parsed DataFrame instead of parsing again
+        if len(my_df.columns) >= 2:
             cols = st.columns((1, 1, 1, 1, 1))
             with cols[0]:
                 st.button(
@@ -396,20 +398,40 @@ def call_llm(my_question: str):
 
 
 ######### Sidebar settings #########
+
+def save_settings_on_click():
+    """Update session state with temporary settings values and save to database"""
+    # Update session state with temporary values
+    st.session_state.show_sql = st.session_state.get("temp_show_sql", st.session_state.show_sql)
+    st.session_state.show_table = st.session_state.get("temp_show_table", st.session_state.show_table)
+    st.session_state.show_chart = st.session_state.get("temp_show_chart", st.session_state.show_chart)
+    st.session_state.show_elapsed_time = st.session_state.get("temp_show_elapsed_time", st.session_state.show_elapsed_time)
+    st.session_state.show_question_history = st.session_state.get("temp_show_question_history", st.session_state.show_question_history)
+    st.session_state.voice_input = st.session_state.get("temp_voice_input", st.session_state.voice_input)
+    st.session_state.speak_summary = st.session_state.get("temp_speak_summary", st.session_state.speak_summary)
+    st.session_state.show_suggested = st.session_state.get("temp_show_suggested", st.session_state.show_suggested)
+    st.session_state.show_followup = st.session_state.get("temp_show_followup", st.session_state.show_followup)
+    st.session_state.llm_fallback = st.session_state.get("temp_llm_fallback", st.session_state.llm_fallback)
+    # Handle show_plotly_code even though it's not currently in the UI
+    st.session_state.show_plotly_code = st.session_state.get("temp_show_plotly_code", st.session_state.get("show_plotly_code", False))
+    
+    # Save to database
+    save_user_settings()
+
 st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
 with st.sidebar.expander("Settings"):
-    st.checkbox("Show SQL", key="show_sql")
-    st.checkbox("Show Table", key="show_table")
+    st.checkbox("Show SQL", value=st.session_state.get("show_sql", True), key="temp_show_sql")
+    st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show Chart", key="show_chart")
-    st.checkbox("Show Elapsed Time", key="show_elapsed_time")
-    st.checkbox("Show Question History", key="show_question_history")
-    st.checkbox("Voice Input", key="voice_input")
-    st.checkbox("Speak Summary", key="speak_summary")
-    st.checkbox("Show Suggested Questions", key="show_suggested")
-    st.checkbox("Show Follow-up Questions", key="show_followup")
-    st.checkbox("LLM Fallback on Error", key="llm_fallback")
-    st.button("Save", on_click=save_user_settings, use_container_width=True)
+    st.checkbox("Show Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
+    st.checkbox("Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time")
+    st.checkbox("Show Question History", value=st.session_state.get("show_question_history", True), key="temp_show_question_history")
+    st.checkbox("Voice Input", value=st.session_state.get("voice_input", False), key="temp_voice_input")
+    st.checkbox("Speak Summary", value=st.session_state.get("speak_summary", False), key="temp_speak_summary")
+    st.checkbox("Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested")
+    st.checkbox("Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup")
+    st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
+    st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True, type="primary")
 
