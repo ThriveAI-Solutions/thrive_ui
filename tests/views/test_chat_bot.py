@@ -296,7 +296,7 @@ class TestRenderMessage:
         summary_content = "This is a summary."
         sql_query = "SELECT * FROM summary_table;"
         question_text = "What is the summary?"
-        df_for_actions = pd.DataFrame({"data": [1]})
+        df_for_actions = pd.DataFrame({"column1": [1], "column2": [2]})  # Need at least 2 columns for chart buttons
         df_json_for_actions = df_for_actions.to_json(orient="records")
 
         msg = Message(
@@ -322,6 +322,23 @@ class TestRenderMessage:
             col_mock.__enter__.return_value = None
             col_mock.__exit__.return_value = None
         mock_st.columns.return_value = mock_cols
+        
+        # Also need to mock the 5-column layout for chart buttons
+        mock_chart_cols = [MagicMock() for _ in range(5)]
+        for col_mock in mock_chart_cols:
+            col_mock.__enter__.return_value = None
+            col_mock.__exit__.return_value = None
+        
+        # Set up columns mock to return different layouts based on parameters
+        def columns_side_effect(spec):
+            if spec == [0.1, 0.1, 0.6]:
+                return mock_cols  # For feedback buttons
+            elif spec == (1, 1, 1, 1, 1):
+                return mock_chart_cols  # For chart buttons
+            else:
+                return mock_cols  # Default fallback
+        
+        mock_st.columns.side_effect = columns_side_effect
 
         # Mock for pd.read_json inside the summary rendering for actions
         with patch("pandas.read_json") as mock_pd_read_json:
@@ -333,7 +350,9 @@ class TestRenderMessage:
         mock_st.write.assert_called_once_with("Elapsed Time: 0.789")
         mock_st.code.assert_any_call(summary_content, language=None, wrap_lines=True)  # First code call for summary
 
-        mock_st.columns.assert_called_once_with([0.1, 0.1, 0.6])
+        # Check that columns was called for both feedback buttons and chart buttons
+        mock_st.columns.assert_any_call([0.1, 0.1, 0.6])  # For feedback buttons
+        mock_st.columns.assert_any_call((1, 1, 1, 1, 1))   # For chart buttons
 
         # Check feedback buttons
         mock_st.button.assert_any_call(
@@ -352,7 +371,7 @@ class TestRenderMessage:
         speak_call = call("Speak Summary", key="speak_summary_6", on_click=ANY)  # ANY for lambda
         follow_up_call = call("Follow-up Questions", key="follow_up_questions_6", on_click=ANY)
         generate_table_call = call("Generate Table", key="table_6")  # No on_click for this one as it's conditional
-        generate_graph_call = call("Generate Graph", key="graph_6", on_click=ANY)
+        generate_graph_call = call("Generate Plotly", key="graph_6", on_click=ANY)
 
         # Brittle check for button calls, assumes order. A more robust check would inspect call_args_list.
         # This part needs careful checking of exact lambda behavior or restructuring for easier testing if lambdas are complex.
@@ -367,7 +386,7 @@ class TestRenderMessage:
             "Generate Table button not called as expected"
         )
         assert any(c == generate_graph_call for c in mock_st.button.call_args_list), (
-            "Generate Graph button not called as expected"
+            "Generate Plotly button not called as expected"
         )
 
         # Check expander and its content
