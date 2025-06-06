@@ -5,16 +5,15 @@ import random
 import time
 import uuid
 from io import StringIO
-
 import pandas as pd
 import streamlit as st
 from ethical_guardrails_lib import get_ethical_guideline
-
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
 from utils.communicate import listen, speak
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
+from utils.magic_functions import is_magic_do_magic
 
 logger = logging.getLogger(__name__)
 
@@ -476,7 +475,6 @@ if st.session_state.get("show_question_history", True):
 # for debugging
 # st.sidebar.write(st.session_state)
 ######### Sidebar settings #########
-
 # st.title("Thrive AI")
 
 if st.session_state.messages == []:
@@ -527,6 +525,11 @@ if my_question:
             guardrail_sentence,
         )
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
+        st.stop()
+
+    magic_response = is_magic_do_magic(my_question)
+    if magic_response != False:
+        add_message(magic_response)
         st.stop()
 
     # write an acknowledgment message to
