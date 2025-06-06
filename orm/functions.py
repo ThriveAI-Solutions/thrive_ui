@@ -6,7 +6,7 @@ import streamlit as st
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
-from orm.models import Message, SessionLocal, User
+from orm.models import Message, SessionLocal, User, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ def verify_user_credentials(username: str, password: str) -> bool:
 
             if user:
                 st.session_state.cookies["user_id"] = json.dumps(user.id)
+                userRole = session.query(UserRole).filter(UserRole.id == user.user_role_id).one_or_none()
+                st.session_state.cookies["role_name"] = userRole.role_name
 
             # Return True if the user exists, otherwise return False
             return user is not None

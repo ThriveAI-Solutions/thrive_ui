@@ -115,6 +115,10 @@
         {
             "question": "What is the average number of penguins per island?",
             "query": "SELECT AVG(penguin_count) AS avg_penguins_per_island\nFROM (\n    SELECT COUNT(*) AS penguin_count\n    FROM penguin\n    GROUP BY island\n) AS subquery"
+        },
+        {
+            "question": "how many people in wny smoke and have diabetes based on gender",
+            "query": "SELECT sex, COUNT(*) as count \nFROM wny_health \nWHERE tobacco = 'Y' AND diabetes = 'Y' \nGROUP BY sex"
         }
     ],
     "sample_documents": [

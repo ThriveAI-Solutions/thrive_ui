@@ -156,10 +156,50 @@ def _render_python(message: Message, index: int):
     st.code(message.content, language="python", line_numbers=True)
 
 
+def _render_line_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.line_chart(
+        df, x=columns[0], y=columns[1], color="#0b5258"
+    )  # Assuming first column is x-axis and rest are y-axis
+
+
+def _render_bar_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.bar_chart(df, x=columns[0], y=columns[1], color="#0b5258")  # Assuming first column is x-axis and rest are y-axis
+
+
+def _render_area_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.area_chart(
+        df, x=columns[0], y=columns[1], color="#0b5258"
+    )  # Assuming first column is x-axis and rest are y-axis
+
+
+def _render_scatter_chart(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
+    df = pd.read_json(StringIO(message.dataframe))
+    columns = df.columns.tolist()
+    st.scatter_chart(
+        df, x=columns[0], y=columns[1], color="#0b5258"
+    )  # Assuming first column is x-axis and rest are y-axis
+
+
 def _render_plotly_chart(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
+    message.content = message.content.replace("#000001", "#0b5258")  # Replace color code for consistency
     chart = json.loads(message.content)
+    print(message.content)
     st.plotly_chart(chart, key=f"message_{index}")
 
 
@@ -185,13 +225,76 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
             df_json_content = my_df.to_json(orient="records")
             add_message(
-                Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question)
+                Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question),
+                False,
             )
-        st.button(
-            "Generate Graph",
-            key=f"graph_{index}",
-            on_click=lambda: get_chart(message.question, message.query, my_df),
-        )
+
+        # Use the already parsed DataFrame instead of parsing again
+        if len(my_df.columns) >= 2:
+            cols = st.columns((1, 1, 1, 1, 1))
+            with cols[0]:
+                st.button(
+                    "Generate Plotly",
+                    key=f"graph_{index}",
+                    on_click=lambda: get_chart(message.question, message.query, my_df),
+                )
+            with cols[1]:
+                if st.button("Line Chart", key=f"line_chart_{index}"):
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_LINE_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
+                    )
+            with cols[2]:
+                if st.button("Bar Chart", key=f"bar_chart_{index}"):
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_BAR_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
+                    )
+            with cols[3]:
+                if st.button("Area Chart", key=f"area_chart_{index}"):
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_AREA_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
+                    )
+            with cols[4]:
+                if st.button("Scatter Chart", key=f"scatter_chart_{index}"):
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            message.dataframe,
+                            MessageType.ST_SCATTER_CHART,
+                            message.query,
+                            message.question,
+                            message.dataframe,
+                            0,
+                        ),
+                        False,
+                    )
+
         with st.expander("Show SQL"):
             st.code(message.query, language="sql", line_numbers=True)
 
@@ -261,6 +364,10 @@ MESSAGE_RENDERERS = {
     MessageType.SQL.value: _render_sql,
     MessageType.PYTHON.value: _render_python,
     MessageType.PLOTLY_CHART.value: _render_plotly_chart,
+    MessageType.ST_LINE_CHART.value: _render_line_chart,
+    MessageType.ST_BAR_CHART.value: _render_bar_chart,
+    MessageType.ST_AREA_CHART.value: _render_area_chart,
+    MessageType.ST_SCATTER_CHART.value: _render_scatter_chart,
     MessageType.ERROR.value: _render_error,
     MessageType.DATAFRAME.value: _render_dataframe,
     MessageType.SUMMARY.value: _render_summary,
@@ -291,19 +398,40 @@ def call_llm(my_question: str):
 
 
 ######### Sidebar settings #########
+
+def save_settings_on_click():
+    """Update session state with temporary settings values and save to database"""
+    # Update session state with temporary values
+    st.session_state.show_sql = st.session_state.get("temp_show_sql", st.session_state.show_sql)
+    st.session_state.show_table = st.session_state.get("temp_show_table", st.session_state.show_table)
+    st.session_state.show_chart = st.session_state.get("temp_show_chart", st.session_state.show_chart)
+    st.session_state.show_elapsed_time = st.session_state.get("temp_show_elapsed_time", st.session_state.show_elapsed_time)
+    st.session_state.show_question_history = st.session_state.get("temp_show_question_history", st.session_state.show_question_history)
+    st.session_state.voice_input = st.session_state.get("temp_voice_input", st.session_state.voice_input)
+    st.session_state.speak_summary = st.session_state.get("temp_speak_summary", st.session_state.speak_summary)
+    st.session_state.show_suggested = st.session_state.get("temp_show_suggested", st.session_state.show_suggested)
+    st.session_state.show_followup = st.session_state.get("temp_show_followup", st.session_state.show_followup)
+    st.session_state.llm_fallback = st.session_state.get("temp_llm_fallback", st.session_state.llm_fallback)
+    # Handle show_plotly_code even though it's not currently in the UI
+    st.session_state.show_plotly_code = st.session_state.get("temp_show_plotly_code", st.session_state.get("show_plotly_code", False))
+    
+    # Save to database
+    save_user_settings()
+
+st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
 with st.sidebar.expander("Settings"):
-    st.checkbox("Show SQL", key="show_sql")
-    st.checkbox("Show Table", key="show_table")
+    st.checkbox("Show SQL", value=st.session_state.get("show_sql", True), key="temp_show_sql")
+    st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show Chart", key="show_chart")
-    st.checkbox("Show Elapsed Time", key="show_elapsed_time")
-    st.checkbox("Show Question History", key="show_question_history")
-    st.checkbox("Voice Input", key="voice_input")
-    st.checkbox("Speak Summary", key="speak_summary")
-    st.checkbox("Show Suggested Questions", key="show_suggested")
-    st.checkbox("Show Follow-up Questions", key="show_followup")
-    st.checkbox("LLM Fallback on Error", key="llm_fallback")
-    st.button("Save", on_click=save_user_settings, use_container_width=True)
+    st.checkbox("Show Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
+    st.checkbox("Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time")
+    st.checkbox("Show Question History", value=st.session_state.get("show_question_history", True), key="temp_show_question_history")
+    st.checkbox("Voice Input", value=st.session_state.get("voice_input", False), key="temp_voice_input")
+    st.checkbox("Speak Summary", value=st.session_state.get("speak_summary", False), key="temp_speak_summary")
+    st.checkbox("Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested")
+    st.checkbox("Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup")
+    st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
+    st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True, type="primary")
 
@@ -349,7 +477,7 @@ if st.session_state.get("show_question_history", True):
 # st.sidebar.write(st.session_state)
 ######### Sidebar settings #########
 
-st.title("Thrive AI")
+# st.title("Thrive AI")
 
 if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):
@@ -441,6 +569,7 @@ if my_question:
             summary, elapsed_time = vn.generate_summary(question=my_question, df=df)
             if summary is not None:
                 if st.session_state.get("show_summary", True):
+                    print(df)
                     add_message(
                         Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time)
                     )

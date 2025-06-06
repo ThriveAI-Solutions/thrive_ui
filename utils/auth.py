@@ -55,8 +55,8 @@ def show_login():
             unsafe_allow_html=True,
         )
         # --- HIDE LOGIN NAVIGATION ---
-
-        st.title("🔓 Log In - Thrive AI")
+        st.image("assets/logo.png", width=200)
+        st.title("🔓 Log In")
 
         with st.form("login_form"):
             username = st.text_input("Username")
