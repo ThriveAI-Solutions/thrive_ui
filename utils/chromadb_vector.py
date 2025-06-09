@@ -1,5 +1,6 @@
 import json
 import re
+from difflib import SequenceMatcher
 from typing import Any
 
 import pandas as pd
@@ -156,31 +157,84 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
             )
         )
 
-    def get_closest_table_from_ddl(
-        self, table_name: str, metadata: dict[str, Any] | None = None, **kwargs
-    ) -> str | None:
-        query = f"CREATE TABLE {table_name}"
-        result = self.ddl_collection.query(
-            query_texts=query,
-            n_results=1,
-            where=self._prepare_retrieval_metadata(metadata),
-            include=["documents"],
-        )
-
-        if not result or "documents" not in result or not result["documents"][0]:
-            return None
-
-        table_ddl = result["documents"][0][0]
-
-        # Match various DDL patterns: CREATE TABLE, CREATE TEMP TABLE, etc.
+    def _extract_table_name_from_ddl(self, ddl: str) -> str | None:
+        """Extract table name from DDL statement"""
         if parsed_table_name := re.search(
             pattern=r"CREATE (?:TEMP |TEMPORARY )?TABLE (?:IF NOT EXISTS )?([`\w]+)",
-            string=table_ddl,
+            string=ddl,
             flags=re.IGNORECASE,
         ):
             return parsed_table_name.group(1).strip("`")
-        else:
+        return None
+
+    def _fuzzy_match_score(self, a: str, b: str) -> float:
+        """Calculate fuzzy match score between two strings (0.0 to 1.0)"""
+        return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+    def get_closest_table_from_ddl(
+        self, table_name: str, metadata: dict[str, Any] | None = None, **kwargs
+    ) -> str | None:
+        """
+        Find the closest table name using fuzzy string matching on all available tables.
+        
+        This approach:
+        1. Retrieves all DDL documents from ChromaDB
+        2. Extracts table names from each DDL
+        3. Uses fuzzy string matching to find the best match
+        4. Returns the actual table name (not the input)
+        """
+        # Get all DDL documents
+        all_ddl_data = self.ddl_collection.get(
+            where=self._prepare_retrieval_metadata(metadata),
+            include=["documents"]
+        )
+
+        if not all_ddl_data or "documents" not in all_ddl_data or not all_ddl_data["documents"]:
             return None
+
+        # Extract all table names and their DDLs
+        table_candidates = []
+        for ddl in all_ddl_data["documents"]:
+            extracted_table_name = self._extract_table_name_from_ddl(ddl)
+            if extracted_table_name:
+                table_candidates.append({
+                    "table_name": extracted_table_name,
+                    "ddl": ddl
+                })
+
+        if not table_candidates:
+            return None
+
+        # Find the best fuzzy match
+        best_match = None
+        best_score = 0.0
+        input_table_lower = table_name.lower()
+
+        for candidate in table_candidates:
+            candidate_table_lower = candidate["table_name"].lower()
+            
+            # Calculate different types of similarity scores
+            exact_match = candidate_table_lower == input_table_lower
+            starts_with = candidate_table_lower.startswith(input_table_lower) or input_table_lower.startswith(candidate_table_lower)
+            fuzzy_score = self._fuzzy_match_score(input_table_lower, candidate_table_lower)
+            
+            # Prioritize exact matches, then starts_with, then fuzzy similarity
+            if exact_match:
+                score = 1.0
+            elif starts_with:
+                score = 0.9 + (fuzzy_score * 0.1)  # 0.9-1.0 range for starts_with matches
+            else:
+                score = fuzzy_score * 0.8  # Max 0.8 for pure fuzzy matches
+            
+            if score > best_score:
+                best_score = score
+                best_match = candidate
+
+        # Return the best match if the score is above a reasonable threshold
+        if best_match and best_score > 0.3:  # Adjust threshold as needed
+            return best_match["table_name"]
+        
+        return None
 
     def get_related_documentation(self, question: str, metadata: dict[str, Any] | None = None, **kwargs) -> list:
         return self._extract_documents(
