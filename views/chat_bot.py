@@ -177,7 +177,7 @@ def generate_heatmap(table: str) -> None:
             add_message(Message(RoleType.ASSISTANT, f"Could not find table similar to '{table}'", MessageType.ERROR))
             return
 
-        df = vn.run_sql(f"SELECT * FROM {closest_table} ORDER BY RANDOM() LIMIT 1000")
+        df = vn.run_sql(f"SELECT * FROM {closest_table} ORDER BY RANDOM() LIMIT 10000")
         if df is None or df.empty:
             add_message(Message(RoleType.ASSISTANT, f"No data found in table '{closest_table}'", MessageType.ERROR))
             return
