@@ -8,13 +8,10 @@ import uuid
 from io import StringIO
 from typing import Callable, Dict, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from attr import dataclass
 from ethical_guardrails_lib import get_ethical_guideline
-from plotly.graph_objects import Figure
 from wordcloud import WordCloud
 
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
@@ -62,25 +59,27 @@ def get_followup_questions(my_question, sql, df):
 
 # === MAGIC SYSTEM ===
 
+
 class MagicRegistry:
     """Registry for magic commands that start with '/'"""
-    
+
     def __init__(self):
         self._commands: Dict[str, Callable] = {}
         self._patterns: Dict[str, str] = {}
         self._descriptions: Dict[str, str] = {}
         self._usage: Dict[str, str] = {}
-    
+
     def register(self, command: str, pattern: str, description: str = "", usage: str = ""):
         """
         Decorator to register a magic command
-        
+
         Args:
             command: The command name (e.g., 'heatmap')
             pattern: Regex pattern to match the command
             description: Description of what the command does
             usage: Usage example (e.g., '/heatmap <table>')
         """
+
         def decorator(func: Callable):
             self._commands[command] = func
             self._patterns[command] = pattern
@@ -88,82 +87,73 @@ class MagicRegistry:
             self._usage[command] = usage or f"/{command}"
             logger.info(f"Registered magic command: {command}")
             return func
+
         return decorator
-    
+
     def parse_command(self, question: str) -> Optional[Tuple[str, Dict[str, str]]]:
         """
         Parse a question to see if it matches any magic command
-        
+
         Returns:
             Tuple of (command_name, parsed_args) or None if no match
         """
-        if not question.startswith('/'):
+        if not question.startswith("/"):
             return None
-            
+
         for command, pattern in self._patterns.items():
             match = re.match(pattern, question.strip())
             if match:
                 return command, match.groupdict()
-        
+
         return None
-    
+
     def execute(self, command: str, args: Dict[str, str]) -> bool:
         """
         Execute a magic command with parsed arguments
-        
+
         Returns:
             True if command was executed successfully, False otherwise
         """
         if command not in self._commands:
             return False
-            
+
         try:
             self._commands[command](**args)
             return True
         except Exception as e:
             logger.error(f"Error executing magic command '{command}': {e}")
-            add_message(Message(
-                RoleType.ASSISTANT, 
-                f"Error executing command /{command}: {str(e)}", 
-                MessageType.ERROR
-            ))
+            add_message(Message(RoleType.ASSISTANT, f"Error executing command /{command}: {str(e)}", MessageType.ERROR))
             return False
-    
+
     def get_help(self) -> str:
         """Get help text for all registered commands in CLI-style format"""
         if not self._commands:
             return "No magic commands available."
-            
-        help_lines = [
-            "MAGIC COMMANDS",
-            "=" * 50,
-            "",
-            "Usage: /<command> [arguments]",
-            "",
-            "Available commands:",
-            ""
-        ]
-        
+
+        help_lines = ["MAGIC COMMANDS", "=" * 50, "", "Usage: /<command> [arguments]", "", "Available commands:", ""]
+
         # Find the longest usage string for alignment
         max_usage_len = max(len(usage) for usage in self._usage.values()) if self._usage else 0
-        
+
         for command in sorted(self._commands.keys()):
             usage = self._usage.get(command, f"/{command}")
             description = self._descriptions.get(command, "No description available")
-            
+
             # Format: "  /command <args>    Description here"
             help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
-        
-        help_lines.extend([
-            "",
-            "Examples:",
-            "  /heatmap sales_data",
-            "  /wordcloud reviews comment_text", 
-            "  /help",
-            "",
-            "Note: Table and column names are matched using fuzzy search."
-        ])
-        
+
+        help_lines.extend(
+            [
+                "",
+                "Examples:",
+                "  /heatmap sales_data",
+                "  /wordcloud reviews comment_text",
+                "  /help",
+                "",
+                "Note: Table and column names are matched using fuzzy search.",
+            ]
+        )
+
         return "\n".join(help_lines)
 
 
@@ -175,161 +165,149 @@ magic_registry = MagicRegistry()
     command="heatmap",
     pattern=r"^/heatmap\s+(?P<table>\w+)$",
     description="Generate a correlation heatmap visualization for a table",
-    usage="/heatmap <table>"
+    usage="/heatmap <table>",
 )
 def generate_heatmap(table: str) -> None:
     """Generate a heatmap for the specified table"""
     start_time = time.perf_counter()
-    
+
     try:
         closest_table = vn.get_closest_table_from_ddl(table_name=table)
         if not closest_table:
-            add_message(Message(
-                RoleType.ASSISTANT, 
-                f"Could not find table similar to '{table}'", 
-                MessageType.ERROR
-            ))
+            add_message(Message(RoleType.ASSISTANT, f"Could not find table similar to '{table}'", MessageType.ERROR))
             return
-            
+
         df = vn.run_sql(f"SELECT * FROM {closest_table}")
         if df is None or df.empty:
-            add_message(Message(
-                RoleType.ASSISTANT, 
-                f"No data found in table '{closest_table}'", 
-                MessageType.ERROR
-            ))
+            add_message(Message(RoleType.ASSISTANT, f"No data found in table '{closest_table}'", MessageType.ERROR))
             return
-            
+
         # Generate heatmap
-        fig = px.imshow(df.corr(numeric_only=True), text_auto=".2f", aspect="auto", color_continuous_scale="RdYlGn", title=f"Correlation Heatmap for {closest_table}")
+        fig = px.imshow(
+            df.corr(numeric_only=True),
+            text_auto=".2f",
+            aspect="auto",
+            color_continuous_scale="RdYlGn",
+            title=f"Correlation Heatmap for {closest_table}",
+        )
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
-        
-        add_message(Message(
-            RoleType.ASSISTANT, 
-            fig, 
-            MessageType.PLOTLY_CHART, 
-            f"SELECT * FROM {closest_table}", 
-            f"/heatmap {table}", 
-            None, 
-            elapsed_time
-        ))
-        
+
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                fig,
+                MessageType.PLOTLY_CHART,
+                f"SELECT * FROM {closest_table}",
+                f"/heatmap {table}",
+                None,
+                elapsed_time,
+            )
+        )
+
     except Exception as e:
         logger.error(f"Error generating heatmap for table '{table}': {e}")
-        add_message(Message(
-            RoleType.ASSISTANT, 
-            f"Error generating heatmap: {str(e)}", 
-            MessageType.ERROR
-        ))
+        add_message(Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR))
 
 
 @magic_registry.register(
     command="wordcloud",
     pattern=r"^/wordcloud\s+(?P<table>\w+)\s+(?P<column>\w+)$",
     description="Generate a wordcloud visualization for a table column",
-    usage="/wordcloud <table> <column>"
+    usage="/wordcloud <table> <column>",
 )
 def generate_wordcloud(table: str, column: str) -> None:
     """Generate a wordcloud for the specified table and column"""
     start_time = time.perf_counter()
-    
+
     try:
         closest_table = vn.get_closest_table_from_ddl(table_name=table)
         if not closest_table:
-            add_message(Message(
-                RoleType.ASSISTANT, 
-                f"Could not find table similar to '{table}'", 
-                MessageType.ERROR
-            ))
+            add_message(Message(RoleType.ASSISTANT, f"Could not find table similar to '{table}'", MessageType.ERROR))
             return
-            
+
         # Query specific column from the table
         df = vn.run_sql(f"SELECT {column} FROM {closest_table} WHERE {column} IS NOT NULL")
         if df is None or df.empty:
-            add_message(Message(
-                RoleType.ASSISTANT, 
-                f"No data found in column '{column}' of table '{closest_table}'", 
-                MessageType.ERROR
-            ))
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"No data found in column '{column}' of table '{closest_table}'",
+                    MessageType.ERROR,
+                )
+            )
             return
-            
+
         # Check if column exists
         if column not in df.columns:
-            add_message(Message(
-                RoleType.ASSISTANT, 
-                f"Column '{column}' not found in table '{closest_table}'. Available columns: {', '.join(df.columns)}", 
-                MessageType.ERROR
-            ))
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Column '{column}' not found in table '{closest_table}'. Available columns: {', '.join(df.columns)}",
+                    MessageType.ERROR,
+                )
+            )
             return
-            
+
         # Combine all text from the column
-        text_data = df[column].astype(str).str.cat(sep=' ')
-        
-        if not text_data or text_data.strip() == '':
-            add_message(Message(
-                RoleType.ASSISTANT, 
-                f"No text data found in column '{column}' of table '{closest_table}'", 
-                MessageType.ERROR
-            ))
+        text_data = df[column].astype(str).str.cat(sep=" ")
+
+        if not text_data or text_data.strip() == "":
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"No text data found in column '{column}' of table '{closest_table}'",
+                    MessageType.ERROR,
+                )
+            )
             return
-        
+
         # Generate wordcloud
         wordcloud = WordCloud(
-            width=800, 
-            height=400, 
-            background_color='white',
-            colormap='viridis',
+            width=800,
+            height=400,
+            background_color="white",
+            colormap="viridis",
             max_words=100,
             relative_scaling=0.5,
-            random_state=42
+            random_state=42,
         ).generate(text_data)
-        
+
         # Convert wordcloud to image array and create plotly figure
         wordcloud_array = wordcloud.to_array()
-        
+
         # Use plotly express imshow to display the wordcloud
-        fig = px.imshow(
-            wordcloud_array,
-            title=f"Word Cloud for {closest_table}.{column}"
-        )
-        
+        fig = px.imshow(wordcloud_array, title=f"Word Cloud for {closest_table}.{column}")
+
         # Hide axes and ticks for clean appearance
         fig.update_layout(
             xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
             yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
             width=800,
-            height=400
+            height=400,
         )
-        
+
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
-        
-        add_message(Message(
-            RoleType.ASSISTANT, 
-            fig, 
-            MessageType.PLOTLY_CHART, 
-            f"SELECT {column} FROM {closest_table} WHERE {column} IS NOT NULL", 
-            f"/wordcloud {table} {column}", 
-            None, 
-            elapsed_time
-        ))
-        
+
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                fig,
+                MessageType.PLOTLY_CHART,
+                f"SELECT {column} FROM {closest_table} WHERE {column} IS NOT NULL",
+                f"/wordcloud {table} {column}",
+                None,
+                elapsed_time,
+            )
+        )
+
     except Exception as e:
         logger.error(f"Error generating wordcloud for table '{table}', column '{column}': {e}")
-        add_message(Message(
-            RoleType.ASSISTANT, 
-            f"Error generating wordcloud: {str(e)}", 
-            MessageType.ERROR
-        ))
+        add_message(Message(RoleType.ASSISTANT, f"Error generating wordcloud: {str(e)}", MessageType.ERROR))
 
 
-@magic_registry.register(
-    command="help",
-    pattern=r"^/help$",
-    description="Show available magic commands",
-    usage="/help"
-)
+@magic_registry.register(command="help", pattern=r"^/help$", description="Show available magic commands", usage="/help")
 def show_help() -> None:
     """Show help for all available magic commands"""
     help_text = magic_registry.get_help()
@@ -340,17 +318,17 @@ def show_help() -> None:
 def handle_magic_command(question: str) -> bool:
     """
     Check if question is a magic command and execute it if so
-    
+
     Returns:
         True if it was a magic command (whether successful or not), False otherwise
     """
     parsed = magic_registry.parse_command(question)
     if parsed is None:
         return False
-    
+
     command, args = parsed
     logger.info(f"Executing magic command: {command} with args: {args}")
-    
+
     # Execute the command
     magic_registry.execute(command, args)
     return True
@@ -704,24 +682,32 @@ def call_llm(my_question: str):
 
 ######### Sidebar settings #########
 
+
 def save_settings_on_click():
     """Update session state with temporary settings values and save to database"""
     # Update session state with temporary values
     st.session_state.show_sql = st.session_state.get("temp_show_sql", st.session_state.show_sql)
     st.session_state.show_table = st.session_state.get("temp_show_table", st.session_state.show_table)
     st.session_state.show_chart = st.session_state.get("temp_show_chart", st.session_state.show_chart)
-    st.session_state.show_elapsed_time = st.session_state.get("temp_show_elapsed_time", st.session_state.show_elapsed_time)
-    st.session_state.show_question_history = st.session_state.get("temp_show_question_history", st.session_state.show_question_history)
+    st.session_state.show_elapsed_time = st.session_state.get(
+        "temp_show_elapsed_time", st.session_state.show_elapsed_time
+    )
+    st.session_state.show_question_history = st.session_state.get(
+        "temp_show_question_history", st.session_state.show_question_history
+    )
     st.session_state.voice_input = st.session_state.get("temp_voice_input", st.session_state.voice_input)
     st.session_state.speak_summary = st.session_state.get("temp_speak_summary", st.session_state.speak_summary)
     st.session_state.show_suggested = st.session_state.get("temp_show_suggested", st.session_state.show_suggested)
     st.session_state.show_followup = st.session_state.get("temp_show_followup", st.session_state.show_followup)
     st.session_state.llm_fallback = st.session_state.get("temp_llm_fallback", st.session_state.llm_fallback)
     # Handle show_plotly_code even though it's not currently in the UI
-    st.session_state.show_plotly_code = st.session_state.get("temp_show_plotly_code", st.session_state.get("show_plotly_code", False))
-    
+    st.session_state.show_plotly_code = st.session_state.get(
+        "temp_show_plotly_code", st.session_state.get("show_plotly_code", False)
+    )
+
     # Save to database
     save_user_settings()
+
 
 st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
 with st.sidebar.expander("Settings"):
@@ -729,12 +715,22 @@ with st.sidebar.expander("Settings"):
     st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
     st.checkbox("Show Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
-    st.checkbox("Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time")
-    st.checkbox("Show Question History", value=st.session_state.get("show_question_history", True), key="temp_show_question_history")
+    st.checkbox(
+        "Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time"
+    )
+    st.checkbox(
+        "Show Question History",
+        value=st.session_state.get("show_question_history", True),
+        key="temp_show_question_history",
+    )
     st.checkbox("Voice Input", value=st.session_state.get("voice_input", False), key="temp_voice_input")
     st.checkbox("Speak Summary", value=st.session_state.get("speak_summary", False), key="temp_speak_summary")
-    st.checkbox("Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested")
-    st.checkbox("Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup")
+    st.checkbox(
+        "Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested"
+    )
+    st.checkbox(
+        "Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup"
+    )
     st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
     st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
@@ -810,7 +806,7 @@ if my_question:
         # Magic command was handled, clear the question and stop processing
         st.session_state.my_question = None
         st.stop()
-    
+
     # check guardrails here
     guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
     logger.debug(

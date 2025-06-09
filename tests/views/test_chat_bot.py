@@ -322,13 +322,13 @@ class TestRenderMessage:
             col_mock.__enter__.return_value = None
             col_mock.__exit__.return_value = None
         mock_st.columns.return_value = mock_cols
-        
+
         # Also need to mock the 5-column layout for chart buttons
         mock_chart_cols = [MagicMock() for _ in range(5)]
         for col_mock in mock_chart_cols:
             col_mock.__enter__.return_value = None
             col_mock.__exit__.return_value = None
-        
+
         # Set up columns mock to return different layouts based on parameters
         def columns_side_effect(spec):
             if spec == [0.1, 0.1, 0.6]:
@@ -337,7 +337,7 @@ class TestRenderMessage:
                 return mock_chart_cols  # For chart buttons
             else:
                 return mock_cols  # Default fallback
-        
+
         mock_st.columns.side_effect = columns_side_effect
 
         # Mock for pd.read_json inside the summary rendering for actions
@@ -352,7 +352,7 @@ class TestRenderMessage:
 
         # Check that columns was called for both feedback buttons and chart buttons
         mock_st.columns.assert_any_call([0.1, 0.1, 0.6])  # For feedback buttons
-        mock_st.columns.assert_any_call((1, 1, 1, 1, 1))   # For chart buttons
+        mock_st.columns.assert_any_call((1, 1, 1, 1, 1))  # For chart buttons
 
         # Check feedback buttons
         mock_st.button.assert_any_call(
