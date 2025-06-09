@@ -153,10 +153,12 @@ def get_recent_messages():
             messages = (
                 session.query(Message)
                 .filter(Message.user_id == user_id, Message.id > max_index)
-                .order_by(Message.created_at.asc())
+                .order_by(Message.created_at.desc())
                 .limit(20)
                 .all()
             )
+
+        messages.reverse()
 
         return messages
     except Exception as e:
