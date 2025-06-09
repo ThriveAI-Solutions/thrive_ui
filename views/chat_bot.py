@@ -285,11 +285,22 @@ def generate_wordcloud(table: str, column: str) -> None:
             random_state=42
         ).generate(text_data)
         
-        # Convert to plotly figure for display
-        fig = plt.figure(figsize=(10, 5))
-        plt.imshow(wordcloud, interpolation='bilinear')
-        plt.axis('off')
-        plt.title(f"Word Cloud for {closest_table}.{column}", fontsize=16, pad=20)
+        # Convert wordcloud to image array and create plotly figure
+        wordcloud_array = wordcloud.to_array()
+        
+        # Use plotly express imshow to display the wordcloud
+        fig = px.imshow(
+            wordcloud_array,
+            title=f"Word Cloud for {closest_table}.{column}"
+        )
+        
+        # Hide axes and ticks for clean appearance
+        fig.update_layout(
+            xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+            yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+            width=800,
+            height=400
+        )
         
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
