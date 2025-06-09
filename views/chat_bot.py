@@ -264,8 +264,8 @@ def generate_wordcloud(table: str, column: str) -> None:
 
         # Generate wordcloud
         wordcloud = WordCloud(
-            width=800,
-            height=400,
+            width=1200,
+            height=600,
             background_color="white",
             colormap="viridis",
             max_words=100,
@@ -283,8 +283,9 @@ def generate_wordcloud(table: str, column: str) -> None:
         fig.update_layout(
             xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
             yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
-            width=800,
-            height=400,
+            width=1200,
+            height=600,
+            margin=dict(l=0, r=0, t=50, b=0),
         )
 
         end_time = time.perf_counter()
