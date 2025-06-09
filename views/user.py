@@ -14,7 +14,6 @@ vn = VannaService.from_streamlit_session()
 # Don't get training data at module load time - get it when rendering the page
 # df = vn.get_training_data()
 
-logging.debug(f"{st.session_state.to_dict()=}")
 
 logger = logging.getLogger(__name__)
 

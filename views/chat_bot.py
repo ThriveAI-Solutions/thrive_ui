@@ -2,13 +2,20 @@ import ast
 import json
 import logging
 import random
+import re
 import time
 import uuid
 from io import StringIO
+from typing import Callable, Dict, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import pandas as pd
+import plotly.express as px
 import streamlit as st
+from attr import dataclass
 from ethical_guardrails_lib import get_ethical_guideline
+from plotly.graph_objects import Figure
+from wordcloud import WordCloud
 
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
@@ -51,6 +58,294 @@ def get_followup_questions(my_question, sql, df):
     followup_questions = vn.generate_followup_questions(question=my_question, sql=sql, df=df)
 
     add_message(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP, sql, my_question))
+
+
+# === MAGIC SYSTEM ===
+
+class MagicRegistry:
+    """Registry for magic commands that start with '/'"""
+    
+    def __init__(self):
+        self._commands: Dict[str, Callable] = {}
+        self._patterns: Dict[str, str] = {}
+        self._descriptions: Dict[str, str] = {}
+        self._usage: Dict[str, str] = {}
+    
+    def register(self, command: str, pattern: str, description: str = "", usage: str = ""):
+        """
+        Decorator to register a magic command
+        
+        Args:
+            command: The command name (e.g., 'heatmap')
+            pattern: Regex pattern to match the command
+            description: Description of what the command does
+            usage: Usage example (e.g., '/heatmap <table>')
+        """
+        def decorator(func: Callable):
+            self._commands[command] = func
+            self._patterns[command] = pattern
+            self._descriptions[command] = description
+            self._usage[command] = usage or f"/{command}"
+            logger.info(f"Registered magic command: {command}")
+            return func
+        return decorator
+    
+    def parse_command(self, question: str) -> Optional[Tuple[str, Dict[str, str]]]:
+        """
+        Parse a question to see if it matches any magic command
+        
+        Returns:
+            Tuple of (command_name, parsed_args) or None if no match
+        """
+        if not question.startswith('/'):
+            return None
+            
+        for command, pattern in self._patterns.items():
+            match = re.match(pattern, question.strip())
+            if match:
+                return command, match.groupdict()
+        
+        return None
+    
+    def execute(self, command: str, args: Dict[str, str]) -> bool:
+        """
+        Execute a magic command with parsed arguments
+        
+        Returns:
+            True if command was executed successfully, False otherwise
+        """
+        if command not in self._commands:
+            return False
+            
+        try:
+            self._commands[command](**args)
+            return True
+        except Exception as e:
+            logger.error(f"Error executing magic command '{command}': {e}")
+            add_message(Message(
+                RoleType.ASSISTANT, 
+                f"Error executing command /{command}: {str(e)}", 
+                MessageType.ERROR
+            ))
+            return False
+    
+    def get_help(self) -> str:
+        """Get help text for all registered commands in CLI-style format"""
+        if not self._commands:
+            return "No magic commands available."
+            
+        help_lines = [
+            "MAGIC COMMANDS",
+            "=" * 50,
+            "",
+            "Usage: /<command> [arguments]",
+            "",
+            "Available commands:",
+            ""
+        ]
+        
+        # Find the longest usage string for alignment
+        max_usage_len = max(len(usage) for usage in self._usage.values()) if self._usage else 0
+        
+        for command in sorted(self._commands.keys()):
+            usage = self._usage.get(command, f"/{command}")
+            description = self._descriptions.get(command, "No description available")
+            
+            # Format: "  /command <args>    Description here"
+            help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
+        
+        help_lines.extend([
+            "",
+            "Examples:",
+            "  /heatmap sales_data",
+            "  /wordcloud reviews comment_text", 
+            "  /help",
+            "",
+            "Note: Table and column names are matched using fuzzy search."
+        ])
+        
+        return "\n".join(help_lines)
+
+
+# Initialize the magic registry
+magic_registry = MagicRegistry()
+
+
+@magic_registry.register(
+    command="heatmap",
+    pattern=r"^/heatmap\s+(?P<table>\w+)$",
+    description="Generate a correlation heatmap visualization for a table",
+    usage="/heatmap <table>"
+)
+def generate_heatmap(table: str) -> None:
+    """Generate a heatmap for the specified table"""
+    start_time = time.perf_counter()
+    
+    try:
+        closest_table = vn.get_closest_table_from_ddl(table_name=table)
+        if not closest_table:
+            add_message(Message(
+                RoleType.ASSISTANT, 
+                f"Could not find table similar to '{table}'", 
+                MessageType.ERROR
+            ))
+            return
+            
+        df = vn.run_sql(f"SELECT * FROM {closest_table}")
+        if df is None or df.empty:
+            add_message(Message(
+                RoleType.ASSISTANT, 
+                f"No data found in table '{closest_table}'", 
+                MessageType.ERROR
+            ))
+            return
+            
+        # Generate heatmap
+        fig = px.imshow(df.corr(numeric_only=True), text_auto=".2f", aspect="auto", color_continuous_scale="RdYlGn", title=f"Correlation Heatmap for {closest_table}")
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        
+        add_message(Message(
+            RoleType.ASSISTANT, 
+            fig, 
+            MessageType.PLOTLY_CHART, 
+            f"SELECT * FROM {closest_table}", 
+            f"/heatmap {table}", 
+            None, 
+            elapsed_time
+        ))
+        
+    except Exception as e:
+        logger.error(f"Error generating heatmap for table '{table}': {e}")
+        add_message(Message(
+            RoleType.ASSISTANT, 
+            f"Error generating heatmap: {str(e)}", 
+            MessageType.ERROR
+        ))
+
+
+@magic_registry.register(
+    command="wordcloud",
+    pattern=r"^/wordcloud\s+(?P<table>\w+)\s+(?P<column>\w+)$",
+    description="Generate a wordcloud visualization for a table column",
+    usage="/wordcloud <table> <column>"
+)
+def generate_wordcloud(table: str, column: str) -> None:
+    """Generate a wordcloud for the specified table and column"""
+    start_time = time.perf_counter()
+    
+    try:
+        closest_table = vn.get_closest_table_from_ddl(table_name=table)
+        if not closest_table:
+            add_message(Message(
+                RoleType.ASSISTANT, 
+                f"Could not find table similar to '{table}'", 
+                MessageType.ERROR
+            ))
+            return
+            
+        # Query specific column from the table
+        df = vn.run_sql(f"SELECT {column} FROM {closest_table} WHERE {column} IS NOT NULL")
+        if df is None or df.empty:
+            add_message(Message(
+                RoleType.ASSISTANT, 
+                f"No data found in column '{column}' of table '{closest_table}'", 
+                MessageType.ERROR
+            ))
+            return
+            
+        # Check if column exists
+        if column not in df.columns:
+            add_message(Message(
+                RoleType.ASSISTANT, 
+                f"Column '{column}' not found in table '{closest_table}'. Available columns: {', '.join(df.columns)}", 
+                MessageType.ERROR
+            ))
+            return
+            
+        # Combine all text from the column
+        text_data = df[column].astype(str).str.cat(sep=' ')
+        
+        if not text_data or text_data.strip() == '':
+            add_message(Message(
+                RoleType.ASSISTANT, 
+                f"No text data found in column '{column}' of table '{closest_table}'", 
+                MessageType.ERROR
+            ))
+            return
+        
+        # Generate wordcloud
+        wordcloud = WordCloud(
+            width=800, 
+            height=400, 
+            background_color='white',
+            colormap='viridis',
+            max_words=100,
+            relative_scaling=0.5,
+            random_state=42
+        ).generate(text_data)
+        
+        # Convert to plotly figure for display
+        fig = plt.figure(figsize=(10, 5))
+        plt.imshow(wordcloud, interpolation='bilinear')
+        plt.axis('off')
+        plt.title(f"Word Cloud for {closest_table}.{column}", fontsize=16, pad=20)
+        
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        
+        add_message(Message(
+            RoleType.ASSISTANT, 
+            fig, 
+            MessageType.PLOTLY_CHART, 
+            f"SELECT {column} FROM {closest_table} WHERE {column} IS NOT NULL", 
+            f"/wordcloud {table} {column}", 
+            None, 
+            elapsed_time
+        ))
+        
+    except Exception as e:
+        logger.error(f"Error generating wordcloud for table '{table}', column '{column}': {e}")
+        add_message(Message(
+            RoleType.ASSISTANT, 
+            f"Error generating wordcloud: {str(e)}", 
+            MessageType.ERROR
+        ))
+
+
+@magic_registry.register(
+    command="help",
+    pattern=r"^/help$",
+    description="Show available magic commands",
+    usage="/help"
+)
+def show_help() -> None:
+    """Show help for all available magic commands"""
+    help_text = magic_registry.get_help()
+    # Display as code block for better formatting
+    add_message(Message(RoleType.ASSISTANT, help_text, MessageType.PYTHON))
+
+
+def handle_magic_command(question: str) -> bool:
+    """
+    Check if question is a magic command and execute it if so
+    
+    Returns:
+        True if it was a magic command (whether successful or not), False otherwise
+    """
+    parsed = magic_registry.parse_command(question)
+    if parsed is None:
+        return False
+    
+    command, args = parsed
+    logger.info(f"Executing magic command: {command} with args: {args}")
+    
+    # Execute the command
+    magic_registry.execute(command, args)
+    return True
+
+
+# === END MAGIC SYSTEM ===
 
 
 def get_chart(my_question, sql, df):
@@ -199,7 +494,6 @@ def _render_plotly_chart(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     message.content = message.content.replace("#000001", "#0b5258")  # Replace color code for consistency
     chart = json.loads(message.content)
-    print(message.content)
     st.plotly_chart(chart, key=f"message_{index}")
 
 
@@ -500,6 +794,12 @@ if chat_input:
 my_question = st.session_state.get("my_question", None)
 
 if my_question:
+    # Check if this is a magic command first
+    if handle_magic_command(my_question):
+        # Magic command was handled, clear the question and stop processing
+        st.session_state.my_question = None
+        st.stop()
+    
     # check guardrails here
     guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
     logger.debug(
@@ -516,7 +816,6 @@ if my_question:
             guardrail_sentence,
         )
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
-        print("guardrail_score == 2")
         call_llm(my_question)
         st.stop()
     if guardrail_score >= 3:
@@ -542,11 +841,11 @@ if my_question:
             if st.session_state.get("show_sql", True):
                 add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
         else:
-            print("sql is not valid")
+            logger.debug("sql is not valid")
             add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):
-                print("fallback to LLM")
+                logger.debug("fallback to LLM")
                 call_llm(my_question)
             st.stop()
 
@@ -569,7 +868,6 @@ if my_question:
             summary, elapsed_time = vn.generate_summary(question=my_question, df=df)
             if summary is not None:
                 if st.session_state.get("show_summary", True):
-                    print(df)
                     add_message(
                         Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time)
                     )
@@ -604,6 +902,6 @@ if my_question:
             )
         )
         if st.session_state.get("llm_fallback", True):
-            print("cant generate sql for that question, fallback to LLM")
+            logger.info("cant generate sql for that question, fallback to LLM")
             call_llm(my_question)
 ######### Handle new chat input #########

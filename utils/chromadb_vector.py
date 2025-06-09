@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 import pandas as pd
@@ -6,10 +7,12 @@ from vanna.chromadb.chromadb_vector import ChromaDB_VectorStore
 from vanna.utils import deterministic_uuid
 
 import chromadb
+from chromadb.api import ClientAPI
+from chromadb.api.types import QueryRequest
 
 
 class ThriveAI_ChromaDB(ChromaDB_VectorStore):
-    def __init__(self, user_role: int, config=None, client: chromadb.ClientAPI | None = None):
+    def __init__(self, user_role: int, config=None, client: ClientAPI | None = None):
         if client:
             self.client = client
             # If a client is provided, we assume collections will be managed externally or by super init with a config that doesn't specify a path
@@ -152,6 +155,32 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
                 where=self._prepare_retrieval_metadata(metadata),
             )
         )
+
+    def get_closest_table_from_ddl(
+        self, table_name: str, metadata: dict[str, Any] | None = None, **kwargs
+    ) -> str | None:
+        query = f"CREATE TABLE {table_name}"
+        result = self.ddl_collection.query(
+            query_texts=query,
+            n_results=1,
+            where=self._prepare_retrieval_metadata(metadata),
+            include=["documents"],
+        )
+
+        if not result or "documents" not in result or not result["documents"][0]:
+            return None
+
+        table_ddl = result["documents"][0][0]
+
+        # Match various DDL patterns: CREATE TABLE, CREATE TEMP TABLE, etc.
+        if parsed_table_name := re.search(
+            pattern=r"CREATE (?:TEMP |TEMPORARY )?TABLE (?:IF NOT EXISTS )?([`\w]+)",
+            string=table_ddl,
+            flags=re.IGNORECASE,
+        ):
+            return parsed_table_name.group(1).strip("`")
+        else:
+            return None
 
     def get_related_documentation(self, question: str, metadata: dict[str, Any] | None = None, **kwargs) -> list:
         return self._extract_documents(

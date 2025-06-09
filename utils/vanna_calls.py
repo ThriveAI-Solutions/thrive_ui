@@ -351,6 +351,16 @@ class VannaService:
             return False
         else:
             return generate_chart
+        
+    def get_closest_table_from_ddl(self, table_name: str) -> str:
+        """Get the closest table from the DDL."""
+        try:
+            closest_table = self.vn.get_closest_table_from_ddl(table_name=table_name)
+            return closest_table
+        except Exception as e:
+            st.error(f"Error getting closest table from DDL: {e}")
+            logger.exception("%s", e)
+            return None
 
     @st.cache_data(show_spinner="Generating Plotly code ...")
     def generate_plotly_code(_self, question, sql, df):
