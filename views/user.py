@@ -14,7 +14,6 @@ vn = VannaService.from_streamlit_session()
 # Don't get training data at module load time - get it when rendering the page
 # df = vn.get_training_data()
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -64,7 +63,7 @@ st.title("User Settings")
 tab1, tab2 = st.tabs(["Training Data", "Change Password"])
 
 with tab1:
-    if st.session_state.cookies.get("role_name") == "admin":
+    if st.session_state.cookies.get("role_name", "Patient").upper() == RoleTypeEnum.ADMIN.name:
         cols = st.columns((0.2, 0.3, 0.2, 0.2, 0.2, 0.3, 0.2))
         with cols[0]:
             st.button("Train DDL", on_click=train_ddl)
@@ -97,7 +96,7 @@ with tab1:
         col1.write(row["training_data_type"])
         col2.write(row["question"])
         col3.write(row["content"])
-        if st.session_state.cookies.get("role_name") == "admin":
+        if st.session_state.cookies.get("role_name", "Patient").upper() == RoleTypeEnum.ADMIN.name:
             button_phold = col4.empty()
             do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
             if do_action:
@@ -120,5 +119,5 @@ with tab2:
                 else:
                     st.error("Current password is incorrect.")
 
-if st.session_state.cookies.get("role_name") == "admin":
+if st.session_state.cookies.get("role_name", "Patient").upper() == RoleTypeEnum.ADMIN.name:
     st.sidebar.button("Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary")

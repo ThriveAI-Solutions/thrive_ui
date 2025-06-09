@@ -29,6 +29,7 @@ def verify_user_credentials(username: str, password: str) -> bool:
                 st.session_state.cookies["user_id"] = json.dumps(user.id)
                 userRole = session.query(UserRole).filter(UserRole.id == user.user_role_id).one_or_none()
                 st.session_state.cookies["role_name"] = userRole.role_name
+                st.session_state.cookies["user_role"] = str(userRole.role)
 
             # Return True if the user exists, otherwise return False
             return user is not None
