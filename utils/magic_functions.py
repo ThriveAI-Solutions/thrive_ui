@@ -150,7 +150,7 @@ def _help(question, tuple):
         )
 
 
-def _table_heatmap(question, tuple):
+def _generate_heatmap(question, tuple):
     try:
         start_time = time.perf_counter()
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
@@ -181,7 +181,7 @@ def _table_heatmap(question, tuple):
             Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR)
         )
 
-def _table_wordcloud(question, tuple):
+def _generate_wordcloud(question, tuple):
     try:
         start_time = time.perf_counter()
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
@@ -243,21 +243,21 @@ def _table_wordcloud(question, tuple):
 
 MAGIC_RENDERERS = {
     # r"^generate heatmap for (?P<table>\w+)$": {
-    #     "func": _table_heatmap,
+    #     "func": _generate_heatmap,
     #     "description": "Generate a correlation heatmap visualization for a table.",
     #     "sample_values": {
     #         "table": "wny_health"
     #     }
     # },
     r"^/heatmap\s+(?P<table>\w+)$": {
-        "func": _table_heatmap,
+        "func": _generate_heatmap,
         "description": "Generate a correlation heatmap visualization for a table.",
         "sample_values": {
             "table": "wny_health"
         }
     },
     # r"^generate wordcloud for (?P<table>\w+)\s+(?P<column>\w+)$": {
-    #     "func": _table_wordcloud,
+    #     "func": _generate_wordcloud,
     #     "description": "Generate a wordcloud visualization for a table column",
     #     "sample_values": {
     #         "table": "wny_health",
@@ -265,7 +265,7 @@ MAGIC_RENDERERS = {
     #     }
     # },
     r"^/wordcloud\s+(?P<table>\w+)\.(?P<column>\w+)$": {
-        "func": _table_wordcloud,
+        "func": _generate_wordcloud,
         "description": "Generate a wordcloud visualization for a table column.",
         "sample_values": {
             "table": "wny_health",
