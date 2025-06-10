@@ -498,6 +498,11 @@ if chat_input:
 my_question = st.session_state.get("my_question", None)
 
 if my_question:
+    magic_response = is_magic_do_magic(my_question)
+    if magic_response != False:
+        add_message(magic_response)
+        st.stop()
+        
     # check guardrails here
     guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
     logger.debug(
@@ -525,11 +530,6 @@ if my_question:
             guardrail_sentence,
         )
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
-        st.stop()
-
-    magic_response = is_magic_do_magic(my_question)
-    if magic_response != False:
-        add_message(magic_response)
         st.stop()
 
     # write an acknowledgment message to
