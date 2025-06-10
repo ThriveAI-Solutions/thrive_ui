@@ -103,10 +103,11 @@ def set_feedback(index: int, value: str):
         "question": st.session_state.messages[index].question,
         "query": st.session_state.messages[index].query,
     }
-    if value == "up":
-        write_to_file_and_training(new_entry)
-    else:
-        remove_from_file_training(new_entry)
+    if st.session_state.cookies.get("role_name") == "Admin":
+        if value == "up":
+            write_to_file_and_training(new_entry)
+        else:
+            remove_from_file_training(new_entry)
 
 def generate_guid():
     return str(uuid.uuid4())
