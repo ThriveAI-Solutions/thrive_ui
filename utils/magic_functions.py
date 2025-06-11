@@ -1,13 +1,15 @@
-from utils.vanna_calls import run_sql_cached
-import plotly.express as px
-from utils.enums import MessageType, RoleType
-from orm.models import Message
-import time
 import difflib
-from wordcloud import WordCloud
-from utils.vanna_calls import read_forbidden_from_json
-from utils.chat_bot_helper import add_message
 import re
+import time
+
+import plotly.express as px
+from wordcloud import WordCloud
+
+from orm.models import Message
+from utils.chat_bot_helper import add_message
+from utils.enums import MessageType, RoleType
+from utils.vanna_calls import read_forbidden_from_json, run_sql_cached
+
 
 def generate_example_from_pattern(pattern, sample_values=None):
     """
@@ -16,10 +18,7 @@ def generate_example_from_pattern(pattern, sample_values=None):
     """
     if sample_values is None:
         # Default sample values for common group names
-        sample_values = {
-            "table": "my_table",
-            "column": "my_column"
-        }
+        sample_values = {"table": "my_table", "column": "my_column"}
     # Find all named groups in the pattern
     group_names = re.findall(r"\?P<(\w+)>", pattern)
     example = pattern
@@ -43,7 +42,7 @@ def usage_from_pattern(pattern):
     # Remove regex anchors and escapes for clarity
     usage = pattern
     usage = usage.replace("^", "").replace("$", "")
-    usage = re.sub(r"\\s\+", " ", usage)
+    usage = re.sub(r"\s\+", " ", usage)
     # Replace named groups with <group_name>
     usage = re.sub(r"\(\?P<(\w+)>[^\)]+\)", r"<\1>", usage)
     # Remove any remaining regex tokens
@@ -61,22 +60,23 @@ def get_all_table_names():
         df = run_sql_cached(sql)
         if df.empty:
             raise Exception("No tables found in the database.")
-        
-        return df['table_name'].tolist()
+
+        return df["table_name"].tolist()
     except Exception as e:
         raise
+
 
 def find_closest_table_name(table_name):
     try:
         table_names = get_all_table_names()
-        if table_names is None:    
+        if table_names is None:
             raise Exception("No table names found in the database.")
-        
+
         matches = difflib.get_close_matches(table_name, table_names, n=1, cutoff=0.6)
 
         if not matches:
             raise Exception(f"Could not find table similar to '{table_name}'")
-        
+
         return matches[0]
     except Exception as e:
         raise
@@ -95,15 +95,16 @@ def find_closest_column_name(table_name, column_name):
             AND table_name = '{table_name}';
         """
         df = run_sql_cached(sql)
-        column_names = df['column_name'].tolist() if not df.empty else []
+        column_names = df["column_name"].tolist() if not df.empty else []
         matches = difflib.get_close_matches(column_name, column_names, n=1, cutoff=0.6)
 
         if not matches:
             raise Exception(f"Could not find column similar to  {column_name} on '{table_name}'")
-        
+
         return matches[0]
     except Exception as e:
         raise
+
 
 def is_magic_do_magic(question):
     try:
@@ -115,9 +116,7 @@ def is_magic_do_magic(question):
                 return True
         return False
     except Exception as e:
-        add_message(
-            Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR)
-        )
+        add_message(Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR))
         return False
 
 
@@ -125,10 +124,7 @@ def _help(question, tuple):
     try:
         help_lines = ["MAGIC COMMANDS", "=" * 50, "", "Usage: /<command> [arguments]", "", "Available commands:", ""]
         # Find the longest usage string for alignment
-        usages = [
-            (usage_from_pattern(pattern), meta["description"])
-            for pattern, meta in MAGIC_RENDERERS.items()
-        ]
+        usages = [(usage_from_pattern(pattern), meta["description"]) for pattern, meta in MAGIC_RENDERERS.items()]
 
         max_usage_len = max(len(usage) for usage, _ in usages) if usages else 0
 
@@ -145,19 +141,17 @@ def _help(question, tuple):
 
         add_message(Message(RoleType.ASSISTANT, "\n".join(help_lines), MessageType.PYTHON, None, question, None, 0))
     except Exception as e:
-        add_message(
-            Message(RoleType.ASSISTANT, f"Error generating help message: {str(e)}", MessageType.ERROR)
-        )
+        add_message(Message(RoleType.ASSISTANT, f"Error generating help message: {str(e)}", MessageType.ERROR))
 
 
 def _generate_heatmap(question, tuple):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple['table'])
+        table_name = find_closest_table_name(tuple["table"])
         # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
         sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 1000;"
         df = run_sql_cached(sql)
-        if( df is None or df.empty):
+        if df is None or df.empty:
             add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
             return
 
@@ -169,37 +163,46 @@ def _generate_heatmap(question, tuple):
             text_auto=".2f",
             aspect="auto",
             color_continuous_scale="RdYlGn",
-            title=f"Correlation Heatmap for {table_name}"
+            title=f"Correlation Heatmap for {table_name}",
         )
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
         add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
     except Exception as e:
-        add_message(
-            Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR)
-        )
+        add_message(Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR))
+
 
 def _generate_wordcloud_column(question, tuple):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple['table'])
-        column_name = find_closest_column_name(table_name, tuple['column'])
+        table_name = find_closest_table_name(tuple["table"])
+        column_name = find_closest_column_name(table_name, tuple["column"])
         sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
         df = run_sql_cached(sql)
-        if( df is None or df.empty):
+        if df is None or df.empty:
             add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
             return
 
         if column_name not in df.columns:
-            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR))
+            add_message(
+                Message(
+                    RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR
+                )
+            )
             return
 
         # Combine all text from the column
         text_data = df[column_name].astype(str).str.cat(sep=" ")
 
         if not text_data or text_data.strip() == "":
-            add_message(Message(RoleType.ASSISTANT, f"No text data found in column '{column_name}' of table '{table_name}'", MessageType.ERROR))
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"No text data found in column '{column_name}' of table '{table_name}'",
+                    MessageType.ERROR,
+                )
+            )
             return
 
         # Generate wordcloud
@@ -227,28 +230,27 @@ def _generate_wordcloud_column(question, tuple):
             height=600,
             margin=dict(l=0, r=0, t=50, b=0),
         )
-        
+
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
         add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
     except Exception as e:
-        add_message(
-            Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR)
-        )
+        add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR))
+
 
 def _generate_wordcloud(question, tuple):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple['table'])
+        table_name = find_closest_table_name(tuple["table"])
         # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
         sql = f"SELECT * FROM {table_name};"
         df = run_sql_cached(sql)
-        if( df is None or df.empty):
+        if df is None or df.empty:
             add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
             return
 
-       # Combine all text from the column, filtering out unwanted words
+        # Combine all text from the column, filtering out unwanted words
         unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
         string_columns = df.select_dtypes(include="object").columns
         words = []
@@ -285,23 +287,20 @@ def _generate_wordcloud(question, tuple):
             height=600,
             margin=dict(l=0, r=0, t=50, b=0),
         )
-        
+
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
         add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
     except Exception as e:
-        add_message(
-            Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR)
-        )
+        add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR))
+
 
 MAGIC_RENDERERS = {
     r"^/heatmap\s+(?P<table>\w+)$": {
         "func": _generate_heatmap,
         "description": "Generate a correlation heatmap visualization for a table.",
-        "sample_values": {
-            "table": "wny_health"
-        }
+        "sample_values": {"table": "wny_health"},
     },
     # r"^generate heatmap for (?P<table>\w+)$": {
     #     "func": _generate_heatmap,
@@ -315,15 +314,12 @@ MAGIC_RENDERERS = {
         "description": "Generate a wordcloud visualization for a table.",
         "sample_values": {
             "table": "wny_health",
-        }
+        },
     },
     r"^/wordcloud\s+(?P<table>\w+)\.(?P<column>\w+)$": {
         "func": _generate_wordcloud_column,
         "description": "Generate a wordcloud visualization for a table column.",
-        "sample_values": {
-            "table": "wny_health",
-            "column": "county"
-        }
+        "sample_values": {"table": "wny_health", "column": "county"},
     },
     # r"^generate wordcloud for (?P<table>\w+)\s+(?P<column>\w+)$": {
     #     "func": _generate_wordcloud,
@@ -333,10 +329,6 @@ MAGIC_RENDERERS = {
     #         "column": "county"
     #     }
     # },
-    r"^/help$": {
-        "func": _help,
-        "description": "Show available magic commands",
-        "sample_values": {}
-    },
+    r"^/help$": {"func": _help, "description": "Show available magic commands", "sample_values": {}},
     # Add more as needed...
 }

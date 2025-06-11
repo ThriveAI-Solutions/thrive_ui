@@ -1,16 +1,19 @@
-from io import StringIO
 import ast
 import json
-from orm.models import Message
-import streamlit as st
-import pandas as pd
-from utils.enums import MessageType, RoleType
 import uuid
-from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
+from io import StringIO
+
+import pandas as pd
+import streamlit as st
+
 from orm.functions import save_user_settings
+from orm.models import Message
+from utils.enums import MessageType, RoleType
+from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
 # Initialize VannaService singleton
 vn = VannaService.from_streamlit_session()
+
 
 def call_llm(my_question: str):
     response = vn.submit_prompt(
@@ -18,6 +21,7 @@ def call_llm(my_question: str):
         my_question,
     )
     add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR))
+
 
 def get_chart(my_question, sql, df):
     elapsed_sum = 0
@@ -109,6 +113,7 @@ def set_feedback(index: int, value: str):
         else:
             remove_from_file_training(new_entry)
 
+
 def generate_guid():
     return str(uuid.uuid4())
 
@@ -117,6 +122,7 @@ def get_followup_questions(my_question, sql, df):
     followup_questions = vn.generate_followup_questions(question=my_question, sql=sql, df=df)
 
     add_message(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP, sql, my_question))
+
 
 # --- Private helper functions for rendering specific message types ---
 
@@ -174,7 +180,6 @@ def _render_plotly_chart(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     message.content = message.content.replace("#000001", "#0b5258")  # Replace color code for consistency
     chart = json.loads(message.content)
-    print(message.content)
     st.plotly_chart(chart, key=f"message_{index}")
 
 
