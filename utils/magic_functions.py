@@ -110,7 +110,6 @@ def is_magic_do_magic(question):
         for key, meta in MAGIC_RENDERERS.items():
             match = re.match(key, question.strip())
             if match:
-                print(match.groupdict())
                 meta["func"](question, match.groupdict())
                 return True
         return False
@@ -188,7 +187,6 @@ def _generate_wordcloud(question, tuple):
         table_name = find_closest_table_name(tuple['table'])
         column_name = find_closest_column_name(table_name, tuple['column'])
         # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
-        print(f"table_name: {table_name}, column_name: {column_name}")
         sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
         df = run_sql_cached(sql)
         if( df is None or df.empty):
