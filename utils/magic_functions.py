@@ -110,6 +110,7 @@ def is_magic_do_magic(question):
         for key, meta in MAGIC_RENDERERS.items():
             match = re.match(key, question.strip())
             if match:
+                add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
                 meta["func"](question, match.groupdict())
                 return True
         return False
@@ -152,7 +153,6 @@ def _help(question, tuple):
 def _generate_heatmap(question, tuple):
     try:
         start_time = time.perf_counter()
-        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
         table_name = find_closest_table_name(tuple['table'])
         # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
         sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 1000;"
@@ -183,7 +183,6 @@ def _generate_heatmap(question, tuple):
 def _generate_wordcloud(question, tuple):
     try:
         start_time = time.perf_counter()
-        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
         table_name = find_closest_table_name(tuple['table'])
         column_name = find_closest_column_name(table_name, tuple['column'])
         # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
