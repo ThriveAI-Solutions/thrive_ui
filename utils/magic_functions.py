@@ -180,7 +180,7 @@ def _generate_heatmap(question, tuple):
             Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR)
         )
 
-def _generate_wordcloud(question, tuple):
+def _generate_wordcloud_column(question, tuple):
     try:
         start_time = time.perf_counter()
         table_name = find_closest_table_name(tuple['table'])
@@ -237,7 +237,7 @@ def _generate_wordcloud(question, tuple):
             Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR)
         )
 
-def _generate_wordcloud_all(question, tuple):
+def _generate_wordcloud(question, tuple):
     try:
         start_time = time.perf_counter()
         table_name = find_closest_table_name(tuple['table'])
@@ -248,12 +248,13 @@ def _generate_wordcloud_all(question, tuple):
             add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
             return
 
-        # Combine all text from the column
+       # Combine all text from the column, filtering out unwanted words
+        unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
         string_columns = df.select_dtypes(include="object").columns
-        text_data = ""
+        words = []
         for col in string_columns:
-            text_data += df[col].astype(str).str.cat(sep=" ") + " "
-        text_data = text_data.strip()
+            words += [w for w in df[col].astype(str).str.cat(sep=" ").split() if w.lower() not in unwanted_words]
+        text_data = " ".join(words)
 
         if not text_data or text_data.strip() == "":
             add_message(Message(RoleType.ASSISTANT, f"No text data found in table '{table_name}'", MessageType.ERROR))
@@ -295,6 +296,13 @@ def _generate_wordcloud_all(question, tuple):
         )
 
 MAGIC_RENDERERS = {
+    r"^/heatmap\s+(?P<table>\w+)$": {
+        "func": _generate_heatmap,
+        "description": "Generate a correlation heatmap visualization for a table.",
+        "sample_values": {
+            "table": "wny_health"
+        }
+    },
     # r"^generate heatmap for (?P<table>\w+)$": {
     #     "func": _generate_heatmap,
     #     "description": "Generate a correlation heatmap visualization for a table.",
@@ -302,11 +310,19 @@ MAGIC_RENDERERS = {
     #         "table": "wny_health"
     #     }
     # },
-    r"^/heatmap\s+(?P<table>\w+)$": {
-        "func": _generate_heatmap,
-        "description": "Generate a correlation heatmap visualization for a table.",
+    r"^/wordcloud\s+(?P<table>\w+)$": {
+        "func": _generate_wordcloud,
+        "description": "Generate a wordcloud visualization for a table.",
         "sample_values": {
-            "table": "wny_health"
+            "table": "wny_health",
+        }
+    },
+    r"^/wordcloud\s+(?P<table>\w+)\.(?P<column>\w+)$": {
+        "func": _generate_wordcloud_column,
+        "description": "Generate a wordcloud visualization for a table column.",
+        "sample_values": {
+            "table": "wny_health",
+            "column": "county"
         }
     },
     # r"^generate wordcloud for (?P<table>\w+)\s+(?P<column>\w+)$": {
@@ -317,21 +333,6 @@ MAGIC_RENDERERS = {
     #         "column": "county"
     #     }
     # },
-    r"^/wordcloud\s+(?P<table>\w+)\.(?P<column>\w+)$": {
-        "func": _generate_wordcloud,
-        "description": "Generate a wordcloud visualization for a table column.",
-        "sample_values": {
-            "table": "wny_health",
-            "column": "county"
-        }
-    },
-    r"^/wordcloud\s+(?P<table>\w+)$": {
-        "func": _generate_wordcloud_all,
-        "description": "Generate a wordcloud visualization for a table column.",
-        "sample_values": {
-            "table": "wny_health",
-        }
-    },
     r"^/help$": {
         "func": _help,
         "description": "Show available magic commands",
