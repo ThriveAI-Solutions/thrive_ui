@@ -185,7 +185,6 @@ def _generate_wordcloud(question, tuple):
         start_time = time.perf_counter()
         table_name = find_closest_table_name(tuple['table'])
         column_name = find_closest_column_name(table_name, tuple['column'])
-        # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
         sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
         df = run_sql_cached(sql)
         if( df is None or df.empty):
@@ -238,6 +237,63 @@ def _generate_wordcloud(question, tuple):
             Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR)
         )
 
+def _generate_wordcloud_all(question, tuple):
+    try:
+        start_time = time.perf_counter()
+        table_name = find_closest_table_name(tuple['table'])
+        # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
+        sql = f"SELECT * FROM {table_name};"
+        df = run_sql_cached(sql)
+        if( df is None or df.empty):
+            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            return
+
+        # Combine all text from the column
+        string_columns = df.select_dtypes(include="object").columns
+        text_data = ""
+        for col in string_columns:
+            text_data += df[col].astype(str).str.cat(sep=" ") + " "
+        text_data = text_data.strip()
+
+        if not text_data or text_data.strip() == "":
+            add_message(Message(RoleType.ASSISTANT, f"No text data found in table '{table_name}'", MessageType.ERROR))
+            return
+
+        # Generate wordcloud
+        wordcloud = WordCloud(
+            width=1200,
+            height=600,
+            background_color="white",
+            colormap="viridis",
+            max_words=100,
+            relative_scaling=0.5,
+            random_state=42,
+        ).generate(text_data)
+
+        # Convert wordcloud to image array and create plotly figure
+        wordcloud_array = wordcloud.to_array()
+
+        # Use plotly express imshow to display the wordcloud
+        fig = px.imshow(wordcloud_array, title=f"Word Cloud for {table_name}")
+
+        # Hide axes and ticks for clean appearance
+        fig.update_layout(
+            xaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+            yaxis=dict(showticklabels=False, showgrid=False, zeroline=False),
+            width=1200,
+            height=600,
+            margin=dict(l=0, r=0, t=50, b=0),
+        )
+        
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+    except Exception as e:
+        add_message(
+            Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR)
+        )
+
 MAGIC_RENDERERS = {
     # r"^generate heatmap for (?P<table>\w+)$": {
     #     "func": _generate_heatmap,
@@ -267,6 +323,13 @@ MAGIC_RENDERERS = {
         "sample_values": {
             "table": "wny_health",
             "column": "county"
+        }
+    },
+    r"^/wordcloud\s+(?P<table>\w+)$": {
+        "func": _generate_wordcloud_all,
+        "description": "Generate a wordcloud visualization for a table column.",
+        "sample_values": {
+            "table": "wny_health",
         }
     },
     r"^/help$": {
