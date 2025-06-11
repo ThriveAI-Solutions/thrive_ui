@@ -2,9 +2,7 @@
 
 import os
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 from utils.chromadb_vector import ThriveAI_ChromaDB
 
@@ -27,7 +25,6 @@ def test_chromadb_path_fixture(test_chromadb_path):
 
 def test_in_memory_chromadb(in_memory_chromadb_client):
     """Test that in_memory_chromadb_client creates an in-memory client."""
-    import chromadb
 
     assert type(in_memory_chromadb_client).__name__ == "Client"
     assert hasattr(in_memory_chromadb_client, "create_collection")

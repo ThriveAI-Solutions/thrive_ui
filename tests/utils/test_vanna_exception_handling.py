@@ -3,7 +3,6 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pandas as pd
 import pytest
-import streamlit as st
 from pandas import DataFrame
 
 from utils.vanna_calls import (

@@ -4,7 +4,6 @@ from unittest.mock import MagicMock, patch
 import chromadb
 import pandas as pd
 import pytest
-import streamlit as st
 
 from orm.models import RoleTypeEnum  # Assuming RoleTypeEnum is here for user_role values
 from utils.chromadb_vector import ThriveAI_ChromaDB
@@ -389,7 +388,6 @@ def test_hierarchical_role_access_ddl_with_lte_filter(mock_vanna_service_with_in
 
 def test_role_based_access_with_different_service_roles(thrive_ai_chromadb_in_memory):
     """Test that the built-in role filtering works correctly with different user roles."""
-    from orm.models import RoleTypeEnum
 
     # Create services with different user roles
     basic_user_service = type(thrive_ai_chromadb_in_memory)(user_role=1, client=thrive_ai_chromadb_in_memory.client)
@@ -639,7 +637,6 @@ def test_role_based_similar_question_retrieval(mock_vanna_service_with_in_memory
 
 def test_built_in_role_filtering_behavior(thrive_ai_chromadb_in_memory):
     """Test that the built-in _prepare_retrieval_metadata filtering works as designed."""
-    from orm.models import RoleTypeEnum
 
     # Create services with different user roles
     basic_user_service = type(thrive_ai_chromadb_in_memory)(user_role=1, client=thrive_ai_chromadb_in_memory.client)

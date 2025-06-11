@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from psycopg2.extras import RealDictCursor
 
 from utils.vanna_calls import (
     MyVannaAnthropic,
