@@ -62,7 +62,7 @@ def get_all_table_names():
             raise Exception("No tables found in the database.")
 
         return df["table_name"].tolist()
-    except Exception as e:
+    except Exception:
         raise
 
 
@@ -78,7 +78,7 @@ def find_closest_table_name(table_name):
             raise Exception(f"Could not find table similar to '{table_name}'")
 
         return matches[0]
-    except Exception as e:
+    except Exception:
         raise
 
 
@@ -102,7 +102,7 @@ def find_closest_column_name(table_name, column_name):
             raise Exception(f"Could not find column similar to  {column_name} on '{table_name}'")
 
         return matches[0]
-    except Exception as e:
+    except Exception:
         raise
 
 
