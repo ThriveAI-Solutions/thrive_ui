@@ -247,10 +247,9 @@ def get_wordcloud(sql, table_name, column_name = None):
         background_color="white",
         colormap="viridis",
         max_words=100,
-        stopwords=stopwords,
+        # stopwords=stopwords,
         relative_scaling=0.5,
         random_state=42,
-        contour_width=10
         mask=img_mask
     ).generate(text_data)
 
