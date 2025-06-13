@@ -3,10 +3,8 @@ import re
 from PIL import Image
 import numpy as np
 import time
-
 import plotly.express as px
 from wordcloud import WordCloud
-
 from orm.models import Message
 from utils.chat_bot_helper import add_message
 from utils.enums import MessageType, RoleType
@@ -181,9 +179,9 @@ def _generate_wordcloud_column(question, tuple):
         table_name = find_closest_table_name(tuple["table"])
         column_name = find_closest_column_name(table_name, tuple["column"])
         sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-        
+
         fig = get_wordcloud(sql, table_name, column_name)
-        
+
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
@@ -198,9 +196,9 @@ def _generate_wordcloud(question, tuple):
         table_name = find_closest_table_name(tuple["table"])
         # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
         sql = f"SELECT * FROM {table_name};"
-        
+
         fig = get_wordcloud(sql, table_name)
-        
+
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
@@ -209,9 +207,9 @@ def _generate_wordcloud(question, tuple):
         add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR))
 
 
-def get_wordcloud(sql, table_name, column_name = None):
+def get_wordcloud(sql, table_name, column_name=None):
     df = run_sql_cached(sql)
-    if( df is None or df.empty):
+    if df is None or df.empty:
         add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
         return
 
@@ -221,9 +219,13 @@ def get_wordcloud(sql, table_name, column_name = None):
 
     if column_name != None:
         if column_name not in df.columns:
-            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR))
+            add_message(
+                Message(
+                    RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR
+                )
+            )
             return
-        
+
         text_data = df[column_name].astype(str).str.cat(sep=" ")
     else:
         string_columns = df.select_dtypes(include="object").columns
@@ -235,7 +237,7 @@ def get_wordcloud(sql, table_name, column_name = None):
     if not text_data or text_data.strip() == "":
         add_message(Message(RoleType.ASSISTANT, f"No text data found in table '{table_name}'", MessageType.ERROR))
         return
-    
+
     # Load the brain mask image
     mask_path = "assets/heart.png"
     img_mask = np.array(Image.open(mask_path))
@@ -250,7 +252,7 @@ def get_wordcloud(sql, table_name, column_name = None):
         # stopwords=stopwords,
         relative_scaling=0.5,
         random_state=42,
-        mask=img_mask
+        mask=img_mask,
     ).generate(text_data)
 
     # Convert wordcloud to image array and create plotly figure
@@ -267,9 +269,9 @@ def get_wordcloud(sql, table_name, column_name = None):
         height=600,
         margin=dict(l=0, r=0, t=50, b=0),
     )
-    
+
     return fig
-    
+
 
 MAGIC_RENDERERS = {
     r"^/heatmap\s+(?P<table>\w+)$": {
