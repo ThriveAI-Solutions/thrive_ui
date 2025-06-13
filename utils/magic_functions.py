@@ -122,7 +122,7 @@ def is_magic_do_magic(question):
 
 def _help(question, tuple):
     try:
-        help_lines = ["MAGIC COMMANDS", "=" * 50, "", "Usage: /<command> [arguments]", "", "Available commands:", ""]
+        help_lines = ["MAGIC COMMANDS", "=" * 50, "", "Usage: /<command> [arguments]", "", "Available commands:"]
         # Find the longest usage string for alignment
         usages = [(usage_from_pattern(pattern), meta["description"]) for pattern, meta in MAGIC_RENDERERS.items()]
 
