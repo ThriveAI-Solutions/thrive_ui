@@ -1,16 +1,17 @@
-
 import logging
 import random
 import time
+
 import pandas as pd
 import streamlit as st
 from ethical_guardrails_lib import get_ethical_guideline
+
+import utils.chat_bot_helper as cbh
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
 from utils.communicate import listen, speak
 from utils.enums import MessageType, RoleType
 from utils.magic_functions import is_magic_do_magic
-import utils.chat_bot_helper as cbh
 
 logger = logging.getLogger(__name__)
 
@@ -38,24 +39,32 @@ if st.session_state.messages is None:
 
 ######### Sidebar settings #########
 
+
 def save_settings_on_click():
     """Update session state with temporary settings values and save to database"""
     # Update session state with temporary values
     st.session_state.show_sql = st.session_state.get("temp_show_sql", st.session_state.show_sql)
     st.session_state.show_table = st.session_state.get("temp_show_table", st.session_state.show_table)
     st.session_state.show_chart = st.session_state.get("temp_show_chart", st.session_state.show_chart)
-    st.session_state.show_elapsed_time = st.session_state.get("temp_show_elapsed_time", st.session_state.show_elapsed_time)
-    st.session_state.show_question_history = st.session_state.get("temp_show_question_history", st.session_state.show_question_history)
+    st.session_state.show_elapsed_time = st.session_state.get(
+        "temp_show_elapsed_time", st.session_state.show_elapsed_time
+    )
+    st.session_state.show_question_history = st.session_state.get(
+        "temp_show_question_history", st.session_state.show_question_history
+    )
     st.session_state.voice_input = st.session_state.get("temp_voice_input", st.session_state.voice_input)
     st.session_state.speak_summary = st.session_state.get("temp_speak_summary", st.session_state.speak_summary)
     st.session_state.show_suggested = st.session_state.get("temp_show_suggested", st.session_state.show_suggested)
     st.session_state.show_followup = st.session_state.get("temp_show_followup", st.session_state.show_followup)
     st.session_state.llm_fallback = st.session_state.get("temp_llm_fallback", st.session_state.llm_fallback)
     # Handle show_plotly_code even though it's not currently in the UI
-    st.session_state.show_plotly_code = st.session_state.get("temp_show_plotly_code", st.session_state.get("show_plotly_code", False))
-    
+    st.session_state.show_plotly_code = st.session_state.get(
+        "temp_show_plotly_code", st.session_state.get("show_plotly_code", False)
+    )
+
     # Save to database
     save_user_settings()
+
 
 st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
 with st.sidebar.expander("Settings"):
@@ -63,12 +72,22 @@ with st.sidebar.expander("Settings"):
     st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
     st.checkbox("Show Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
-    st.checkbox("Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time")
-    st.checkbox("Show Question History", value=st.session_state.get("show_question_history", True), key="temp_show_question_history")
+    st.checkbox(
+        "Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time"
+    )
+    st.checkbox(
+        "Show Question History",
+        value=st.session_state.get("show_question_history", True),
+        key="temp_show_question_history",
+    )
     st.checkbox("Voice Input", value=st.session_state.get("voice_input", False), key="temp_voice_input")
     st.checkbox("Speak Summary", value=st.session_state.get("speak_summary", False), key="temp_speak_summary")
-    st.checkbox("Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested")
-    st.checkbox("Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup")
+    st.checkbox(
+        "Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested"
+    )
+    st.checkbox(
+        "Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup"
+    )
     st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
     st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
@@ -107,7 +126,10 @@ if st.session_state.get("show_question_history", True):
     if len(filtered_messages) > 0:
         for past_question in filtered_messages:
             st.sidebar.button(
-                past_question.content, on_click=cbh.set_question, args=(past_question.content,), use_container_width=True
+                past_question.content,
+                on_click=cbh.set_question,
+                args=(past_question.content,),
+                use_container_width=True,
             )
     else:
         st.sidebar.text("No questions asked yet")
@@ -141,7 +163,7 @@ if my_question:
     magic_response = is_magic_do_magic(my_question)
     if magic_response == True:
         st.stop()
-        
+
     # check guardrails here
     guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
     logger.debug(
@@ -158,7 +180,6 @@ if my_question:
             guardrail_sentence,
         )
         cbh.add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
-        print("guardrail_score == 2")
         cbh.call_llm(my_question)
         st.stop()
     if guardrail_score >= 3:
@@ -184,11 +205,11 @@ if my_question:
             if st.session_state.get("show_sql", True):
                 cbh.add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
         else:
-            print("sql is not valid")
+            logger.debug("sql is not valid")
             cbh.add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):
-                print("fallback to LLM")
+                logger.debug("fallback to LLM")
                 cbh.call_llm(my_question)
             st.stop()
 
@@ -211,7 +232,6 @@ if my_question:
             summary, elapsed_time = cbh.vn.generate_summary(question=my_question, df=df)
             if summary is not None:
                 if st.session_state.get("show_summary", True):
-                    print(df)
                     cbh.add_message(
                         Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time)
                     )
@@ -246,6 +266,5 @@ if my_question:
             )
         )
         if st.session_state.get("llm_fallback", True):
-            print("cant generate sql for that question, fallback to LLM")
             cbh.call_llm(my_question)
 ######### Handle new chat input #########
