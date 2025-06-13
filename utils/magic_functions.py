@@ -42,7 +42,7 @@ def usage_from_pattern(pattern):
     # Remove regex anchors and escapes for clarity
     usage = pattern
     usage = usage.replace("^", "").replace("$", "")
-    usage = re.sub(r"\s\+", " ", usage)
+    usage = re.sub(r"\\s\+", " ", usage)
     # Replace named groups with <group_name>
     usage = re.sub(r"\(\?P<(\w+)>[^\)]+\)", r"<\1>", usage)
     # Remove any remaining regex tokens
