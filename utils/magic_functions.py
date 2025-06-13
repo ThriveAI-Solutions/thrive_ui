@@ -291,6 +291,8 @@ def _generate_pairplot(question, tuple):
             color=column_name,
             symbol=column_name,
             title=f"Pairplot for {table_name} - {column_name}",
+            width=1200,
+            height=1200,
         )
 
         end_time = time.perf_counter()
