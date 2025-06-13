@@ -231,7 +231,7 @@ def get_wordcloud(sql, table_name, column_name=None):
         string_columns = df.select_dtypes(include="object").columns
         words = []
         for col in string_columns:
-            words += [w for w in df[col].astype(str).str.cat(sep=" ").split()]
+            words += [w for w in df[col].astype(str).str.cat(sep=" ").split() if w.lower() not in unwanted_words]
         text_data = " ".join(words)
 
     if not text_data or text_data.strip() == "":
@@ -273,6 +273,34 @@ def get_wordcloud(sql, table_name, column_name=None):
     return fig
 
 
+def _generate_pairplot(question, tuple):
+    try:
+        start_time = time.perf_counter()
+        table_name = find_closest_table_name(tuple["table"])
+        column_name = find_closest_column_name(table_name, tuple["column"])
+        sql = f"SELECT * FROM {table_name};"
+
+        df = run_sql_cached(sql)
+        if df is None or df.empty:
+            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            return
+
+        fig = px.scatter_matrix(
+            df,
+            dimensions=df.select_dtypes(include=[np.number]).columns.tolist(),
+            color=column_name,
+            symbol=column_name,
+            title=f"Pairplot for {table_name} - {column_name}",
+        )
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error generating pair plot: {str(e)}", MessageType.ERROR))
+
+
 MAGIC_RENDERERS = {
     r"^/heatmap\s+(?P<table>\w+)$": {
         "func": _generate_heatmap,
@@ -306,6 +334,11 @@ MAGIC_RENDERERS = {
     #         "column": "county"
     #     }
     # },
+    r"^/pairplot\s+(?P<table>\w+)\.(?P<column>\w+)$": {
+        "func": _generate_pairplot,
+        "description": "Generate a pairplot visualization for a table column.",
+        "sample_values": {"table": "wny_health", "column": "county"},
+    },
     r"^/help$": {"func": _help, "description": "Show available magic commands", "sample_values": {}},
     # Add more as needed...
 }
