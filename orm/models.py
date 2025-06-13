@@ -2,7 +2,6 @@ import enum
 import json
 import logging
 from decimal import Decimal
-
 import pandas as pd
 import streamlit as st
 from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, Numeric, String, create_engine, func

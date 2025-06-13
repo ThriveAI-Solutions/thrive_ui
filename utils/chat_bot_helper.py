@@ -178,7 +178,6 @@ def _render_plotly_chart(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     message.content = message.content.replace("#000001", "#0b5258")  # Replace color code for consistency
     chart = json.loads(message.content)
-    print(message.content)
     st.plotly_chart(chart, key=f"message_{index}")
 
 
