@@ -11,7 +11,7 @@ from streamlit_cookies_manager_ext import EncryptedCookieManager
 from utils.auth import check_authenticate
 
 # setup logging
-setup_logging(debug=False)
+setup_logging(debug=True)
 
 logger = logging.getLogger(__name__)
 
