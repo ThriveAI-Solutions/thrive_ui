@@ -45,7 +45,7 @@ def usage_from_pattern(pattern):
     # Remove regex anchors and escapes for clarity
     usage = pattern
     usage = usage.replace("^", "").replace("$", "")
-    usage = re.sub(r"\\s\+", " ", usage)
+    usage = re.sub(r"\s+", " ", usage)
     # Replace named groups with <group_name>
     usage = re.sub(r"\(\?P<(\w+)>[^\)]+\)", r"<\1>", usage)
     # Remove any remaining regex tokens
@@ -482,12 +482,12 @@ MAGIC_RENDERERS = {
     },
     r"^/bar\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_bar,
-        "description": "Generate a scatterplot visualization for a table x and y axis.",
+        "description": "Generate a bar chart visualization for a table x and y axis.",
         "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
     },
     r"^/line\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_line,
-        "description": "Generate a scatterplot visualization for a table x and y axis.",
+        "description": "Generate a line chart visualization for a table x and y axis.",
         "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
     },
     r"^/followup\s+(?P<command>.+)$": {"func": _followup, "description": "Ask a follow up question to the previous result set.", "sample_values": {
