@@ -144,7 +144,7 @@ def is_magic_do_magic(question, previous_df=None):
                 match = re.match(key, question.strip())
                 if match:
                     add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
-                    meta["func"](question, match.groupdict())
+                    meta["func"](question, match.groupdict(), None)
                     return True
         return False
     except Exception as e:
@@ -228,7 +228,7 @@ def _head(question, tuple, previous_df):
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
 
 
-def _followup(question, tuple):
+def _followup(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
 
