@@ -587,7 +587,7 @@ MAGIC_RENDERERS = {
     },
     r"^/followup\s+(?P<command>.+)$": {
         "func": _followup,
-        "description": "Ask a follow up question to the previous result set.",
+        "description": "Ask a follow up question to the previous result set.  Also accepts magic commands ie: heatmap/wordcloud.",
         "sample_values": {"command": "how do these results compare to the national averages?"},
     },
     r"^/tables$": {"func": _tables, "description": "Show all available tables", "sample_values": {}},
