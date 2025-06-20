@@ -158,7 +158,6 @@ if chat_input:
 my_question = st.session_state.get("my_question", None)
 
 if my_question:
-    print("********************************************************************MAGIC******************************************************************")
     magic_response = is_magic_do_magic(my_question)
     if magic_response == True:
         st.stop()
