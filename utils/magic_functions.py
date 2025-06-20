@@ -1,8 +1,10 @@
 import difflib
+from io import StringIO
 import re
 import streamlit as st
 from PIL import Image
 import numpy as np
+import pandas as pd
 import time
 import plotly.express as px
 from wordcloud import WordCloud
@@ -13,6 +15,8 @@ from utils.vanna_calls import VannaService, read_forbidden_from_json, run_sql_ca
 
 # Initialize VannaService singleton
 vn = VannaService.from_streamlit_session()
+unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
+
 
 def generate_example_from_pattern(pattern, sample_values=None):
     """
@@ -45,7 +49,7 @@ def usage_from_pattern(pattern):
     # Remove regex anchors and escapes for clarity
     usage = pattern
     usage = usage.replace("^", "").replace("$", "")
-    usage = re.sub(r"\\s\+", " ", usage) 
+    usage = re.sub(r"\\s\+", " ", usage)
     # Replace named groups with <group_name>
     usage = re.sub(r"\(\?P<(\w+)>[^\)]+\)", r"<\1>", usage)
     # Remove any remaining regex tokens
@@ -124,16 +128,24 @@ def find_closest_column_name(table_name, column_name):
         raise
 
 
-def is_magic_do_magic(question):
+def is_magic_do_magic(question, previous_df=None):
     try:
         if question is None or question.strip() == "":
             return False
-        for key, meta in MAGIC_RENDERERS.items():
-            match = re.match(key, question.strip())
-            if match:
-                add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
-                meta["func"](question, match.groupdict())
-                return True
+
+        if previous_df is not None:
+            for key, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
+                match = re.match(key, question.strip())
+                if match:
+                    meta["func"](question, match.groupdict(), previous_df)
+                    return True
+        else:
+            for key, meta in MAGIC_RENDERERS.items():
+                match = re.match(key, question.strip())
+                if match:
+                    add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
+                    meta["func"](question, match.groupdict())
+                    return True
         return False
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR))
@@ -168,7 +180,7 @@ def _tables(question, tuple):
     try:
         start_time = time.perf_counter()
         table_names = get_all_table_names()
-        
+
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
@@ -186,46 +198,64 @@ def _columns(question, tuple):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, column_names, MessageType.DATAFRAME, None, question, None, elapsed_time))
+        add_message(
+            Message(RoleType.ASSISTANT, column_names, MessageType.DATAFRAME, None, question, None, elapsed_time)
+        )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving columns: {str(e)}", MessageType.ERROR))
 
-    
-def _head(question, tuple):
+
+def _head(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
+        sql = ""
+        if previous_df is None:
+            table_name = find_closest_table_name(tuple["table"])
 
-        table_name = find_closest_table_name(tuple["table"])
+            sql = f"SELECT *  FROM {table_name} LIMIT 5;"
+            df = run_sql_cached(sql)
+        else:
+            df = previous_df.head(5)
 
-        sql = f"SELECT *  FROM {table_name} LIMIT 5;"
-        df = run_sql_cached(sql)
         if df.empty:
             raise Exception("No rows found in the database.")
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, None, question, None, elapsed_time))
+        add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, question, previous_df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
 
-    
+
 def _followup(question, tuple):
     try:
         start_time = time.perf_counter()
 
         last_assistant_msg = None
-            
+
         last_assistant_msg = next(
-            (msg for msg in reversed(st.session_state.messages) if msg.role == RoleType.ASSISTANT.value and  msg.elapsed_time is not None),
-            None
+            (
+                msg
+                for msg in reversed(st.session_state.messages)
+                if msg.role == RoleType.ASSISTANT.value and msg.elapsed_time is not None
+            ),
+            None,
         )
 
         if last_assistant_msg is None:
-            add_message(Message(RoleType.ASSISTANT, "No previous assistant message found to follow up on.", MessageType.ERROR))
+            add_message(
+                Message(RoleType.ASSISTANT, "No previous assistant message found to follow up on.", MessageType.ERROR)
+            )
             return
 
-        response = vn.submit_prompt(tuple["command"], last_assistant_msg.content)
+        command = tuple["command"].strip()
+
+        if last_assistant_msg.dataframe is not None:
+            df = pd.read_json(StringIO(last_assistant_msg.dataframe))
+            return is_magic_do_magic(command, df)
+
+        response = vn.submit_prompt(command, last_assistant_msg.content)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -235,13 +265,21 @@ def _followup(question, tuple):
         add_message(Message(RoleType.ASSISTANT, f"Error generating follow up message: {str(e)}", MessageType.ERROR))
 
 
-def _generate_heatmap(question, tuple):
+def _generate_heatmap(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple["table"])
-        # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
-        sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 1000;"
-        df = run_sql_cached(sql)
+        table_name = ""
+
+        sql = ""
+        if previous_df is None:
+            table_name = find_closest_table_name(tuple["table"])
+            # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
+            sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 1000;"
+            df = run_sql_cached(sql)
+        else:
+            table_name = "Temp Table"
+            df = previous_df
+
         if df is None or df.empty:
             add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
             return
@@ -259,53 +297,73 @@ def _generate_heatmap(question, tuple):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+        add_message(
+            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
+        )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR))
 
 
-def _generate_wordcloud_column(question, tuple):
+def _generate_wordcloud_column(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple["table"])
-        column_name = find_closest_column_name(table_name, tuple["column"])
-        sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
+        table_name = "Temp Table"
+        column_name = tuple["column"]
+        fig = None
+        sql = ""
+        if previous_df is None:
+            table_name = find_closest_table_name(tuple["table"])
+            column_name = find_closest_column_name(table_name, column_name)
+            sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
+            fig = get_wordcloud(sql, table_name, column_name)
 
-        fig = get_wordcloud(sql, table_name, column_name)
+        else:
+            fig = get_wordcloud(sql, table_name, column_name, previous_df)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+        add_message(
+            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
+        )
     except Exception as e:
-        add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR))
+        add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud column: {str(e)}", MessageType.ERROR))
 
 
-def _generate_wordcloud(question, tuple):
+def _generate_wordcloud(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple["table"])
-        # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
-        sql = f"SELECT * FROM {table_name};"
+        fig = None
+        table_name = "Temp Table"
+        sql = ""
 
-        fig = get_wordcloud(sql, table_name)
+        if previous_df is None:
+            table_name = find_closest_table_name(tuple["table"])
+            # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
+            sql = f"SELECT * FROM {table_name};"
+            fig = get_wordcloud(sql, table_name)
+        else:
+            fig = get_wordcloud(sql, table_name, None, previous_df)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+        add_message(
+            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
+        )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR))
 
 
-def get_wordcloud(sql, table_name, column_name=None):
-    df = run_sql_cached(sql)
+def get_wordcloud(sql, table_name, column_name=None, previous_df=None):
+    if previous_df is not None:
+        df = previous_df
+    else:
+        df = run_sql_cached(sql)
     if df is None or df.empty:
         add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
         return
-
     # Combine all text from the column, filtering out unwanted words
-    unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
     text_data = ""
 
     if column_name != None:
@@ -316,7 +374,6 @@ def get_wordcloud(sql, table_name, column_name=None):
                 )
             )
             return
-
         text_data = df[column_name].astype(str).str.cat(sep=" ")
     else:
         string_columns = df.select_dtypes(include="object").columns
@@ -364,14 +421,22 @@ def get_wordcloud(sql, table_name, column_name=None):
     return fig
 
 
-def _generate_pairplot(question, tuple):
+def _generate_pairplot(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple["table"])
-        column_name = find_closest_column_name(table_name, tuple["column"])
-        sql = f"SELECT * FROM {table_name};"
+        table_name = "Temp Table"
+        column_name = tuple["column"]
+        sql = ""
 
-        df = run_sql_cached(sql)
+        if previous_df is None:
+            table_name = find_closest_table_name(tuple["table"])
+            column_name = find_closest_column_name(table_name, column_name)
+            sql = f"SELECT * FROM {table_name};"
+
+            df = run_sql_cached(sql)
+        else:
+            df = previous_df
+
         if df is None or df.empty:
             add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
             return
@@ -389,12 +454,14 @@ def _generate_pairplot(question, tuple):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+        add_message(
+            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
+        )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating pair plot: {str(e)}", MessageType.ERROR))
 
 
-def generate_plotly(type, question, tuple):
+def generate_plotly(type, question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
         table_name = find_closest_table_name(tuple["table"])
@@ -424,17 +491,45 @@ def generate_plotly(type, question, tuple):
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating plotly: {str(e)}", MessageType.ERROR))
 
-def _generate_scatterplot(question, tuple):
+
+def _generate_scatterplot(question, tuple, previous_df):
     generate_plotly("scatter", question, tuple)
 
 
-def _generate_bar(question, tuple):
+def _generate_bar(question, tuple, previous_df):
     generate_plotly("bar", question, tuple)
 
 
-def _generate_line(question, tuple):
+def _generate_line(question, tuple, previous_df):
     generate_plotly("line", question, tuple)
 
+
+FOLLOW_UP_MAGIC_RENDERERS = {
+    r"^heatmap$": {
+        "func": _generate_heatmap,
+    },
+    r"^wordcloud$": {
+        "func": _generate_wordcloud,
+    },
+    r"^wordcloud\s+(?P<column>\w+)$": {
+        "func": _generate_wordcloud_column,
+    },
+    r"^pairplot\s+(?P<column>\w+)$": {
+        "func": _generate_pairplot,
+    },
+    # r"^scatter\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+    #     "func": _generate_scatterplot,
+    # },
+    # r"^bar\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+    #     "func": _generate_bar,
+    # },
+    # r"^line\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+    #     "func": _generate_line,
+    # },
+    r"^head$": {
+        "func": _head,
+    },
+}
 
 # TODO: confusion matrix?
 MAGIC_RENDERERS = {
@@ -490,16 +585,22 @@ MAGIC_RENDERERS = {
         "description": "Generate a line chart visualization for a table x and y axis.",
         "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
     },
-    r"^/followup\s+(?P<command>.+)$": {"func": _followup, "description": "Ask a follow up question to the previous result set.", "sample_values": {
-        "command": "how do these results compare to the national averages?"
-    }},
+    r"^/followup\s+(?P<command>.+)$": {
+        "func": _followup,
+        "description": "Ask a follow up question to the previous result set.",
+        "sample_values": {"command": "how do these results compare to the national averages?"},
+    },
     r"^/tables$": {"func": _tables, "description": "Show all available tables", "sample_values": {}},
-    r"^/columns\s+(?P<table>.+)$": {"func": _columns, "description": "Show all available columns on a given table", "sample_values": {
-        "table": "wny_health"
-    }},
-    r"^/head\s+(?P<table>.+)$": {"func": _head, "description": "Show the first 5 rows of a given table", "sample_values": {
-        "table": "wny_health"
-    }},
+    r"^/columns\s+(?P<table>.+)$": {
+        "func": _columns,
+        "description": "Show all available columns on a given table",
+        "sample_values": {"table": "wny_health"},
+    },
+    r"^/head\s+(?P<table>.+)$": {
+        "func": _head,
+        "description": "Show the first 5 rows of a given table",
+        "sample_values": {"table": "wny_health"},
+    },
     r"^/help$": {"func": _help, "description": "Show available magic commands", "sample_values": {}},
     # Add more as needed...
 }
