@@ -1,5 +1,6 @@
 import difflib
 import re
+import streamlit as st
 from PIL import Image
 import numpy as np
 import time
@@ -8,8 +9,10 @@ from wordcloud import WordCloud
 from orm.models import Message
 from utils.chat_bot_helper import add_message
 from utils.enums import MessageType, RoleType
-from utils.vanna_calls import read_forbidden_from_json, run_sql_cached
+from utils.vanna_calls import VannaService, read_forbidden_from_json, run_sql_cached
 
+# Initialize VannaService singleton
+vn = VannaService.from_streamlit_session()
 
 def generate_example_from_pattern(pattern, sample_values=None):
     """
@@ -51,24 +54,39 @@ def usage_from_pattern(pattern):
     return usage.strip()
 
 
+def get_all_column_names(table):
+    try:
+        table_name = find_closest_table_name(table)
+
+        sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND  table_name = '{table_name}';"
+        df = run_sql_cached(sql)
+        if df.empty:
+            raise Exception("No tables found in the database.")
+
+        return df
+    except Exception:
+        raise
+
+
 def get_all_table_names():
     try:
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
 
-        # Example for PostgreSQL; adjust for your DB
         sql = f"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND  table_name NOT IN ({forbidden_tables_str});"
         df = run_sql_cached(sql)
         if df.empty:
             raise Exception("No tables found in the database.")
 
-        return df["table_name"].tolist()
+        return df
     except Exception:
         raise
 
 
 def find_closest_table_name(table_name):
     try:
-        table_names = get_all_table_names()
+        df = get_all_table_names()
+        table_names = df["table_name"].tolist()
+
         if table_names is None:
             raise Exception("No table names found in the database.")
 
@@ -108,6 +126,8 @@ def find_closest_column_name(table_name, column_name):
 
 def is_magic_do_magic(question):
     try:
+        if question is None or question.strip() == "":
+            return False
         for key, meta in MAGIC_RENDERERS.items():
             match = re.match(key, question.strip())
             if match:
@@ -142,6 +162,77 @@ def _help(question, tuple):
         add_message(Message(RoleType.ASSISTANT, "\n".join(help_lines), MessageType.PYTHON, None, question, None, 0))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating help message: {str(e)}", MessageType.ERROR))
+
+
+def _tables(question, tuple):
+    try:
+        start_time = time.perf_counter()
+        table_names = get_all_table_names()
+        
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, table_names, MessageType.DATAFRAME, None, question, None, elapsed_time))
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
+
+
+def _columns(question, tuple):
+    try:
+        start_time = time.perf_counter()
+
+        column_names = get_all_column_names(tuple["table"])
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, column_names, MessageType.DATAFRAME, None, question, None, elapsed_time))
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error retrieving columns: {str(e)}", MessageType.ERROR))
+
+    
+def _head(question, tuple):
+    try:
+        start_time = time.perf_counter()
+
+        table_name = find_closest_table_name(tuple["table"])
+
+        sql = f"SELECT *  FROM {table_name} LIMIT 5;"
+        df = run_sql_cached(sql)
+        if df.empty:
+            raise Exception("No rows found in the database.")
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, None, question, None, elapsed_time))
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
+
+    
+def _followup(question, tuple):
+    try:
+        start_time = time.perf_counter()
+
+        last_assistant_msg = None
+            
+        last_assistant_msg = next(
+            (msg for msg in reversed(st.session_state.messages) if msg.role == RoleType.ASSISTANT.value and  msg.elapsed_time is not None),
+            None
+        )
+
+        if last_assistant_msg is None:
+            add_message(Message(RoleType.ASSISTANT, "No previous assistant message found to follow up on.", MessageType.ERROR))
+            return
+
+        response = vn.submit_prompt(tuple["command"], last_assistant_msg.content)
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, response, MessageType.TEXT, None, question, None, elapsed_time))
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error generating follow up message: {str(e)}", MessageType.ERROR))
 
 
 def _generate_heatmap(question, tuple):
@@ -303,6 +394,49 @@ def _generate_pairplot(question, tuple):
         add_message(Message(RoleType.ASSISTANT, f"Error generating pair plot: {str(e)}", MessageType.ERROR))
 
 
+def generate_plotly(type, question, tuple):
+    try:
+        start_time = time.perf_counter()
+        table_name = find_closest_table_name(tuple["table"])
+        column_x = find_closest_column_name(table_name, tuple["x"])
+        column_y = find_closest_column_name(table_name, tuple["y"])
+        column_color = find_closest_column_name(table_name, tuple["color"])
+        sql = f"SELECT {column_x}, {column_y}, {column_color} FROM {table_name};"
+
+        df = run_sql_cached(sql)
+        if df is None or df.empty:
+            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            return
+
+        fig = getattr(px, type)(
+            df,
+            x=column_x,
+            y=column_y,
+            color=column_color,
+            width=1200,
+            height=600,
+        )
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error generating plotly: {str(e)}", MessageType.ERROR))
+
+def _generate_scatterplot(question, tuple):
+    generate_plotly("scatter", question, tuple)
+
+
+def _generate_bar(question, tuple):
+    generate_plotly("bar", question, tuple)
+
+
+def _generate_line(question, tuple):
+    generate_plotly("line", question, tuple)
+
+
+# TODO: confusion matrix?
 MAGIC_RENDERERS = {
     r"^/heatmap\s+(?P<table>\w+)$": {
         "func": _generate_heatmap,
@@ -341,6 +475,31 @@ MAGIC_RENDERERS = {
         "description": "Generate a pairplot visualization for a table column.",
         "sample_values": {"table": "wny_health", "column": "county"},
     },
+    r"^/scatter\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+        "func": _generate_scatterplot,
+        "description": "Generate a scatterplot visualization for a table x and y axis.",
+        "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
+    },
+    r"^/bar\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+        "func": _generate_bar,
+        "description": "Generate a scatterplot visualization for a table x and y axis.",
+        "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
+    },
+    r"^/line\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+        "func": _generate_line,
+        "description": "Generate a scatterplot visualization for a table x and y axis.",
+        "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
+    },
+    r"^/followup\s+(?P<command>.+)$": {"func": _followup, "description": "Ask a follow up question to the previous result set.", "sample_values": {
+        "command": "how do these results compare to the national averages?"
+    }},
+    r"^/tables$": {"func": _tables, "description": "Show all available tables", "sample_values": {}},
+    r"^/columns\s+(?P<table>.+)$": {"func": _columns, "description": "Show all available columns on a given table", "sample_values": {
+        "table": "wny_health"
+    }},
+    r"^/head\s+(?P<table>.+)$": {"func": _head, "description": "Show the first 5 rows of a given table", "sample_values": {
+        "table": "wny_health"
+    }},
     r"^/help$": {"func": _help, "description": "Show available magic commands", "sample_values": {}},
     # Add more as needed...
 }
