@@ -153,7 +153,7 @@ def get_recent_messages():
             messages = (
                 session.query(Message)
                 .filter(Message.user_id == user_id, Message.id > max_index)
-                .order_by(Message.created_at.desc())
+                .order_by(Message.created_at.desc(), Message.id.desc())
                 .limit(20)
                 .all()
             )
