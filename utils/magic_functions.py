@@ -9,12 +9,10 @@ import time
 import plotly.express as px
 from wordcloud import WordCloud
 from orm.models import Message
-from utils.chat_bot_helper import add_message
+from utils.chat_bot_helper import add_message, vn 
 from utils.enums import MessageType, RoleType
-from utils.vanna_calls import VannaService, read_forbidden_from_json, run_sql_cached
+from utils.vanna_calls import read_forbidden_from_json, run_sql_cached
 
-# Initialize VannaService singleton
-vn = VannaService.from_streamlit_session()
 unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
 
 
@@ -152,7 +150,7 @@ def is_magic_do_magic(question, previous_df=None):
         return False
 
 
-def _help(question, tuple):
+def _help(question, tuple, previous_df):
     try:
         help_lines = ["MAGIC COMMANDS", "=" * 50, "", "Usage: /<command> [arguments]", "", "Available commands:"]
         # Find the longest usage string for alignment
@@ -176,7 +174,7 @@ def _help(question, tuple):
         add_message(Message(RoleType.ASSISTANT, f"Error generating help message: {str(e)}", MessageType.ERROR))
 
 
-def _tables(question, tuple):
+def _tables(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
         table_names = get_all_table_names()
@@ -189,7 +187,7 @@ def _tables(question, tuple):
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
 
 
-def _columns(question, tuple):
+def _columns(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
 
@@ -316,7 +314,6 @@ def _generate_wordcloud_column(question, tuple, previous_df):
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             fig = get_wordcloud(sql, table_name, column_name)
-
         else:
             fig = get_wordcloud(sql, table_name, column_name, previous_df)
 
@@ -454,9 +451,7 @@ def _generate_pairplot(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(
-            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
-        )
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating pair plot: {str(e)}", MessageType.ERROR))
 
@@ -464,13 +459,22 @@ def _generate_pairplot(question, tuple, previous_df):
 def generate_plotly(type, question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
-        table_name = find_closest_table_name(tuple["table"])
-        column_x = find_closest_column_name(table_name, tuple["x"])
-        column_y = find_closest_column_name(table_name, tuple["y"])
-        column_color = find_closest_column_name(table_name, tuple["color"])
-        sql = f"SELECT {column_x}, {column_y}, {column_color} FROM {table_name};"
+        table_name = "Temp Table"
+        column_x = tuple["x"]
+        column_y = tuple["y"]
+        column_color = tuple["color"]
+        sql = ""
 
-        df = run_sql_cached(sql)
+        if previous_df is None:
+            table_name = find_closest_table_name(tuple["table"])
+            column_x = find_closest_column_name(table_name, tuple["x"])
+            column_y = find_closest_column_name(table_name, tuple["y"])
+            column_color = find_closest_column_name(table_name, tuple["color"])
+            sql = f"SELECT {column_x}, {column_y}, {column_color} FROM {table_name};"
+            df = run_sql_cached(sql)
+        else:
+            df = previous_df
+
         if df is None or df.empty:
             add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
             return
@@ -487,21 +491,21 @@ def generate_plotly(type, question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, None, elapsed_time))
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating plotly: {str(e)}", MessageType.ERROR))
 
 
 def _generate_scatterplot(question, tuple, previous_df):
-    generate_plotly("scatter", question, tuple)
+    generate_plotly("scatter", question, tuple, previous_df)
 
 
 def _generate_bar(question, tuple, previous_df):
-    generate_plotly("bar", question, tuple)
+    generate_plotly("bar", question, tuple, previous_df)
 
 
 def _generate_line(question, tuple, previous_df):
-    generate_plotly("line", question, tuple)
+    generate_plotly("line", question, tuple, previous_df)
 
 
 FOLLOW_UP_MAGIC_RENDERERS = {
@@ -517,15 +521,15 @@ FOLLOW_UP_MAGIC_RENDERERS = {
     r"^pairplot\s+(?P<column>\w+)$": {
         "func": _generate_pairplot,
     },
-    # r"^scatter\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
-    #     "func": _generate_scatterplot,
-    # },
-    # r"^bar\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
-    #     "func": _generate_bar,
-    # },
-    # r"^line\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
-    #     "func": _generate_line,
-    # },
+    r"^scatter\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+        "func": _generate_scatterplot,
+    },
+    r"^bar\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+        "func": _generate_bar,
+    },
+    r"^line\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
+        "func": _generate_line,
+    },
     r"^head$": {
         "func": _head,
     },
