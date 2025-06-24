@@ -40,7 +40,7 @@ def backup_and_migrate_collection(client, collection_name: str):
         print(f"Collection '{collection_name}' is using '{space}', not 'l2'. Skipping migration.")
         print("-" * 20)
         return
-        
+
     print(f"Collection '{collection_name}' is using '{space}'. Proceeding with migration to 'cosine'.")
 
     # 2. Backup collection with a dynamic suffix
@@ -54,32 +54,29 @@ def backup_and_migrate_collection(client, collection_name: str):
     except Exception:
         # It's ok if it doesn't exist
         pass
-    
+
     backup_collection = client.create_collection(
-        name=backup_collection_name, 
-        metadata=original_metadata # Preserve original metadata
+        name=backup_collection_name,
+        metadata=original_metadata,  # Preserve original metadata
     )
-    
+
     existing_count = original_collection.count()
     if existing_count > 0:
         print(f"Copying {existing_count} items to backup collection '{backup_collection_name}'...")
         batch_size = 100
         for i in range(0, existing_count, batch_size):
             batch = original_collection.get(
-                include=["metadatas", "documents", "embeddings"],
-                limit=batch_size,
-                offset=i
+                include=["metadatas", "documents", "embeddings"], limit=batch_size, offset=i
             )
             backup_collection.add(
                 ids=batch["ids"],
                 documents=batch["documents"],
                 metadatas=batch["metadatas"],
-                embeddings=batch["embeddings"]
+                embeddings=batch["embeddings"],
             )
         print("Backup copy complete.")
     else:
         print(f"Original collection '{collection_name}' is empty. Nothing to backup.")
-
 
     # 3. Delete original collection
     print(f"Deleting original collection: '{collection_name}'")
@@ -87,10 +84,7 @@ def backup_and_migrate_collection(client, collection_name: str):
 
     # 4. Create new collection with cosine metric
     print(f"Creating new collection '{collection_name}' with 'cosine' distance metric.")
-    new_collection = client.create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"}
-    )
+    new_collection = client.create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
 
     # 5. Copy from backup to new collection
     backup_count = backup_collection.count()
@@ -98,16 +92,12 @@ def backup_and_migrate_collection(client, collection_name: str):
         print(f"Copying {backup_count} items from backup to new '{collection_name}' collection...")
         batch_size = 100
         for i in range(0, backup_count, batch_size):
-            batch = backup_collection.get(
-                include=["metadatas", "documents", "embeddings"],
-                limit=batch_size,
-                offset=i
-            )
+            batch = backup_collection.get(include=["metadatas", "documents", "embeddings"], limit=batch_size, offset=i)
             new_collection.add(
                 ids=batch["ids"],
                 documents=batch["documents"],
                 metadatas=batch["metadatas"],
-                embeddings=batch["embeddings"]
+                embeddings=batch["embeddings"],
             )
         print("Data copy to new collection complete.")
 
@@ -123,7 +113,7 @@ def backup_and_migrate_collection(client, collection_name: str):
         print(f"Successfully verified that '{collection_name}' is using 'cosine' distance.")
     else:
         print(f"ERROR: Verification failed! '{collection_name}' is not using 'cosine' distance.")
-    
+
     print("-" * 20)
 
 
@@ -148,4 +138,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
