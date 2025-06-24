@@ -9,7 +9,7 @@ import time
 import plotly.express as px
 from wordcloud import WordCloud
 from orm.models import Message
-from utils.chat_bot_helper import add_message, vn 
+from utils.chat_bot_helper import add_message, vn
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import read_forbidden_from_json, run_sql_cached
 
