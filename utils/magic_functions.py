@@ -182,7 +182,7 @@ def _tables(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, table_names, MessageType.DATAFRAME, None, question, None, elapsed_time))
+        add_message(Message(RoleType.ASSISTANT, table_names, MessageType.DATAFRAME, None, question, table_names, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
 
@@ -197,7 +197,7 @@ def _columns(question, tuple, previous_df):
         elapsed_time = end_time - start_time
 
         add_message(
-            Message(RoleType.ASSISTANT, column_names, MessageType.DATAFRAME, None, question, None, elapsed_time)
+            Message(RoleType.ASSISTANT, column_names, MessageType.DATAFRAME, None, question, column_names, elapsed_time)
         )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving columns: {str(e)}", MessageType.ERROR))
@@ -221,7 +221,7 @@ def _head(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, question, previous_df, elapsed_time))
+        add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, question, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
 
@@ -249,16 +249,28 @@ def _followup(question, tuple, previous_df):
 
         command = tuple["command"].strip()
 
+        response = None
+        df = None
+        type = MessageType.TEXT
         if last_assistant_msg.dataframe is not None:
             df = pd.read_json(StringIO(last_assistant_msg.dataframe))
-            return is_magic_do_magic(command, df)
+            was_magical =  is_magic_do_magic(command, df)
 
-        response = vn.submit_prompt(command, last_assistant_msg.content)
+            if was_magical:
+                return
+            # TODO: trying to hack a followup feature reduction thing in here.... not succeeding /followup can you do feature reduction on this heatmap?
+            # elif "heatmap" in command.lower(): #is plotly command
+            #     type = MessageType.PLOTLY_CHART
+            #     response, elapsed = vn.generate_plotly_code(question=command, sql=last_assistant_msg.query, df=df)
+            #     print(f"Response: {response}")
+        
+        if response is None:
+            response = vn.submit_prompt(command, last_assistant_msg.content)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, response, MessageType.TEXT, None, question, None, elapsed_time))
+        add_message(Message(RoleType.ASSISTANT, response, type, None, question, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating follow up message: {str(e)}", MessageType.ERROR))
 
@@ -296,7 +308,7 @@ def _generate_heatmap(question, tuple, previous_df):
         elapsed_time = end_time - start_time
 
         add_message(
-            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
+            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time)
         )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR))
@@ -313,15 +325,15 @@ def _generate_wordcloud_column(question, tuple, previous_df):
             table_name = find_closest_table_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-            fig = get_wordcloud(sql, table_name, column_name)
+            fig, df = get_wordcloud(sql, table_name, column_name)
         else:
-            fig = get_wordcloud(sql, table_name, column_name, previous_df)
+            fig, df = get_wordcloud(sql, table_name, column_name, previous_df)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
         add_message(
-            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
+            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time)
         )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud column: {str(e)}", MessageType.ERROR))
@@ -338,15 +350,15 @@ def _generate_wordcloud(question, tuple, previous_df):
             table_name = find_closest_table_name(tuple["table"])
             # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
             sql = f"SELECT * FROM {table_name};"
-            fig = get_wordcloud(sql, table_name)
+            fig, df = get_wordcloud(sql, table_name)
         else:
-            fig = get_wordcloud(sql, table_name, None, previous_df)
+            fig, df = get_wordcloud(sql, table_name, None, previous_df)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
         add_message(
-            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, previous_df, elapsed_time)
+            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time)
         )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR))
@@ -415,7 +427,7 @@ def get_wordcloud(sql, table_name, column_name=None, previous_df=None):
         margin=dict(l=0, r=0, t=50, b=0),
     )
 
-    return fig
+    return fig, df
 
 
 def _generate_pairplot(question, tuple, previous_df):
