@@ -325,6 +325,7 @@ def _generate_wordcloud_column(question, tuple, previous_df):
             table_name = find_closest_table_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
+            # check_length( f"SELECT count({column_name}) FROM {table_name} WHERE {column_name} IS NOT NULL;")
             fig, df = get_wordcloud(sql, table_name, column_name)
         else:
             fig, df = get_wordcloud(sql, table_name, column_name, previous_df)
@@ -350,6 +351,7 @@ def _generate_wordcloud(question, tuple, previous_df):
             table_name = find_closest_table_name(tuple["table"])
             # sql = f"SELECT * FROM {table_name} TABLESAMPLE BERNOULLI(50);"
             sql = f"SELECT * FROM {table_name};"
+            # check_length( f"SELECT count(*) FROM {table_name}")
             fig, df = get_wordcloud(sql, table_name)
         else:
             fig, df = get_wordcloud(sql, table_name, None, previous_df)
@@ -518,6 +520,24 @@ def _generate_bar(question, tuple, previous_df):
 
 def _generate_line(question, tuple, previous_df):
     generate_plotly("line", question, tuple, previous_df)
+
+# def check_length(sql):
+#     df = run_sql_cached(sql)
+#     if df is not None and not df.empty:
+#         number = float(df.iloc[0, 0])
+#         if number > 1: 
+#             return confirm_length(number)
+#     return True
+
+
+# @st.dialog("Confirm Length")
+# def confirm_length(number):
+#     st.write(f"Query is going to fetch {number} rows, are you sure you want to proceed?")
+#     if st.button("Yes"):
+#         return True
+#     elif st.button("No"):
+#         return False
+#     st.stop()
 
 
 FOLLOW_UP_MAGIC_RENDERERS = {
