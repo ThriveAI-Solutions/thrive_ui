@@ -1,24 +1,31 @@
-import ast
 import json
 from decimal import Decimal
-from io import StringIO
 from unittest.mock import ANY, MagicMock, call, patch
 
 import pandas as pd
 import pytest
 
-# Import the function to be tested
-from views.chat_bot import Message, MessageType, RoleType, get_chart, render_message
+from orm.models import Message
+
+# Import the functions to be tested
+from utils.chat_bot_helper import get_chart, render_message
+from utils.enums import MessageType, RoleType
 
 
 # Mock VannaService globally for this test module
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_vanna_service():
-    with patch("views.chat_bot.vn") as mock_vn:
-        # Configure default return values for vn methods used in get_chart
-        mock_vn.should_generate_chart.return_value = True
-        mock_vn.generate_plotly_code.return_value = ("mock_plotly_code", 0.1)
-        mock_vn.generate_plot.return_value = (MagicMock(), 0.2)  # Assuming generate_plot returns a figure object
+    mock_vn = MagicMock()
+    # Configure default return values for vn methods used in get_chart
+    mock_vn.should_generate_chart.return_value = True
+    mock_vn.generate_plotly_code.return_value = ("mock_plotly_code", 0.1)
+    mock_vn.generate_plot.return_value = (
+        MagicMock(
+            to_json=MagicMock(return_value='{"data": [], "layout": {}}'), update_layout=MagicMock(return_value=None)
+        ),
+        0.2,
+    )  # Assuming generate_plot returns a figure object
+    with patch("utils.chat_bot_helper.vn", new=mock_vn):
         yield mock_vn
 
 
@@ -39,7 +46,7 @@ def mock_streamlit_session_state():
 
 @pytest.fixture
 def mock_add_message():
-    with patch("views.chat_bot.add_message") as mock_add_msg:
+    with patch("utils.chat_bot_helper.add_message") as mock_add_msg:
         yield mock_add_msg
 
 
@@ -158,21 +165,106 @@ class TestGetChart:
         assert message_arg.query == sql
         assert message_arg.question == my_question
 
+    def test_get_chart_shows_plotly_code_if_enabled(
+        self, mock_vanna_service, mock_streamlit_session_state, mock_add_message
+    ):
+        my_question = "Test question for code"
+        sql = "SELECT * FROM another_table"
+        df = pd.DataFrame({"data": [3, 4]})
+
+        # Enable showing plotly code in session state
+        mock_streamlit_session_state.get.side_effect = (
+            lambda key, default=None: True if key == "show_plotly_code" else default
+        )
+
+        get_chart(my_question, sql, df)
+
+        # Assert that add_message was called twice (once for code, once for plot)
+        assert mock_add_message.call_count == 2
+
+        # Check the first call (for Python code)
+        code_call_args, _ = mock_add_message.call_args_list[0]
+        code_message_arg = code_call_args[0]
+        assert isinstance(code_message_arg, Message)
+        assert code_message_arg.type == MessageType.PYTHON.value
+        assert code_message_arg.content == "mock_plotly_code"
+        assert code_message_arg.query == sql
+        assert code_message_arg.question == my_question
+
+        # Check the second call (for the plot)
+        plot_call_args, _ = mock_add_message.call_args_list[1]
+        plot_message_arg = plot_call_args[0]
+        assert isinstance(plot_message_arg, Message)
+        assert plot_message_arg.type == MessageType.PLOTLY_CHART.value
+
+    def test_get_chart_handles_no_chart_generation(
+        self, mock_vanna_service, mock_streamlit_session_state, mock_add_message
+    ):
+        my_question = "Test no chart"
+        sql = "SELECT * FROM empty_table"
+        df = pd.DataFrame()  # Empty dataframe
+
+        # Mock vn.should_generate_chart to return False
+        mock_vanna_service.should_generate_chart.return_value = False
+
+        get_chart(my_question, sql, df)
+
+        # Assert that generate_plotly_code and generate_plot were NOT called
+        mock_vanna_service.generate_plotly_code.assert_not_called()
+        mock_vanna_service.generate_plot.assert_not_called()
+
+        # Assert that add_message was called with an error message
+        mock_add_message.assert_called_once()
+        args, kwargs = mock_add_message.call_args
+        message_arg = args[0]
+
+        assert isinstance(message_arg, Message)
+        assert message_arg.role == RoleType.ASSISTANT.value
+        assert message_arg.type == MessageType.ERROR.value
+        assert "unable to generate a chart" in message_arg.content.lower()
+        assert message_arg.query == sql
+        assert message_arg.question == my_question
+
+    def test_get_chart_handles_plot_generation_failure(
+        self, mock_vanna_service, mock_streamlit_session_state, mock_add_message
+    ):
+        my_question = "Test plot failure"
+        sql = "SELECT * FROM fail_table"
+        df = pd.DataFrame({"col1": [1]})
+
+        # Mock generate_plot to return None (failure)
+        # Mock generate_plot to return None (failure)
+        mock_vanna_service.generate_plot.return_value = (None, 0.2)
+
+        get_chart(my_question, sql, df)
+
+        assert mock_add_message.call_count == 1
+        args, kwargs = mock_add_message.call_args
+        message_arg = args[0]
+
+        assert isinstance(message_arg, Message)
+        assert message_arg.role == RoleType.ASSISTANT.value
+        assert message_arg.type == MessageType.ERROR.value
+        assert message_arg.content == "I couldn't generate a chart"
+        assert message_arg.query == sql
+        assert message_arg.question == my_question
+
 
 class TestRenderMessage:
     def common_asserts(self, mock_st, expected_role):
         mock_st.chat_message.assert_called_once_with(expected_role)
-        # Check that the context manager was entered
+        mock_st.chat_message.return_value.__enter__.return_value = mock_st
         mock_st.chat_message.return_value.__enter__.assert_called_once()
+        mock_st.chat_message.return_value.__exit__.assert_called_once_with(None, None, None)
 
-    @patch("views.chat_bot.generate_guid")
-    @patch("views.chat_bot.set_question")
-    @patch("views.chat_bot.get_chart")
-    @patch("views.chat_bot.add_message")
-    @patch("views.chat_bot.get_followup_questions")
-    @patch("views.chat_bot.speak")
-    @patch("views.chat_bot.set_feedback")
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.generate_guid")
+    @patch("utils.chat_bot_helper.set_question")
+    @patch("utils.chat_bot_helper.get_chart")
+    @patch("utils.chat_bot_helper.add_message")
+    @patch("utils.chat_bot_helper.get_followup_questions")
+    @patch("utils.communicate.speak")
+    @patch("utils.chat_bot_helper.set_feedback")
+    @patch("utils.chat_bot_helper.st")
     def test_render_sql_message_with_elapsed_time(
         self,
         mock_st,
@@ -193,14 +285,14 @@ class TestRenderMessage:
         mock_st.write.assert_called_once_with("Elapsed Time: 0.123")
         mock_st.code.assert_called_once_with("SELECT 1;", language="sql", line_numbers=True)
 
-    @patch("views.chat_bot.generate_guid")
-    @patch("views.chat_bot.set_question")
-    @patch("views.chat_bot.get_chart")
-    @patch("views.chat_bot.add_message")
-    @patch("views.chat_bot.get_followup_questions")
-    @patch("views.chat_bot.speak")
-    @patch("views.chat_bot.set_feedback")
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.generate_guid")
+    @patch("utils.chat_bot_helper.set_question")
+    @patch("utils.chat_bot_helper.get_chart")
+    @patch("utils.chat_bot_helper.add_message")
+    @patch("utils.chat_bot_helper.get_followup_questions")
+    @patch("utils.communicate.speak")
+    @patch("utils.chat_bot_helper.set_feedback")
+    @patch("utils.chat_bot_helper.st")
     def test_render_sql_message_without_elapsed_time(
         self,
         mock_st,
@@ -221,7 +313,7 @@ class TestRenderMessage:
         mock_st.write.assert_not_called()
         mock_st.code.assert_called_once_with("SELECT 2;", language="sql", line_numbers=True)
 
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.st")
     def test_render_python_message(self, mock_st):
         msg = Message(role=RoleType.ASSISTANT, content="print('hello')", type=MessageType.PYTHON)
 
@@ -230,10 +322,10 @@ class TestRenderMessage:
         self.common_asserts(mock_st, RoleType.ASSISTANT.value)
         mock_st.code.assert_called_once_with("print('hello')", language="python", line_numbers=True)
 
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.st")
     def test_render_plotly_chart_message(self, mock_st):
         mock_st.session_state.get.return_value = True
-        chart_data = {"data": [], "layout": {}}
+        chart_data = {"data": [{"type": "bar", "x": [1, 2], "y": [3, 4]}], "layout": {"title": "Test Chart"}}
         msg = Message(
             role=RoleType.ASSISTANT,
             content=json.dumps(chart_data),
@@ -247,7 +339,7 @@ class TestRenderMessage:
         mock_st.write.assert_called_once_with("Elapsed Time: 0.321")
         mock_st.plotly_chart.assert_called_once_with(chart_data, key="message_3")
 
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.st")
     def test_render_error_message(self, mock_st):
         msg = Message(role=RoleType.ASSISTANT, content="An error occurred", type=MessageType.ERROR)
 
@@ -256,7 +348,7 @@ class TestRenderMessage:
         self.common_asserts(mock_st, RoleType.ASSISTANT.value)
         mock_st.error.assert_called_once_with("An error occurred")
 
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.st")
     def test_render_dataframe_message(self, mock_st):
         df_dict = {"col1": [1, 2], "col2": ["a", "b"]}
         df_json = pd.DataFrame(df_dict).to_json()
@@ -273,14 +365,14 @@ class TestRenderMessage:
         pd.testing.assert_frame_equal(called_df, pd.DataFrame(df_dict))
         assert mock_st.dataframe.call_args[1]["key"] == "message_5"
 
-    @patch("views.chat_bot.generate_guid", return_value="mock_guid")
-    @patch("views.chat_bot.set_question")
-    @patch("views.chat_bot.get_chart")
-    @patch("views.chat_bot.add_message")
-    @patch("views.chat_bot.get_followup_questions")
-    @patch("views.chat_bot.speak")
-    @patch("views.chat_bot.set_feedback")
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.generate_guid", return_value="mock_guid")
+    @patch("utils.chat_bot_helper.set_question")
+    @patch("utils.chat_bot_helper.get_chart")
+    @patch("utils.chat_bot_helper.add_message")
+    @patch("utils.chat_bot_helper.get_followup_questions")
+    @patch("utils.chat_bot_helper.speak")
+    @patch("utils.chat_bot_helper.set_feedback")
+    @patch("utils.chat_bot_helper.st")
     def test_render_summary_message(
         self,
         mock_st,
@@ -406,9 +498,9 @@ class TestRenderMessage:
         # A better way might be to extract the logic from the if block.
         # For now, this test doesn't directly test the add_message call from conditional st.button.
 
-    @patch("views.chat_bot.generate_guid", return_value="mock_guid_fw")
-    @patch("views.chat_bot.set_question")
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.generate_guid", return_value="mock_guid_fw")
+    @patch("utils.chat_bot_helper.set_question")
+    @patch("utils.chat_bot_helper.st")
     def test_render_followup_message(self, mock_st, mock_set_question, mock_generate_guid):
         followup_list = ["Question 1?", "Question 2?"]
         msg = Message(role=RoleType.ASSISTANT, content=str(followup_list), type=MessageType.FOLLOWUP)
@@ -439,7 +531,7 @@ class TestRenderMessage:
         )  # Relies on generate_guid being called for each
         assert mock_generate_guid.call_count == len(followup_list)
 
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.st")
     def test_render_default_message(self, mock_st):
         # Assuming MessageType.TEXT or any unknown type would fall here
         # The Message class init uses type.value, so message.type will be the string
@@ -453,9 +545,9 @@ class TestRenderMessage:
         self.common_asserts(mock_st, RoleType.USER.value)
         mock_st.markdown.assert_called_once_with("This is a default message.")
 
-    @patch("views.chat_bot.generate_guid")
-    @patch("views.chat_bot.set_question")
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.generate_guid")
+    @patch("utils.chat_bot_helper.set_question")
+    @patch("utils.chat_bot_helper.st")
     def test_render_followup_message_empty_content(self, mock_st, mock_set_question, mock_generate_guid):
         msg = Message(role=RoleType.ASSISTANT, content="[]", type=MessageType.FOLLOWUP)  # Empty list
 
@@ -464,9 +556,9 @@ class TestRenderMessage:
         mock_st.text.assert_called_once_with("Here are some possible follow-up questions")
         mock_st.button.assert_not_called()  # No buttons for empty list
 
-    @patch("views.chat_bot.generate_guid")
-    @patch("views.chat_bot.set_question")
-    @patch("views.chat_bot.st")
+    @patch("utils.chat_bot_helper.generate_guid")
+    @patch("utils.chat_bot_helper.set_question")
+    @patch("utils.chat_bot_helper.st")
     def test_render_followup_message_malformed_content(self, mock_st, mock_set_question, mock_generate_guid):
         # The code now has error handling for ast.literal_eval
         # and doesn't raise the ValueError anymore

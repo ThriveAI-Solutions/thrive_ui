@@ -1,5 +1,4 @@
-import json
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -11,12 +10,6 @@ from utils.vanna_calls import (
     VannaService,
     extract_user_context_from_streamlit,
     extract_vanna_config_from_secrets,
-    generate_questions_cached,
-    generate_sql_cached,
-    read_forbidden_from_json,
-    run_sql_cached,
-    train_file,
-    write_to_file_and_training,
 )
 
 

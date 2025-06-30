@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from psycopg2.extras import RealDictCursor
 
 from utils.vanna_calls import (
     MyVannaAnthropic,
@@ -76,7 +75,9 @@ class TestMyVannaAnthropicChromaDB:
 
             # Verify ChromaDB_VectorStore (via ThriveAI_ChromaDB) was initialized with the right config
             mock_chromadb_init.assert_called_once()
-            assert mock_chromadb_init.call_args.kwargs["config"] == test_config
+            expected_config = test_config.copy()
+            expected_config["collection_metadata"] = {"hnsw:space": "cosine"}
+            assert mock_chromadb_init.call_args.kwargs["config"] == expected_config
 
             # Verify Anthropic_Chat was initialized with the right parameters
             mock_anthropic_init.assert_called_once()

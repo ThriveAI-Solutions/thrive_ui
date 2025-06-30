@@ -30,6 +30,8 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
 
         super().__init__(config=super_config)
         self.user_role = user_role
+        if client:
+            self.client = client
 
     def add_question_sql(self, question: str, sql: str, metadata: dict[str, Any] | None = None, **kwargs) -> str:
         question_sql_json = json.dumps(
