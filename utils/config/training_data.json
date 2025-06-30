@@ -119,6 +119,10 @@
         {
             "question": "how many people in wny smoke and have diabetes based on gender",
             "query": "SELECT sex, COUNT(*) as count \nFROM wny_health \nWHERE tobacco = 'Y' AND diabetes = 'Y' \nGROUP BY sex"
+        },
+        {
+            "question": "How many people smoke in wny? Please bucket age by decade and group by gender.",
+            "query": "SELECT \n    floor(age / 10) * 10 AS age_decade,\n    sex,\n    COUNT(*) as count \nFROM \n    wny_health \nWHERE \n    tobacco = 'Y' \nGROUP BY \n    age_decade, sex"
         }
     ],
     "sample_documents": [

@@ -182,7 +182,9 @@ def _tables(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, table_names, MessageType.DATAFRAME, None, question, table_names, elapsed_time))
+        add_message(
+            Message(RoleType.ASSISTANT, table_names, MessageType.DATAFRAME, None, question, table_names, elapsed_time)
+        )
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
 
@@ -254,7 +256,7 @@ def _followup(question, tuple, previous_df):
         type = MessageType.TEXT
         if last_assistant_msg.dataframe is not None:
             df = pd.read_json(StringIO(last_assistant_msg.dataframe))
-            was_magical =  is_magic_do_magic(command, df)
+            was_magical = is_magic_do_magic(command, df)
 
             if was_magical:
                 return
@@ -263,7 +265,7 @@ def _followup(question, tuple, previous_df):
             #     type = MessageType.PLOTLY_CHART
             #     response, elapsed = vn.generate_plotly_code(question=command, sql=last_assistant_msg.query, df=df)
             #     print(f"Response: {response}")
-        
+
         if response is None:
             response = vn.submit_prompt(command, last_assistant_msg.content)
 
@@ -307,9 +309,7 @@ def _generate_heatmap(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(
-            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time)
-        )
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating heatmap: {str(e)}", MessageType.ERROR))
 
@@ -333,9 +333,7 @@ def _generate_wordcloud_column(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(
-            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time)
-        )
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud column: {str(e)}", MessageType.ERROR))
 
@@ -359,9 +357,7 @@ def _generate_wordcloud(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(
-            Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time)
-        )
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, question, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating word cloud: {str(e)}", MessageType.ERROR))
 
@@ -521,11 +517,12 @@ def _generate_bar(question, tuple, previous_df):
 def _generate_line(question, tuple, previous_df):
     generate_plotly("line", question, tuple, previous_df)
 
+
 # def check_length(sql):
 #     df = run_sql_cached(sql)
 #     if df is not None and not df.empty:
 #         number = float(df.iloc[0, 0])
-#         if number > 1: 
+#         if number > 1:
 #             return confirm_length(number)
 #     return True
 

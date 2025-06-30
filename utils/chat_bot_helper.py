@@ -1,13 +1,16 @@
-from io import StringIO
 import ast
 import json
-from orm.models import Message
-import streamlit as st
-import pandas as pd
-from utils.enums import MessageType, RoleType
 import uuid
-from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
+from io import StringIO
+
+import pandas as pd
+import streamlit as st
+
 from orm.functions import save_user_settings
+from orm.models import Message
+from utils.communicate import speak
+from utils.enums import MessageType, RoleType
+from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
 # Initialize VannaService singleton
 vn = VannaService.from_streamlit_session()
