@@ -523,7 +523,7 @@ def _generate_heatmap(question, tuple, previous_df):
         # Data acquisition
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
-            sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 1000;"
+            sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
@@ -613,7 +613,7 @@ def _generate_wordcloud(question, tuple, previous_df):
         # Data acquisition
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
-            sql = f"SELECT * FROM {table_name} LIMIT 5000;"  # Limit for performance
+            sql = f"SELECT * FROM {table_name} LIMIT 10000;"  # Limit for performance
             fig, df = get_wordcloud(sql, table_name)
         else:
             fig, df = get_wordcloud(sql, table_name, None, previous_df)
@@ -777,7 +777,7 @@ def _generate_pairplot(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
-            sql = f"SELECT * FROM {table_name} LIMIT 1000;"  # Limit for performance
+            sql = f"SELECT * FROM {table_name} LIMIT 10000;"  # Limit for performance
             df = run_sql_cached(sql)
         else:
             df = previous_df
@@ -2272,6 +2272,7 @@ def _generate_summary(question, tuple, previous_df):
         # Key metrics
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        total_outliers = 0  # Initialize outlier counter
         
         # 1. Dataset Overview
         summary_sections.append("## 📊 DATASET OVERVIEW")
@@ -2354,7 +2355,6 @@ def _generate_summary(question, tuple, previous_df):
                 insights.append(f"**Highly skewed data:** {extreme_cols[0][0]} (skewness: {extreme_cols[0][1]:.2f})")
             
             # Outlier summary
-            total_outliers = 0
             outlier_cols = []
             for col in numeric_cols:
                 col_data = df[col].dropna()
