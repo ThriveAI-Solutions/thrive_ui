@@ -83,15 +83,18 @@ def get_all_column_names(table):
         DataFrame: DataFrame with column_name column
     """
     try:
-        table_name = find_closest_object_name(table)
+        schema_qualified_name = find_closest_object_name(table)
         schema_name = get_configured_schema()
         object_type = get_configured_object_type()
         object_name = "table" if object_type == "tables" else "view"
+        
+        # Extract just the table name from schema.table_name format
+        table_name = schema_qualified_name.split('.')[-1]
 
         sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_name}' AND table_name = '{table_name}';"
         df = run_sql_cached(sql)
         if df.empty:
-            raise Exception(f"No columns found for {object_name} '{table_name}' in schema '{schema_name}'.")
+            raise Exception(f"No columns found for {object_name} '{schema_qualified_name}' in schema '{schema_name}'.")
 
         return df
     except Exception:
@@ -140,7 +143,7 @@ def find_closest_object_name(object_name):
         object_name (str): Name to search for
         
     Returns:
-        str: Best matching object name
+        str: Best matching object name in schema.table_name format
     """
     try:
         df = get_all_object_names()
@@ -158,7 +161,9 @@ def find_closest_object_name(object_name):
             object_name_singular = "table" if object_type == "tables" else "view"
             raise Exception(f"Could not find {object_name_singular} similar to '{object_name}'")
 
-        return matches[0]
+        # Return schema-qualified object name
+        schema_name = get_configured_schema()
+        return f"{schema_name}.{matches[0]}"
     except Exception:
         raise
 
@@ -183,6 +188,9 @@ def find_closest_column_name(table_name, column_name):
         object_type = get_configured_object_type()
         object_name = "table" if object_type == "tables" else "view"
         
+        # Extract just the table name from schema.table_name format if needed
+        unqualified_table_name = table_name.split('.')[-1]
+        
         # Query all column names for the given table/view
         if forbidden_columns_str:
             sql = f"""
@@ -190,14 +198,14 @@ def find_closest_column_name(table_name, column_name):
                 FROM information_schema.columns
                 WHERE table_schema = '{schema_name}'
                 AND column_name NOT IN ({forbidden_columns_str})
-                AND table_name = '{table_name}';
+                AND table_name = '{unqualified_table_name}';
             """
         else:
             sql = f"""
                 SELECT column_name
                 FROM information_schema.columns
                 WHERE table_schema = '{schema_name}'
-                AND table_name = '{table_name}';
+                AND table_name = '{unqualified_table_name}';
             """
         
         df = run_sql_cached(sql)
