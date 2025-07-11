@@ -18,11 +18,15 @@ from sklearn.ensemble import IsolationForest
 from orm.models import Message
 from utils.chat_bot_helper import add_message, set_question, vn
 from utils.enums import MessageType, RoleType
-from utils.vanna_calls import read_forbidden_from_json, run_sql_cached, get_configured_schema
+from utils.vanna_calls import read_forbidden_from_json, run_sql_cached, get_configured_schema, get_configured_object_type
 
 unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
 
 
+def get_object_name_singular():
+    """Get the singular object name (table or view) based on configuration."""
+    object_type = get_configured_object_type()
+    return "table" if object_type == "tables" else "view"
 
 
 def generate_example_from_pattern(pattern, sample_values=None):
@@ -66,47 +70,93 @@ def usage_from_pattern(pattern):
 
 
 def get_all_column_names(table):
+    """
+    Get all column names for a given table or view.
+    
+    Uses the configured schema and object type to query the appropriate
+    information_schema view for column information.
+    
+    Args:
+        table (str): Name of the table or view
+        
+    Returns:
+        DataFrame: DataFrame with column_name column
+    """
     try:
-        table_name = find_closest_table_name(table)
+        table_name = find_closest_object_name(table)
         schema_name = get_configured_schema()
+        object_type = get_configured_object_type()
+        object_name = "table" if object_type == "tables" else "view"
 
-        sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_name}' AND  table_name = '{table_name}';"
+        sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_name}' AND table_name = '{table_name}';"
         df = run_sql_cached(sql)
         if df.empty:
-            raise Exception("No tables found in the database.")
+            raise Exception(f"No columns found for {object_name} '{table_name}' in schema '{schema_name}'.")
 
         return df
     except Exception:
         raise
 
 
-def get_all_table_names():
+def get_all_object_names():
+    """
+    Get all table or view names from the configured schema.
+    
+    Uses the object_type configuration from secrets.toml to determine
+    whether to query tables or views from information_schema.
+    
+    Returns:
+        DataFrame: DataFrame with table_name column containing object names
+    """
     try:
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
         schema_name = get_configured_schema()
-
-        sql = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema_name}' AND  table_name NOT IN ({forbidden_tables_str});"
+        object_type = get_configured_object_type()
+        
+        # Build query based on configured object type (tables or views)
+        if forbidden_tables_str:
+            sql = f"SELECT table_name FROM information_schema.{object_type} WHERE table_schema = '{schema_name}' AND table_name NOT IN ({forbidden_tables_str});"
+        else:
+            sql = f"SELECT table_name FROM information_schema.{object_type} WHERE table_schema = '{schema_name}';"
+        
         df = run_sql_cached(sql)
         if df.empty:
-            raise Exception("No tables found in the database.")
+            object_name = "table" if object_type == "tables" else "view"
+            raise Exception(f"No {object_name}s found in the database.")
 
         return df
     except Exception:
         raise
 
 
-def find_closest_table_name(table_name):
+def find_closest_object_name(object_name):
+    """
+    Find the closest matching table or view name using fuzzy string matching.
+    
+    Uses the object_type configuration to search within the appropriate
+    database objects (tables or views).
+    
+    Args:
+        object_name (str): Name to search for
+        
+    Returns:
+        str: Best matching object name
+    """
     try:
-        df = get_all_table_names()
+        df = get_all_object_names()
         table_names = df["table_name"].tolist()
 
         if table_names is None:
-            raise Exception("No table names found in the database.")
+            object_type = get_configured_object_type()
+            object_name_plural = "table" if object_type == "tables" else "view"
+            raise Exception(f"No {object_name_plural} names found in the database.")
 
-        matches = difflib.get_close_matches(table_name, table_names, n=1, cutoff=0.6)
+        matches = difflib.get_close_matches(object_name, table_names, n=1, cutoff=0.6)
 
         if not matches:
-            raise Exception(f"Could not find table similar to '{table_name}'")
+            object_type = get_configured_object_type()
+            object_name_singular = "table" if object_type == "tables" else "view"
+            raise Exception(f"Could not find {object_name_singular} similar to '{object_name}'")
 
         return matches[0]
     except Exception:
@@ -114,24 +164,48 @@ def find_closest_table_name(table_name):
 
 
 def find_closest_column_name(table_name, column_name):
+    """
+    Find the closest matching column name in a table or view using fuzzy string matching.
+    
+    Uses the configured schema and respects forbidden column restrictions.
+    
+    Args:
+        table_name (str): Name of the table or view
+        column_name (str): Column name to search for
+        
+    Returns:
+        str: Best matching column name
+    """
     try:
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
         forbidden_columns_str = ", ".join(f"'{column}'" for column in forbidden_columns)
         schema_name = get_configured_schema()
-        # Query all column names for the given table
-        sql = f"""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = '{schema_name}'
-            AND column_name NOT IN ({forbidden_columns_str})
-            AND table_name = '{table_name}';
-        """
+        object_type = get_configured_object_type()
+        object_name = "table" if object_type == "tables" else "view"
+        
+        # Query all column names for the given table/view
+        if forbidden_columns_str:
+            sql = f"""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = '{schema_name}'
+                AND column_name NOT IN ({forbidden_columns_str})
+                AND table_name = '{table_name}';
+            """
+        else:
+            sql = f"""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = '{schema_name}'
+                AND table_name = '{table_name}';
+            """
+        
         df = run_sql_cached(sql)
         column_names = df["column_name"].tolist() if not df.empty else []
         matches = difflib.get_close_matches(column_name, column_names, n=1, cutoff=0.6)
 
         if not matches:
-            raise Exception(f"Could not find column similar to  {column_name} on '{table_name}'")
+            raise Exception(f"Could not find column similar to '{column_name}' on {object_name} '{table_name}'")
 
         return matches[0]
     except Exception:
@@ -324,7 +398,7 @@ def _followup_help(question, tuple, previous_df):
 def _tables(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
-        table_names = get_all_table_names()
+        table_names = get_all_object_names()
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -357,7 +431,7 @@ def _head(question, tuple, previous_df):
         start_time = time.perf_counter()
         sql = ""
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
 
             sql = f"SELECT *  FROM {table_name} LIMIT 5;"
             df = run_sql_cached(sql)
@@ -440,21 +514,21 @@ def _generate_heatmap(question, tuple, previous_df):
 
         # Data acquisition
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 1000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
 
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
 
         # Calculate correlation matrix for numeric columns only
         numeric_df = df.select_dtypes(include=[np.number])
         
         if numeric_df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No numeric columns found in {table_name} for correlation analysis", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No numeric columns found in {get_object_name_singular()} {table_name} for correlation analysis", MessageType.ERROR))
             return
             
         if len(numeric_df.columns) < 2:
@@ -498,7 +572,7 @@ def _generate_wordcloud_column(question, tuple, previous_df):
         
         # Data acquisition
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             fig, df = get_wordcloud(sql, table_name, column_name)
@@ -530,7 +604,7 @@ def _generate_wordcloud(question, tuple, previous_df):
 
         # Data acquisition
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 5000;"  # Limit for performance
             fig, df = get_wordcloud(sql, table_name)
         else:
@@ -566,7 +640,7 @@ def get_wordcloud(sql, table_name, column_name=None, previous_df=None):
             df = run_sql_cached(sql)
             
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return None, None
 
         # Text data extraction
@@ -575,14 +649,14 @@ def get_wordcloud(sql, table_name, column_name=None, previous_df=None):
         if column_name is not None:
             # Single column word cloud
             if column_name not in df.columns:
-                add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR))
+                add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
                 return None, None
             text_data = df[column_name].astype(str).str.cat(sep=" ")
         else:
             # Multi-column word cloud
             string_columns = df.select_dtypes(include="object").columns
             if len(string_columns) == 0:
-                add_message(Message(RoleType.ASSISTANT, f"No text columns found in table '{table_name}'", MessageType.ERROR))
+                add_message(Message(RoleType.ASSISTANT, f"No text columns found in {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
                 return None, None
                 
             words = []
@@ -592,7 +666,7 @@ def get_wordcloud(sql, table_name, column_name=None, previous_df=None):
             text_data = " ".join(words)
 
         if not text_data or text_data.strip() == "":
-            add_message(Message(RoleType.ASSISTANT, f"No meaningful text data found in table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No meaningful text data found in {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return None, None
 
         # Enhanced word cloud generation
@@ -693,7 +767,7 @@ def _generate_pairplot(question, tuple, previous_df):
 
         # Data acquisition
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT * FROM {table_name} LIMIT 1000;"  # Limit for performance
             df = run_sql_cached(sql)
@@ -701,7 +775,7 @@ def _generate_pairplot(question, tuple, previous_df):
             df = previous_df
 
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
 
         # Get numeric columns for the scatter matrix
@@ -792,7 +866,7 @@ def generate_plotly(chart_type, question, tuple, previous_df):
 
         # Data acquisition
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_x = find_closest_column_name(table_name, tuple["x"])
             column_y = find_closest_column_name(table_name, tuple["y"])
             column_color = find_closest_column_name(table_name, tuple["color"])
@@ -802,7 +876,7 @@ def generate_plotly(chart_type, question, tuple, previous_df):
             df = previous_df
 
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
 
         # Create enhanced visualization
@@ -896,14 +970,14 @@ def _describe_table(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Get basic description
@@ -951,7 +1025,7 @@ def _distribution_analysis(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             df = run_sql_cached(sql)
@@ -1125,7 +1199,7 @@ def _outlier_detection(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             df = run_sql_cached(sql)
@@ -1232,14 +1306,14 @@ def _profile_table(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Create profiling report
@@ -1293,14 +1367,14 @@ def _missing_analysis(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Calculate missing data
@@ -1381,14 +1455,14 @@ def _duplicate_analysis(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Find duplicates
@@ -1435,7 +1509,7 @@ def _boxplot_visualization(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             df = run_sql_cached(sql)
@@ -1570,14 +1644,14 @@ def _cluster_analysis(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Select only numeric columns
@@ -1682,14 +1756,14 @@ def _pca_analysis(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Select only numeric columns
@@ -1786,7 +1860,7 @@ def _confusion_matrix(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             true_column = find_closest_column_name(table_name, true_column)
             pred_column = find_closest_column_name(table_name, pred_column)
             sql = f"SELECT {true_column}, {pred_column} FROM {table_name} WHERE {true_column} IS NOT NULL AND {pred_column} IS NOT NULL;"
@@ -1899,14 +1973,14 @@ def _generate_report(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Generate comprehensive report
@@ -2167,14 +2241,14 @@ def _generate_summary(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Generate executive summary
@@ -2434,13 +2508,13 @@ def _generate_summary(question, tuple, previous_df):
             next_steps.append("1. **Data Cleaning:** `/missing <table>` and `/duplicates <table>` for detailed analysis")
         
         if len(numeric_cols) > 1:
-            next_steps.append("2. **Correlation Analysis:** `/heatmap <table>` to visualize relationships")
+            next_steps.append(f"2. **Correlation Analysis:** `/heatmap <{get_object_name_singular()}>` to visualize relationships")
         
         if len(numeric_cols) >= 3:
-            next_steps.append("3. **Advanced Analysis:** `/clusters <table>` or `/pca <table>` for pattern discovery")
+            next_steps.append(f"3. **Advanced Analysis:** `/clusters <{get_object_name_singular()}>` or `/pca <{get_object_name_singular()}>` for pattern discovery")
         
         if numeric_cols:
-            next_steps.append("4. **Distribution Analysis:** `/distribution <table>.<column>` for specific variables")
+            next_steps.append(f"4. **Distribution Analysis:** `/distribution <{get_object_name_singular()}>.<column>` for specific variables")
         
         if total_outliers > 0:
             next_steps.append("5. **Outlier Investigation:** `/outliers <table>.<column>` for anomaly detection")
@@ -2476,7 +2550,7 @@ def _correlation_analysis(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column1_name = find_closest_column_name(table_name, column1_name)
             column2_name = find_closest_column_name(table_name, column2_name)
             sql = f"SELECT {column1_name}, {column2_name} FROM {table_name} WHERE {column1_name} IS NOT NULL AND {column2_name} IS NOT NULL;"
@@ -2720,14 +2794,14 @@ def _analyze_datatypes(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Analyze each column
@@ -2984,7 +3058,7 @@ def _violin_plot(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             df = run_sql_cached(sql)
@@ -2994,11 +3068,11 @@ def _violin_plot(question, tuple, previous_df):
                 column_name = find_closest_column_name_from_list(df.columns.tolist(), column_name)
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         if column_name not in df.columns:
-            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Prepare data
@@ -3171,7 +3245,7 @@ def _anomaly_detection(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             df = run_sql_cached(sql)
@@ -3181,11 +3255,11 @@ def _anomaly_detection(question, tuple, previous_df):
                 column_name = find_closest_column_name_from_list(df.columns.tolist(), column_name)
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         if column_name not in df.columns:
-            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Prepare data
@@ -3407,14 +3481,14 @@ def _smart_sample(question, tuple, previous_df):
             return
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name};"
             df = run_sql_cached(sql)
         else:
             df = previous_df
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         sample_size = int(len(df) * percentage / 100)
@@ -3678,7 +3752,7 @@ def _transform_data(question, tuple, previous_df):
         sql = ""
         
         if previous_df is None:
-            table_name = find_closest_table_name(tuple["table"])
+            table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
             df = run_sql_cached(sql)
@@ -3688,11 +3762,11 @@ def _transform_data(question, tuple, previous_df):
                 column_name = find_closest_column_name_from_list(df.columns.tolist(), column_name)
         
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"No data found for {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         if column_name not in df.columns:
-            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in table '{table_name}'", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, f"Column '{column_name}' not found in {get_object_name_singular()} '{table_name}'", MessageType.ERROR))
             return
         
         # Prepare original data
