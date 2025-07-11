@@ -1771,6 +1771,121 @@ def _pca_analysis(question, tuple, previous_df):
         add_message(Message(RoleType.ASSISTANT, f"Error performing PCA analysis: {str(e)}", MessageType.ERROR))
 
 
+def _confusion_matrix(question, tuple, previous_df):
+    """Generate confusion matrix for classification analysis."""
+    try:
+        start_time = time.perf_counter()
+        table_name = "Previous Result"
+        true_column = tuple["true_column"]
+        pred_column = tuple["pred_column"]
+        sql = ""
+        
+        if previous_df is None:
+            table_name = find_closest_table_name(tuple["table"])
+            true_column = find_closest_column_name(table_name, true_column)
+            pred_column = find_closest_column_name(table_name, pred_column)
+            sql = f"SELECT {true_column}, {pred_column} FROM {table_name} WHERE {true_column} IS NOT NULL AND {pred_column} IS NOT NULL;"
+            df = run_sql_cached(sql)
+        else:
+            df = previous_df
+            if true_column not in df.columns:
+                add_message(Message(RoleType.ASSISTANT, f"Column '{true_column}' not found", MessageType.ERROR))
+                return
+            if pred_column not in df.columns:
+                add_message(Message(RoleType.ASSISTANT, f"Column '{pred_column}' not found", MessageType.ERROR))
+                return
+        
+        if df is None or df.empty:
+            add_message(Message(RoleType.ASSISTANT, f"No data found for confusion matrix analysis", MessageType.ERROR))
+            return
+        
+        # Clean data
+        df_clean = df[[true_column, pred_column]].dropna()
+        
+        if df_clean.empty:
+            add_message(Message(RoleType.ASSISTANT, f"No valid data found after removing null values", MessageType.ERROR))
+            return
+        
+        y_true = df_clean[true_column]
+        y_pred = df_clean[pred_column]
+        
+        # Import confusion matrix from sklearn
+        from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+        
+        # Calculate confusion matrix
+        cm = confusion_matrix(y_true, y_pred)
+        labels = sorted(list(set(y_true) | set(y_pred)))
+        
+        # Calculate metrics
+        accuracy = accuracy_score(y_true, y_pred)
+        class_report = classification_report(y_true, y_pred, output_dict=True)
+        
+        # Create heatmap visualization
+        fig = go.Figure(data=go.Heatmap(
+            z=cm,
+            x=labels,
+            y=labels,
+            colorscale='Blues',
+            text=cm,
+            texttemplate="%{text}",
+            textfont={"size": 16},
+            hoverongaps=False,
+            hovertemplate='True: %{y}<br>Predicted: %{x}<br>Count: %{z}<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title=f"Confusion Matrix: {true_column} vs {pred_column}<br>Accuracy: {accuracy:.3f}",
+            xaxis_title="Predicted",
+            yaxis_title="True",
+            xaxis={'side': 'bottom'},
+            yaxis={'autorange': 'reversed'},
+            width=600,
+            height=500
+        )
+        
+        # Generate detailed analysis
+        analysis = []
+        analysis.append(f"CONFUSION MATRIX ANALYSIS")
+        analysis.append("=" * 40)
+        analysis.append(f"Dataset: {table_name}")
+        analysis.append(f"True Column: {true_column}")
+        analysis.append(f"Predicted Column: {pred_column}")
+        analysis.append(f"Total Samples: {len(df_clean):,}")
+        analysis.append(f"Overall Accuracy: {accuracy:.3f} ({accuracy*100:.1f}%)")
+        analysis.append("")
+        
+        # Per-class metrics
+        # analysis.append("PER-CLASS METRICS:")
+        # analysis.append("-" * 20)
+        # for label in labels:
+        #     if str(label) in class_report:
+        #         metrics = class_report[str(label)]
+        #         analysis.append(f"Class '{label}':")
+        #         analysis.append(f"  Precision: {metrics['precision']:.3f}")
+        #         analysis.append(f"  Recall: {metrics['recall']:.3f}")
+        #         analysis.append(f"  F1-Score: {metrics['f1-score']:.3f}")
+        #         analysis.append(f"  Support: {int(metrics['support'])}")
+        #         analysis.append("")
+        
+        # Overall metrics
+        if 'macro avg' in class_report:
+            macro_avg = class_report['macro avg']
+            analysis.append("OVERALL METRICS:")
+            analysis.append("-" * 16)
+            analysis.append(f"Macro Avg Precision: {macro_avg['precision']:.3f}")
+            analysis.append(f"Macro Avg Recall: {macro_avg['recall']:.3f}")
+            analysis.append(f"Macro Avg F1-Score: {macro_avg['f1-score']:.3f}")
+        
+        elapsed = time.perf_counter() - start_time
+        
+        # Add messages
+        add_message(Message(RoleType.ASSISTANT, "\n".join(analysis), MessageType.PYTHON, None, question, None, elapsed))
+        add_message(Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, None, question, sql, elapsed))
+        
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error generating confusion matrix: {str(e)}", MessageType.ERROR))
+
+
 def _generate_report(question, tuple, previous_df):
     """Generate a comprehensive data analysis report."""
     try:
@@ -3983,7 +4098,6 @@ FOLLOW_UP_MAGIC_RENDERERS = {
     },
 }
 
-# TODO: confusion matrix?
 MAGIC_RENDERERS = {
     # ==================== HELP & SYSTEM COMMANDS ====================
     r"^/clear$": {"func": _clear, "description": "Clear message history in window", "sample_values": {}, "category": "Help & System Commands", "show_example": False},
@@ -4181,6 +4295,13 @@ MAGIC_RENDERERS = {
         "func": _pca_analysis,
         "description": "Perform Principal Component Analysis and visualize results",
         "sample_values": {"table": "wny_health"},
+        "category": "Machine Learning",
+        "show_example": True,
+    },
+    r"^/confusion\s+(?P<table>\w+)\.(?P<true_column>\w+)\.(?P<pred_column>\w+)$": {
+        "func": _confusion_matrix,
+        "description": "Generate confusion matrix for classification analysis with detailed metrics",
+        "sample_values": {"table": "wny_health", "true_column": "race_level_1", "pred_column": "diabetes"},
         "category": "Machine Learning",
         "show_example": True,
     },
