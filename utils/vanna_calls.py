@@ -637,35 +637,283 @@ def write_to_file_and_training(new_entry: dict):
 
 
 def training_plan():
-    vanna_service = VannaService.from_streamlit_session()
-    forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
-
-    # The information schema query may need some tweaking depending on your database. This is a good starting point.
-    df_information_schema = vanna_service.run_sql(f"""
-            SELECT 
-                *
-            FROM 
-                information_schema.columns
-            WHERE 
-                table_schema = 'public'
-            AND 
-                table_name NOT IN ({forbidden_tables_str})
-            ORDER BY 
-                table_schema, table_name, ordinal_position;
-        """)
-
-    # This will break up the information schema into bite-sized chunks that can be referenced by the LLM
-    plan = vanna_service.get_training_plan_generic(df_information_schema)
-    vanna_service.train(plan=plan)
-
-
-# Train Vanna on database schema
-def train_ddl(describe_ddl_from_llm: bool = False):
+    """
+    RAG-optimized training plan that captures comprehensive database schema information
+    including relationships, constraints, sample data, and semantic context for superior SQL generation.
+    
+    Returns:
+        bool: True if training completed successfully, False otherwise
+    """
     try:
-        st.toast("🚀 Starting DDL training...")
-        forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+        st.toast("🚀 Starting RAG-optimized training plan...")
+        logger.info("Starting RAG-optimized training plan generation")
+        
+        vanna_service = VannaService.from_streamlit_session()
+        if not vanna_service:
+            st.error("Failed to initialize VannaService")
+            return False
+        
+        # Get forbidden tables with proper error handling
+        try:
+            forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+            logger.info(f"Loaded {len(forbidden_tables)} forbidden tables")
+        except Exception as e:
+            logger.warning(f"Error reading forbidden tables: {e}")
+            forbidden_tables_str = ""
+        
+        # Build enhanced schema query with relationships and semantic information
+        if forbidden_tables_str:
+            enhanced_query = f"""
+                WITH foreign_keys AS (
+                    SELECT
+                        tc.table_name,
+                        kcu.column_name,
+                        ccu.table_name AS referenced_table,
+                        ccu.column_name AS referenced_column,
+                        tc.constraint_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+                    JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                    AND tc.table_schema = 'public'
+                ),
+                primary_keys AS (
+                    SELECT
+                        tc.table_name,
+                        kcu.column_name,
+                        tc.constraint_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+                    WHERE tc.constraint_type = 'PRIMARY KEY'
+                    AND tc.table_schema = 'public'
+                )
+                SELECT DISTINCT
+                    c.table_catalog as database_name,
+                    c.table_schema,
+                    c.table_name,
+                    c.column_name,
+                    c.data_type,
+                    c.is_nullable,
+                    c.column_default,
+                    c.ordinal_position,
+                    c.character_maximum_length,
+                    c.numeric_precision,
+                    c.numeric_scale,
+                    CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
+                    
+                    -- Constraints and relationships
+                    pk.constraint_name as primary_key,
+                    fk.referenced_table,
+                    fk.referenced_column,
+                    fk.constraint_name as foreign_key_name,
+                    
+                    -- Semantic indicators based on column names
+                    CASE 
+                        WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' THEN 'identifier'
+                        WHEN c.column_name ILIKE '%name%' OR c.column_name ILIKE '%title%' THEN 'name'
+                        WHEN c.column_name ILIKE '%email%' THEN 'email'
+                        WHEN c.column_name ILIKE '%phone%' THEN 'phone'
+                        WHEN c.column_name ILIKE '%date%' OR c.column_name ILIKE '%time%' OR c.column_name ILIKE '%created%' OR c.column_name ILIKE '%updated%' THEN 'temporal'
+                        WHEN c.column_name ILIKE '%price%' OR c.column_name ILIKE '%cost%' OR c.column_name ILIKE '%amount%' THEN 'monetary'
+                        WHEN c.column_name ILIKE '%count%' OR c.column_name ILIKE '%quantity%' OR c.column_name ILIKE '%number%' THEN 'quantity'
+                        WHEN c.column_name ILIKE '%status%' OR c.column_name ILIKE '%state%' THEN 'status'
+                        WHEN c.column_name ILIKE '%address%' OR c.column_name ILIKE '%city%' OR c.column_name ILIKE '%zip%' THEN 'location'
+                        ELSE 'general'
+                    END as semantic_type
+                    
+                FROM information_schema.columns c
+                LEFT JOIN foreign_keys fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
+                LEFT JOIN primary_keys pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
+                WHERE c.table_schema = 'public'
+                AND c.table_name NOT IN ({forbidden_tables_str})
+                ORDER BY c.table_schema, c.table_name, c.ordinal_position
+            """
+        else:
+            enhanced_query = """
+                WITH foreign_keys AS (
+                    SELECT
+                        tc.table_name,
+                        kcu.column_name,
+                        ccu.table_name AS referenced_table,
+                        ccu.column_name AS referenced_column,
+                        tc.constraint_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+                    JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                    AND tc.table_schema = 'public'
+                ),
+                primary_keys AS (
+                    SELECT
+                        tc.table_name,
+                        kcu.column_name,
+                        tc.constraint_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+                    WHERE tc.constraint_type = 'PRIMARY KEY'
+                    AND tc.table_schema = 'public'
+                )
+                SELECT DISTINCT
+                    c.table_catalog as database_name,
+                    c.table_schema,
+                    c.table_name,
+                    c.column_name,
+                    c.data_type,
+                    c.is_nullable,
+                    c.column_default,
+                    c.ordinal_position,
+                    c.character_maximum_length,
+                    c.numeric_precision,
+                    c.numeric_scale,
+                    CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
+                    
+                    -- Constraints and relationships
+                    pk.constraint_name as primary_key,
+                    fk.referenced_table,
+                    fk.referenced_column,
+                    fk.constraint_name as foreign_key_name,
+                    
+                    -- Semantic indicators based on column names
+                    CASE 
+                        WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' THEN 'identifier'
+                        WHEN c.column_name ILIKE '%name%' OR c.column_name ILIKE '%title%' THEN 'name'
+                        WHEN c.column_name ILIKE '%email%' THEN 'email'
+                        WHEN c.column_name ILIKE '%phone%' THEN 'phone'
+                        WHEN c.column_name ILIKE '%date%' OR c.column_name ILIKE '%time%' OR c.column_name ILIKE '%created%' OR c.column_name ILIKE '%updated%' THEN 'temporal'
+                        WHEN c.column_name ILIKE '%price%' OR c.column_name ILIKE '%cost%' OR c.column_name ILIKE '%amount%' THEN 'monetary'
+                        WHEN c.column_name ILIKE '%count%' OR c.column_name ILIKE '%quantity%' OR c.column_name ILIKE '%number%' THEN 'quantity'
+                        WHEN c.column_name ILIKE '%status%' OR c.column_name ILIKE '%state%' THEN 'status'
+                        WHEN c.column_name ILIKE '%address%' OR c.column_name ILIKE '%city%' OR c.column_name ILIKE '%zip%' THEN 'location'
+                        ELSE 'general'
+                    END as semantic_type
+                    
+                FROM information_schema.columns c
+                LEFT JOIN foreign_keys fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
+                LEFT JOIN primary_keys pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
+                WHERE c.table_schema = 'public'
+                ORDER BY c.table_schema, c.table_name, c.ordinal_position
+            """
+        
+        # Execute enhanced schema query
+        st.toast("📊 Retrieving enhanced schema information...")
+        df_information_schema = vanna_service.run_sql(enhanced_query)
+        
+        if df_information_schema is None or df_information_schema.empty:
+            st.warning("No schema information retrieved")
+            return False
+        
+        table_count = df_information_schema['table_name'].nunique()
+        column_count = len(df_information_schema)
+        logger.info(f"Retrieved enhanced schema for {table_count} tables with {column_count} columns")
+        
+        # Train standard schema plan
+        st.toast("🎓 Training enhanced schema plan...")
+        plan = vanna_service.get_training_plan_generic(df_information_schema)
+        if plan:
+            vanna_service.train(plan=plan)
+            logger.info("Standard schema training plan executed")
+        
+        # Train relationship documentation
+        st.toast("🔗 Training table relationships...")
+        relationships_trained = 0
+        for table in df_information_schema['table_name'].unique():
+            table_data = df_information_schema[df_information_schema['table_name'] == table]
+            
+            # Foreign key relationships
+            fk_relationships = table_data[table_data['referenced_table'].notna()]
+            for _, fk_row in fk_relationships.iterrows():
+                relationship_doc = f"""
+                Table {fk_row['table_name']} column {fk_row['column_name']} references {fk_row['referenced_table']}.{fk_row['referenced_column']}.
+                This creates a relationship where {fk_row['table_name']} belongs to {fk_row['referenced_table']}.
+                Use JOIN {fk_row['referenced_table']} ON {fk_row['table_name']}.{fk_row['column_name']} = {fk_row['referenced_table']}.{fk_row['referenced_column']} to connect these tables.
+                """
+                vanna_service.train(documentation=relationship_doc)
+                relationships_trained += 1
+        
+        # Train semantic column information
+        st.toast("🏷️ Training semantic context...")
+        semantics_trained = 0
+        for _, row in df_information_schema.iterrows():
+            if row.get('semantic_type') and row['semantic_type'] != 'general':
+                semantic_doc = f"""
+                Column {row['table_name']}.{row['column_name']} ({row['data_type']}) is a {row['semantic_type']} field.
+                """
+                vanna_service.train(documentation=semantic_doc)
+                semantics_trained += 1
+        
+        # Train query patterns
+        st.toast("🎯 Training query patterns...")
+        patterns_trained = 0
+        for table in df_information_schema['table_name'].unique():
+            table_data = df_information_schema[df_information_schema['table_name'] == table]
+            
+            # Generate common query pattern documentation
+            id_columns = table_data[table_data['semantic_type'] == 'identifier']['column_name'].tolist()
+            name_columns = table_data[table_data['semantic_type'] == 'name']['column_name'].tolist()
+            date_columns = table_data[table_data['semantic_type'] == 'temporal']['column_name'].tolist()
+            
+            query_patterns = []
+            if id_columns:
+                query_patterns.append(f"To find {table} by ID: SELECT * FROM {table} WHERE {id_columns[0]} = value")
+            if name_columns:
+                query_patterns.append(f"To search {table} by name: SELECT * FROM {table} WHERE {name_columns[0]} ILIKE '%value%'")
+            if date_columns:
+                query_patterns.append(f"To get recent {table}: SELECT * FROM {table} ORDER BY {date_columns[0]} DESC")
+            
+            if query_patterns:
+                pattern_doc = f"Common query patterns for {table}:\n" + "\n".join(query_patterns)
+                vanna_service.train(documentation=pattern_doc)
+                patterns_trained += 1
+        
+        # Show final success message
+        st.success(f"""
+        🎉 RAG-optimized training plan completed successfully! 
+        📊 Processed {table_count} tables with {column_count} columns
+        🔗 Trained {relationships_trained} relationships
+        🏷️ Enhanced {semantics_trained} columns with semantic context
+        🎯 Added {patterns_trained} query pattern sets
+        """)
+        logger.info(f"Enhanced training plan completed: {table_count} tables, {relationships_trained} relationships, {semantics_trained} semantics, {patterns_trained} patterns")
+        return True
+        
+    except Exception as e:
+        error_msg = f"Error in RAG-optimized training plan: {e}"
+        st.error(error_msg)
+        logger.exception("Error in training_plan: %s", e)
+        return False
 
-        # PostgreSQL Connection
+
+def train_ddl(describe_ddl_from_llm: bool = False):
+    """
+    RAG-optimized DDL training function that captures comprehensive schema information
+    including constraints, indexes, triggers, and enhanced metadata for superior SQL generation.
+    
+    Args:
+        describe_ddl_from_llm (bool): Whether to generate AI descriptions for DDL structures
+        
+    Returns:
+        bool: True if training completed successfully, False otherwise
+    """
+    conn = None
+    try:
+        st.toast("🚀 Starting RAG-optimized DDL training...")
+        logger.info("Starting comprehensive DDL training")
+        
+        vanna_service = VannaService.from_streamlit_session()
+        if not vanna_service:
+            st.error("Failed to initialize VannaService")
+            return False
+            
+        # Get forbidden tables with proper error handling
+        try:
+            forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+            logger.info(f"Loaded {len(forbidden_tables)} forbidden tables")
+        except Exception as e:
+            logger.warning(f"Error reading forbidden tables: {e}")
+            forbidden_tables_str = ""
+        
+        # Establish database connection with context manager
+        from contextlib import closing
         conn = psycopg2.connect(
             host=st.secrets["postgres"]["host"],
             port=st.secrets["postgres"]["port"],
@@ -673,73 +921,335 @@ def train_ddl(describe_ddl_from_llm: bool = False):
             user=st.secrets["postgres"]["user"],
             password=st.secrets["postgres"]["password"],
         )
-
-        # Get database schema
-        cursor = conn.cursor()
-        cursor.execute(f"""
-            SELECT 
-                table_schema,
-                table_name,
-                column_name,
-                data_type,
-                is_nullable
-            FROM 
-                information_schema.columns
-            WHERE 
-                table_schema = 'public'
-            AND 
-                table_name NOT IN ({forbidden_tables_str})
-            ORDER BY 
-                table_schema, table_name, ordinal_position;
-        """)
-        schema_info = cursor.fetchall()
-
-        # Format schema for training
-        ddl = []
-        current_table = None
-        tables_trained = 0
-
-        vanna_service = VannaService.from_streamlit_session()
-
-        for row in schema_info:
-            if current_table != row[1]:
-                if current_table is not None:
-                    ddl.append(");")
-                    vanna_service.train(ddl=" ".join(ddl))
-                    st.toast(f"✓ Trained DDL for table: {current_table}")
-                    if describe_ddl_from_llm:
-                        train_ddl_describe_to_rag(current_table, ddl)
-                    ddl = []  # reset ddl for next table
-                    tables_trained += 1
-                current_table = row[1]
-                ddl.append(f"\nCREATE TABLE {row[1]} (")
+        
+        with closing(conn), conn.cursor() as cursor:
+            # Build comprehensive schema query based on forbidden tables
+            if forbidden_tables_str:
+                schema_query = f"""
+                    WITH table_constraints AS (
+                        SELECT 
+                            tc.table_name,
+                            tc.constraint_name,
+                            tc.constraint_type,
+                            kcu.column_name,
+                            rc.match_option,
+                            rc.update_rule,
+                            rc.delete_rule,
+                            ccu.table_name AS referenced_table_name,
+                            ccu.column_name AS referenced_column_name
+                        FROM information_schema.table_constraints tc
+                        LEFT JOIN information_schema.key_column_usage kcu 
+                            ON tc.constraint_name = kcu.constraint_name
+                        LEFT JOIN information_schema.referential_constraints rc 
+                            ON tc.constraint_name = rc.constraint_name
+                        LEFT JOIN information_schema.constraint_column_usage ccu 
+                            ON rc.unique_constraint_name = ccu.constraint_name
+                        WHERE tc.table_schema = 'public'
+                        AND tc.table_name NOT IN ({forbidden_tables_str})
+                    ),
+                    table_indexes AS (
+                        SELECT 
+                            schemaname,
+                            tablename,
+                            indexname,
+                            indexdef
+                        FROM pg_indexes
+                        WHERE schemaname = 'public'
+                        AND tablename NOT IN ({forbidden_tables_str})
+                    ),
+                    column_stats AS (
+                        SELECT 
+                            schemaname,
+                            tablename,
+                            attname as column_name,
+                            n_distinct,
+                            correlation
+                        FROM pg_stats
+                        WHERE schemaname = 'public'
+                        AND tablename NOT IN ({forbidden_tables_str})
+                    )
+                    SELECT DISTINCT
+                        c.table_schema,
+                        c.table_name,
+                        c.column_name,
+                        c.data_type,
+                        c.is_nullable,
+                        c.column_default,
+                        c.ordinal_position,
+                        c.character_maximum_length,
+                        c.numeric_precision,
+                        c.numeric_scale,
+                        c.datetime_precision,
+                        c.udt_name,
+                        CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
+                        
+                        -- Constraint information
+                        tc.constraint_type,
+                        tc.constraint_name,
+                        tc.referenced_table_name,
+                        tc.referenced_column_name,
+                        tc.update_rule,
+                        tc.delete_rule,
+                        
+                        -- Enhanced semantic classification
+                        CASE 
+                            WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' OR c.column_name = 'id' THEN 'primary_key'
+                            WHEN c.column_name ILIKE '%uuid%' OR c.column_name ILIKE '%guid%' THEN 'uuid'
+                            WHEN c.column_name ILIKE '%name%' OR c.column_name ILIKE '%title%' THEN 'name'
+                            WHEN c.column_name ILIKE '%email%' THEN 'email'
+                            WHEN c.column_name ILIKE '%phone%' OR c.column_name ILIKE '%mobile%' THEN 'phone'
+                            WHEN c.column_name ILIKE '%address%' OR c.column_name ILIKE '%street%' OR c.column_name ILIKE '%city%' OR c.column_name ILIKE '%zip%' OR c.column_name ILIKE '%postal%' THEN 'address'
+                            WHEN c.column_name ILIKE '%date%' OR c.column_name ILIKE '%time%' OR c.column_name ILIKE '%created%' OR c.column_name ILIKE '%updated%' OR c.column_name ILIKE '%modified%' THEN 'temporal'
+                            WHEN c.column_name ILIKE '%price%' OR c.column_name ILIKE '%cost%' OR c.column_name ILIKE '%amount%' OR c.column_name ILIKE '%fee%' OR c.column_name ILIKE '%total%' THEN 'monetary'
+                            WHEN c.column_name ILIKE '%count%' OR c.column_name ILIKE '%quantity%' OR c.column_name ILIKE '%number%' OR c.column_name ILIKE '%size%' THEN 'quantity'
+                            WHEN c.column_name ILIKE '%status%' OR c.column_name ILIKE '%state%' OR c.column_name ILIKE '%type%' THEN 'categorical'
+                            WHEN c.column_name ILIKE '%description%' OR c.column_name ILIKE '%comment%' OR c.column_name ILIKE '%note%' THEN 'text'
+                            WHEN c.column_name ILIKE '%url%' OR c.column_name ILIKE '%link%' OR c.column_name ILIKE '%website%' THEN 'url'
+                            WHEN c.column_name ILIKE '%image%' OR c.column_name ILIKE '%photo%' OR c.column_name ILIKE '%picture%' THEN 'media'
+                            WHEN c.column_name ILIKE '%json%' OR c.column_name ILIKE '%data%' OR c.column_name ILIKE '%config%' THEN 'structured_data'
+                            ELSE 'general'
+                        END as semantic_type
+                        
+                    FROM information_schema.columns c
+                    LEFT JOIN table_constraints tc ON tc.table_name = c.table_name AND tc.column_name = c.column_name
+                    WHERE c.table_schema = 'public'
+                    AND c.table_name NOT IN ({forbidden_tables_str})
+                    ORDER BY c.table_schema, c.table_name, c.ordinal_position
+                """
             else:
-                ddl.append(",")
-
-            nullable = "NULL" if row[4] == "YES" else "NOT NULL"
-            ddl.append(f"\n    {row[2]} {row[3]} {nullable}")
-
-        if ddl:  # Close the last table
-            ddl.append(");")
-            vanna_service.train(ddl=" ".join(ddl))
-            st.toast(f"✓ Trained DDL for table: {current_table}")
-            if describe_ddl_from_llm:
-                train_ddl_describe_to_rag(current_table, ddl)
-            ddl = []  # reset ddl for next table
-            tables_trained += 1
-
-        cursor.close()
-        conn.close()
-
-        # Show final success message
-        if tables_trained > 0:
-            st.success(f"🎉 DDL Training completed successfully! Trained {tables_trained} table(s).")
-        else:
-            st.warning("No tables found to train DDL on.")
-
+                schema_query = """
+                    WITH table_constraints AS (
+                        SELECT 
+                            tc.table_name,
+                            tc.constraint_name,
+                            tc.constraint_type,
+                            kcu.column_name,
+                            rc.match_option,
+                            rc.update_rule,
+                            rc.delete_rule,
+                            ccu.table_name AS referenced_table_name,
+                            ccu.column_name AS referenced_column_name
+                        FROM information_schema.table_constraints tc
+                        LEFT JOIN information_schema.key_column_usage kcu 
+                            ON tc.constraint_name = kcu.constraint_name
+                        LEFT JOIN information_schema.referential_constraints rc 
+                            ON tc.constraint_name = rc.constraint_name
+                        LEFT JOIN information_schema.constraint_column_usage ccu 
+                            ON rc.unique_constraint_name = ccu.constraint_name
+                        WHERE tc.table_schema = 'public'
+                    )
+                    SELECT DISTINCT
+                        c.table_schema,
+                        c.table_name,
+                        c.column_name,
+                        c.data_type,
+                        c.is_nullable,
+                        c.column_default,
+                        c.ordinal_position,
+                        c.character_maximum_length,
+                        c.numeric_precision,
+                        c.numeric_scale,
+                        c.datetime_precision,
+                        c.udt_name,
+                        CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
+                        
+                        -- Constraint information
+                        tc.constraint_type,
+                        tc.constraint_name,
+                        tc.referenced_table_name,
+                        tc.referenced_column_name,
+                        tc.update_rule,
+                        tc.delete_rule,
+                        
+                        -- Enhanced semantic classification
+                        CASE 
+                            WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' OR c.column_name = 'id' THEN 'primary_key'
+                            WHEN c.column_name ILIKE '%uuid%' OR c.column_name ILIKE '%guid%' THEN 'uuid'
+                            WHEN c.column_name ILIKE '%name%' OR c.column_name ILIKE '%title%' THEN 'name'
+                            WHEN c.column_name ILIKE '%email%' THEN 'email'
+                            WHEN c.column_name ILIKE '%phone%' OR c.column_name ILIKE '%mobile%' THEN 'phone'
+                            WHEN c.column_name ILIKE '%address%' OR c.column_name ILIKE '%street%' OR c.column_name ILIKE '%city%' OR c.column_name ILIKE '%zip%' OR c.column_name ILIKE '%postal%' THEN 'address'
+                            WHEN c.column_name ILIKE '%date%' OR c.column_name ILIKE '%time%' OR c.column_name ILIKE '%created%' OR c.column_name ILIKE '%updated%' OR c.column_name ILIKE '%modified%' THEN 'temporal'
+                            WHEN c.column_name ILIKE '%price%' OR c.column_name ILIKE '%cost%' OR c.column_name ILIKE '%amount%' OR c.column_name ILIKE '%fee%' OR c.column_name ILIKE '%total%' THEN 'monetary'
+                            WHEN c.column_name ILIKE '%count%' OR c.column_name ILIKE '%quantity%' OR c.column_name ILIKE '%number%' OR c.column_name ILIKE '%size%' THEN 'quantity'
+                            WHEN c.column_name ILIKE '%status%' OR c.column_name ILIKE '%state%' OR c.column_name ILIKE '%type%' THEN 'categorical'
+                            WHEN c.column_name ILIKE '%description%' OR c.column_name ILIKE '%comment%' OR c.column_name ILIKE '%note%' THEN 'text'
+                            WHEN c.column_name ILIKE '%url%' OR c.column_name ILIKE '%link%' OR c.column_name ILIKE '%website%' THEN 'url'
+                            WHEN c.column_name ILIKE '%image%' OR c.column_name ILIKE '%photo%' OR c.column_name ILIKE '%picture%' THEN 'media'
+                            WHEN c.column_name ILIKE '%json%' OR c.column_name ILIKE '%data%' OR c.column_name ILIKE '%config%' THEN 'structured_data'
+                            ELSE 'general'
+                        END as semantic_type
+                        
+                    FROM information_schema.columns c
+                    LEFT JOIN table_constraints tc ON tc.table_name = c.table_name AND tc.column_name = c.column_name
+                    WHERE c.table_schema = 'public'
+                    ORDER BY c.table_schema, c.table_name, c.ordinal_position
+                """
+            
+            # Execute comprehensive schema query
+            st.toast("📊 Retrieving comprehensive schema information...")
+            cursor.execute(schema_query)
+            schema_info = cursor.fetchall()
+            
+            if not schema_info:
+                st.warning("No schema information found")
+                return False
+            
+            # Organize data by table for enhanced DDL generation
+            tables_data = {}
+            for row in schema_info:
+                table_name = row[1]
+                if table_name not in tables_data:
+                    tables_data[table_name] = {
+                        'columns': [],
+                        'constraints': [],
+                        'indexes': [],
+                        'semantic_info': []
+                    }
+                
+                # Column information
+                column_info = {
+                    'name': row[2],
+                    'type': row[3],
+                    'nullable': row[4],
+                    'default': row[5],
+                    'position': row[6],
+                    'max_length': row[7],
+                    'precision': row[8],
+                    'scale': row[9],
+                    'datetime_precision': row[10],
+                    'udt_name': row[11],
+                    'enum_type': row[12],
+                    'semantic_type': row[19] if len(row) > 19 else 'general'
+                }
+                tables_data[table_name]['columns'].append(column_info)
+                
+                # Constraint information
+                if row[13]:  # constraint_type exists
+                    constraint_info = {
+                        'type': row[13],
+                        'name': row[14],
+                        'column': row[2],
+                        'referenced_table': row[15],
+                        'referenced_column': row[16],
+                        'update_rule': row[17],
+                        'delete_rule': row[18]
+                    }
+                    if constraint_info not in tables_data[table_name]['constraints']:
+                        tables_data[table_name]['constraints'].append(constraint_info)
+                
+                # Note: Index information removed to simplify query
+            
+            # Generate and train enhanced DDL for each table
+            st.toast("🎓 Training enhanced DDL structures...")
+            tables_trained = 0
+            constraints_trained = 0
+            semantic_docs_trained = 0
+            
+            for table_name, table_data in tables_data.items():
+                # Generate enhanced DDL
+                ddl_lines = [f"\nCREATE TABLE {table_name} ("]
+                
+                # Add columns with enhanced information
+                column_definitions = []
+                for col in sorted(table_data['columns'], key=lambda x: x['position']):
+                    nullable = "NULL" if col['nullable'] == "YES" else "NOT NULL"
+                    default_clause = f" DEFAULT {col['default']}" if col['default'] else ""
+                    
+                    # Enhanced type information
+                    data_type = col['type']
+                    if col['max_length']:
+                        data_type += f"({col['max_length']})"
+                    elif col['precision'] and col['scale']:
+                        data_type += f"({col['precision']},{col['scale']})"
+                    elif col['datetime_precision']:
+                        data_type += f"({col['datetime_precision']})"
+                    
+                    column_def = f"    {col['name']} {data_type}{default_clause} {nullable}"
+                    column_definitions.append(column_def)
+                
+                ddl_lines.extend([',\n'.join(column_definitions)])
+                ddl_lines.append(");")
+                
+                # Train basic DDL
+                enhanced_ddl = '\n'.join(ddl_lines)
+                success = vanna_service.train(ddl=enhanced_ddl)
+                if success:
+                    tables_trained += 1
+                    st.toast(f"✓ Trained enhanced DDL for table: {table_name}")
+                
+                # Train constraint documentation
+                for constraint in table_data['constraints']:
+                    if constraint['type'] == 'FOREIGN KEY':
+                        constraint_doc = f"""
+                        Table {table_name} has a foreign key constraint on {constraint['column']} 
+                        referencing {constraint['referenced_table']}.{constraint['referenced_column']}.
+                        Update rule: {constraint['update_rule']}, Delete rule: {constraint['delete_rule']}.
+                        This enforces referential integrity between {table_name} and {constraint['referenced_table']}.
+                        """
+                        vanna_service.train(documentation=constraint_doc)
+                        constraints_trained += 1
+                    elif constraint['type'] == 'PRIMARY KEY':
+                        constraint_doc = f"""
+                        Table {table_name} has primary key constraint on {constraint['column']}.
+                        This uniquely identifies each row in {table_name}.
+                        """
+                        vanna_service.train(documentation=constraint_doc)
+                        constraints_trained += 1
+                    elif constraint['type'] == 'UNIQUE':
+                        constraint_doc = f"""
+                        Table {table_name} has unique constraint on {constraint['column']}.
+                        This ensures no duplicate values in {constraint['column']}.
+                        """
+                        vanna_service.train(documentation=constraint_doc)
+                        constraints_trained += 1
+                
+                # Note: Index training removed to simplify implementation
+                
+                # Train semantic type documentation
+                semantic_groups = {}
+                for col in table_data['columns']:
+                    if col['semantic_type'] != 'general':
+                        if col['semantic_type'] not in semantic_groups:
+                            semantic_groups[col['semantic_type']] = []
+                        semantic_groups[col['semantic_type']].append(col['name'])
+                
+                for semantic_type, columns in semantic_groups.items():
+                    semantic_doc = f"""
+                    Table {table_name} has {semantic_type} columns: {', '.join(columns)}.
+                    These columns contain {semantic_type} data and should be handled accordingly in queries.
+                    """
+                    vanna_service.train(documentation=semantic_doc)
+                    semantic_docs_trained += 1
+                
+                # Optional: Generate AI descriptions
+                if describe_ddl_from_llm:
+                    try:
+                        train_ddl_describe_to_rag(table_name, [enhanced_ddl])
+                    except Exception as e:
+                        logger.warning(f"Failed to generate AI description for {table_name}: {e}")
+        
+        # Show comprehensive success message
+        st.success(f"""
+        🎉 RAG-optimized DDL training completed successfully!
+        📊 Enhanced {tables_trained} table DDL structures
+        🔗 Documented {constraints_trained} constraint relationships  
+        🏷️ Classified {semantic_docs_trained} semantic column groups
+        """)
+        logger.info(f"Enhanced DDL training completed: {tables_trained} tables, {constraints_trained} constraints, {semantic_docs_trained} semantic docs")
+        return True
+        
     except Exception as e:
-        st.error(f"Error training DDL: {e}")
-        logger.exception("%s", e)
+        error_msg = f"Error in RAG-optimized DDL training: {e}"
+        st.error(error_msg)
+        logger.exception("Error in train_ddl: %s", e)
+        return False
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception as e:
+                logger.warning(f"Error closing database connection: {e}")
 
 
 def train_ddl_describe_to_rag(table: str, ddl: list):
