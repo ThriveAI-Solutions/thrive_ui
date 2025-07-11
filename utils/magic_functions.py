@@ -15,12 +15,8 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
-import seaborn as sns
-import matplotlib.pyplot as plt
-import io
-import base64
 from orm.models import Message
-from utils.chat_bot_helper import add_message, vn
+from utils.chat_bot_helper import add_message, set_question, vn
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import read_forbidden_from_json, run_sql_cached
 
@@ -159,26 +155,86 @@ def is_magic_do_magic(question, previous_df=None):
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR))
         return False
-
+    
+def _clear(question, tuple, previous_df):
+    """
+    Clear the message history in the chat window.
+    """
+    try:
+        set_question(None)
+        st.rerun()
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error clearing messages: {str(e)}", MessageType.ERROR))
+        return False
 
 def _help(question, tuple, previous_df):
     try:
-        help_lines = ["MAGIC COMMANDS", "=" * 50, "", "Usage: /<command> [arguments]", "", "Available commands:"]
+        help_lines = ["MAGIC COMMANDS", "=" * 50, "", "Usage: /<command> [arguments]", ""]
+        
+        # Group commands by category
+        commands_by_category = {}
+        for pattern, meta in MAGIC_RENDERERS.items():
+            category = meta.get("category", "Other")
+            if category not in commands_by_category:
+                commands_by_category[category] = []
+            commands_by_category[category].append((pattern, meta))
+        
+        # Define category order
+        category_order = [
+            "Help & System Commands",
+            "Database Exploration", 
+            "Data Exploration & Basic Info",
+            "Data Quality & Preprocessing",
+            "Statistical Analysis",
+            "Visualizations",
+            "Machine Learning",
+            "Comprehensive Reporting"
+        ]
+        
         # Find the longest usage string for alignment
-        usages = [(usage_from_pattern(pattern), meta["description"]) for pattern, meta in MAGIC_RENDERERS.items()]
-
-        max_usage_len = max(len(usage) for usage, _ in usages) if usages else 0
-
-        for usage, description in usages:
-            # Format: "  /command <args>    Description here"
-            help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
-
+        all_usages = [(usage_from_pattern(pattern), meta["description"]) for pattern, meta in MAGIC_RENDERERS.items()]
+        max_usage_len = max(len(usage) for usage, _ in all_usages) if all_usages else 0
+        
+        # Display commands by category
+        for category in category_order:
+            if category in commands_by_category:
+                help_lines.append(f"📂 {category.upper()}")
+                help_lines.append("-" * (len(category) + 4))
+                
+                for pattern, meta in commands_by_category[category]:
+                    usage = usage_from_pattern(pattern)
+                    description = meta["description"]
+                    help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
+                
+                help_lines.append("")
+        
+        # Add any remaining categories not in the order
+        for category, commands in commands_by_category.items():
+            if category not in category_order:
+                help_lines.append(f"📂 {category.upper()}")
+                help_lines.append("-" * (len(category) + 4))
+                
+                for pattern, meta in commands:
+                    usage = usage_from_pattern(pattern)
+                    description = meta["description"]
+                    help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
+                
+                help_lines.append("")
+        
+        help_lines.append("💡 EXAMPLES")
+        help_lines.append("-" * 12)
+        
+        # Show examples for each category
+        for category in category_order:
+            if category in commands_by_category:
+                # Find the first command in this category that has show_example: True
+                for pattern, meta in commands_by_category[category]:
+                    if meta.get("show_example", False):
+                        example_text = generate_example_from_pattern(pattern, meta["sample_values"])
+                        help_lines.append(f"  {example_text}")
+        
         help_lines.append("")
-        help_lines.append("Examples:")
-
-        for key, meta in MAGIC_RENDERERS.items():
-            example_text = generate_example_from_pattern(key, meta["sample_values"])
-            help_lines.append(f"  {example_text:<{max_usage_len + 2}}")
+        help_lines.append("For follow-up commands after running a query, use: /followuphelp")
 
         add_message(Message(RoleType.ASSISTANT, "\n".join(help_lines), MessageType.PYTHON, None, question, None, 0))
     except Exception as e:
@@ -188,12 +244,16 @@ def _help(question, tuple, previous_df):
 def _followup_help(question, tuple, previous_df):
     """Show available follow-up commands that can be used after running a query."""
     try:
-        help_lines = ["FOLLOW-UP COMMANDS", "=" * 50, "", "Usage: /followup <command> [arguments]", "", "Available follow-up commands:"]
+        help_lines = ["FOLLOW-UP COMMANDS", "=" * 50, "", "Usage: /followup <command> [arguments]", ""]
         
-        # Create usage patterns for follow-up commands
-        followup_usages = []
+        # Group follow-up commands by category
+        commands_by_category = {}
         for pattern, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
-            # Remove the regex anchors and convert to readable format
+            category = meta.get("category", "Other")
+            if category not in commands_by_category:
+                commands_by_category[category] = []
+            
+            # Convert pattern to readable usage
             usage = pattern.replace("^", "").replace("$", "")
             usage = re.sub(r"\\s\+", " ", usage)
             usage = re.sub(r"\(\?P<(\w+)>[^\)]+\)", r"<\1>", usage)
@@ -208,30 +268,48 @@ def _followup_help(question, tuple, previous_df):
                     description = main_meta["description"]
                     break
             
-            followup_usages.append((usage, description))
+            commands_by_category[category].append((usage, description))
+        
+        # Define category order (same as main help)
+        category_order = [
+            "Data Exploration & Basic Info",
+            "Data Quality & Preprocessing",
+            "Statistical Analysis",
+            "Visualizations",
+            "Machine Learning",
+            "Reporting"
+        ]
         
         # Find the longest usage string for alignment
-        max_usage_len = max(len(usage) for usage, _ in followup_usages) if followup_usages else 0
+        all_usages = []
+        for category_commands in commands_by_category.values():
+            for usage, _ in category_commands:
+                all_usages.append(usage)
+        max_usage_len = max(len(usage) for usage in all_usages) if all_usages else 0
         
-        for usage, description in followup_usages:
-            # Format: "  command <args>    Description here"
-            help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
+        # Display commands by category
+        for category in category_order:
+            if category in commands_by_category:
+                help_lines.append(f"📂 {category.upper()}")
+                help_lines.append("-" * (len(category) + 4))
+                
+                for usage, description in commands_by_category[category]:
+                    help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
+                
+                help_lines.append("")
         
-        help_lines.append("")
-        help_lines.append("Examples (use after running a query):")
-        help_lines.append("  /followup describe                    Get descriptive statistics")
-        help_lines.append("  /followup heatmap                     Generate correlation heatmap")
-        help_lines.append("  /followup distribution age            Analyze age distribution")
-        help_lines.append("  /followup outliers salary             Detect outliers in salary")
-        help_lines.append("  /followup correlation age salary      Analyze correlation between age and salary")
-        help_lines.append("  /followup clusters                    Perform clustering analysis")
-        help_lines.append("  /followup pca                         Principal component analysis")
-        help_lines.append("  /followup missing                     Analyze missing data patterns")
-        help_lines.append("  /followup duplicates                  Find duplicate records")
-        help_lines.append("  /followup wordcloud department        Generate word cloud for department")
-        help_lines.append("  /followup boxplot salary              Create box plot for salary")
-        help_lines.append("")
-        help_lines.append("Note: Follow-up commands work on the data from your previous query result.")
+        # Add any remaining categories not in the order
+        for category, commands in commands_by_category.items():
+            if category not in category_order:
+                help_lines.append(f"📂 {category.upper()}")
+                help_lines.append("-" * (len(category) + 4))
+                
+                for usage, description in commands:
+                    help_lines.append(f"  {usage:<{max_usage_len + 2}} {description}")
+                
+                help_lines.append("")
+        
+        help_lines.append("ℹ️  Note: Follow-up commands work on the data from your previous query result.")
         
         add_message(Message(RoleType.ASSISTANT, "\n".join(help_lines), MessageType.PYTHON, None, question, None, 0))
     except Exception as e:
@@ -3792,116 +3870,148 @@ FOLLOW_UP_MAGIC_RENDERERS = {
     # ==================== DATA EXPLORATION & BASIC INFO ====================
     r"^head$": {
         "func": _head,
+        "category": "Data Exploration & Basic Info",
     },
     r"^describe$": {
         "func": _describe_table,
+        "category": "Data Exploration & Basic Info",
     },
     r"^profile$": {
         "func": _profile_table,
+        "category": "Data Exploration & Basic Info",
     },
     r"^datatypes$": {
         "func": _analyze_datatypes,
+        "category": "Data Exploration & Basic Info",
     },
     
     # ==================== DATA QUALITY & PREPROCESSING ====================
     r"^missing$": {
         "func": _missing_analysis,
+        "category": "Data Quality & Preprocessing",
     },
     r"^duplicates$": {
         "func": _duplicate_analysis,
+        "category": "Data Quality & Preprocessing",
     },
     r"^outliers\s+(?P<column>\w+)$": {
         "func": _outlier_detection,
+        "category": "Data Quality & Preprocessing",
     },
     r"^anomaly\s+(?P<column>\w+)$": {
         "func": _anomaly_detection,
+        "category": "Data Quality & Preprocessing",
     },
     r"^sample\s+(?P<percentage>\d+)$": {
         "func": _smart_sample,
+        "category": "Data Quality & Preprocessing",
     },
     r"^transform\s+(?P<column>\w+)\.(?P<operation>\w+)$": {
         "func": _transform_data,
+        "category": "Data Quality & Preprocessing",
     },
     
     # ==================== STATISTICAL ANALYSIS ====================
     r"^distribution\s+(?P<column>\w+)$": {
         "func": _distribution_analysis,
+        "category": "Statistical Analysis",
     },
     r"^correlation\s+(?P<column1>\w+)\.(?P<column2>\w+)$": {
         "func": _correlation_analysis,
+        "category": "Statistical Analysis",
     },
     
     # ==================== VISUALIZATIONS ====================
     # Basic Plots
     r"^boxplot\s+(?P<column>\w+)$": {
         "func": _boxplot_visualization,
+        "category": "Visualizations",
     },
     r"^violin\s+(?P<column>\w+)$": {
         "func": _violin_plot,
+        "category": "Visualizations",
     },
     r"^heatmap$": {
         "func": _generate_heatmap,
+        "category": "Visualizations",
     },
     r"^wordcloud$": {
         "func": _generate_wordcloud,
+        "category": "Visualizations",
     },
     r"^wordcloud\s+(?P<column>\w+)$": {
         "func": _generate_wordcloud_column,
+        "category": "Visualizations",
     },
     
     # Multi-variable Plots
     r"^pairplot\s+(?P<column>\w+)$": {
         "func": _generate_pairplot,
+        "category": "Visualizations",
     },
     r"^scatter\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_scatterplot,
+        "category": "Visualizations",
     },
     r"^bar\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_bar,
+        "category": "Visualizations",
     },
     r"^line\s+(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_line,
+        "category": "Visualizations",
     },
     
     # ==================== MACHINE LEARNING ====================
     r"^clusters$": {
         "func": _cluster_analysis,
+        "category": "Machine Learning",
     },
     r"^pca$": {
         "func": _pca_analysis,
+        "category": "Machine Learning",
     },
     
     # ==================== REPORTING ====================
     r"^report$": {
         "func": _generate_report,
+        "category": "Reporting",
     },
     r"^summary$": {
         "func": _generate_summary,
+        "category": "Reporting",
     },
 }
 
 # TODO: confusion matrix?
 MAGIC_RENDERERS = {
     # ==================== HELP & SYSTEM COMMANDS ====================
-    r"^/help$": {"func": _help, "description": "Show available magic commands", "sample_values": {}},
-    r"^/followuphelp$": {"func": _followup_help, "description": "Show available follow-up commands for use after queries", "sample_values": {}},
+    r"^/clear$": {"func": _clear, "description": "Clear message history in window", "sample_values": {}, "category": "Help & System Commands", "show_example": False},
+    r"^/help$": {"func": _help, "description": "Show available magic commands", "sample_values": {}, "category": "Help & System Commands", "show_example": False},
+    r"^/followuphelp$": {"func": _followup_help, "description": "Show available follow-up commands for use after queries", "sample_values": {}, "category": "Help & System Commands", "show_example": False},
     r"^/followup\s+(?P<command>.+)$": {
         "func": _followup,
         "description": "Ask a follow up question to the previous result set.  Also accepts magic commands ie: heatmap/wordcloud.",
         "sample_values": {"command": "how do these results compare to the national averages?"},
+        "category": "Help & System Commands",
+        "show_example": True,
     },
     
     # ==================== DATABASE EXPLORATION ====================
-    r"^/tables$": {"func": _tables, "description": "Show all available tables", "sample_values": {}},
+    r"^/tables$": {"func": _tables, "description": "Show all available tables", "sample_values": {}, "category": "Database Exploration", "show_example": False},
     r"^/columns\s+(?P<table>.+)$": {
         "func": _columns,
         "description": "Show all available columns on a given table",
         "sample_values": {"table": "wny_health"},
+        "category": "Database Exploration",
+        "show_example": False,
     },
     r"^/head\s+(?P<table>.+)$": {
         "func": _head,
         "description": "Show the first 5 rows of a given table",
         "sample_values": {"table": "wny_health"},
+        "category": "Database Exploration",
+        "show_example": False,
     },
     
     # ==================== DATA EXPLORATION & BASIC INFO ====================
@@ -3909,16 +4019,22 @@ MAGIC_RENDERERS = {
         "func": _describe_table,
         "description": "Generate comprehensive descriptive statistics for a table",
         "sample_values": {"table": "wny_health"},
+        "category": "Data Exploration & Basic Info",
+        "show_example": True,
     },
     r"^/profile\s+(?P<table>\w+)$": {
         "func": _profile_table,
         "description": "Generate comprehensive data profiling report",
         "sample_values": {"table": "wny_health"},
+        "category": "Data Exploration & Basic Info",
+        "show_example": True,
     },
     r"^/datatypes\s+(?P<table>\w+)$": {
         "func": _analyze_datatypes,
         "description": "Analyze and suggest optimal data types for columns",
         "sample_values": {"table": "wny_health"},
+        "category": "Data Exploration & Basic Info",
+        "show_example": True,
     },
     
     # ==================== DATA QUALITY & PREPROCESSING ====================
@@ -3926,31 +4042,43 @@ MAGIC_RENDERERS = {
         "func": _missing_analysis,
         "description": "Analyze missing data patterns and create visualizations",
         "sample_values": {"table": "wny_health"},
+        "category": "Data Quality & Preprocessing",
+        "show_example": True,
     },
     r"^/duplicates\s+(?P<table>\w+)$": {
         "func": _duplicate_analysis,
         "description": "Analyze duplicate rows and values in the dataset",
         "sample_values": {"table": "wny_health"},
+        "category": "Data Quality & Preprocessing",
+        "show_example": True,
     },
     r"^/outliers\s+(?P<table>\w+)\.(?P<column>\w+)$": {
         "func": _outlier_detection,
         "description": "Detect outliers using multiple statistical methods",
         "sample_values": {"table": "wny_health", "column": "age"},
+        "category": "Data Quality & Preprocessing",
+        "show_example": True,
     },
     r"^/anomaly\s+(?P<table>\w+)\.(?P<column>\w+)$": {
         "func": _anomaly_detection,
         "description": "Anomaly detection using statistical and ML methods",
         "sample_values": {"table": "wny_health", "column": "age"},
+        "category": "Data Quality & Preprocessing",
+        "show_example": True,
     },
     r"^/sample\s+(?P<table>\w+)\.(?P<percentage>\d+)$": {
         "func": _smart_sample,
         "description": "Smart sampling with stratification options",
         "sample_values": {"table": "wny_health", "percentage": "10"},
+        "category": "Data Quality & Preprocessing",
+        "show_example": True,
     },
     r"^/transform\s+(?P<table>\w+)\.(?P<column>\w+)\.(?P<operation>\w+)$": {
         "func": _transform_data,
         "description": "Data transformation operations (log, sqrt, normalize, etc.)",
         "sample_values": {"table": "wny_health", "column": "age", "operation": "log"},
+        "category": "Data Quality & Preprocessing",
+        "show_example": True,
     },
     
     # ==================== STATISTICAL ANALYSIS ====================
@@ -3958,11 +4086,15 @@ MAGIC_RENDERERS = {
         "func": _distribution_analysis,
         "description": "Analyze distribution of a specific column with statistical tests",
         "sample_values": {"table": "wny_health", "column": "age"},
+        "category": "Statistical Analysis",
+        "show_example": True,
     },
     r"^/correlation\s+(?P<table>\w+)\.(?P<column1>\w+)\.(?P<column2>\w+)$": {
         "func": _correlation_analysis,
         "description": "Detailed correlation analysis with p-values and confidence intervals",
         "sample_values": {"table": "wny_health", "column1": "age", "column2": "zip_code"},
+        "category": "Statistical Analysis",
+        "show_example": True,
     },
     
     # ==================== VISUALIZATIONS ====================
@@ -3971,11 +4103,15 @@ MAGIC_RENDERERS = {
         "func": _boxplot_visualization,
         "description": "Create box plot with statistical annotations",
         "sample_values": {"table": "wny_health", "column": "obesity"},
+        "category": "Visualizations",
+        "show_example": True,
     },
     r"^/violin\s+(?P<table>\w+)\.(?P<column>\w+)$": {
         "func": _violin_plot,
         "description": "Violin plots showing distribution shapes",
         "sample_values": {"table": "wny_health", "column": "age"},
+        "category": "Visualizations",
+        "show_example": True,
     },
     
     # Multi-Variable & Correlation Plots
@@ -3983,26 +4119,36 @@ MAGIC_RENDERERS = {
         "func": _generate_heatmap,
         "description": "Generate a correlation heatmap visualization for a table.",
         "sample_values": {"table": "wny_health"},
+        "category": "Visualizations",
+        "show_example": True,
     },
     r"^/pairplot\s+(?P<table>\w+)\.(?P<column>\w+)$": {
         "func": _generate_pairplot,
         "description": "Generate a pairplot visualization for a table column.",
         "sample_values": {"table": "wny_health", "column": "county"},
+        "category": "Visualizations",
+        "show_example": True,
     },
     r"^/scatter\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_scatterplot,
         "description": "Generate a scatterplot visualization for a table x and y axis.",
         "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
+        "category": "Visualizations",
+        "show_example": True,
     },
     r"^/bar\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_bar,
         "description": "Generate a bar chart visualization for a table x and y axis.",
         "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
+        "category": "Visualizations",
+        "show_example": True,
     },
     r"^/line\s+(?P<table>\w+)\.(?P<x>\w+)\.(?P<y>\w+)\.(?P<color>\w+)$": {
         "func": _generate_line,
         "description": "Generate a line chart visualization for a table x and y axis.",
         "sample_values": {"table": "wny_health", "x": "county", "y": "obesity", "color": "age"},
+        "category": "Visualizations",
+        "show_example": True,
     },
     
     # Text & Word Analysis
@@ -4012,11 +4158,15 @@ MAGIC_RENDERERS = {
         "sample_values": {
             "table": "wny_health",
         },
+        "category": "Visualizations",
+        "show_example": True,
     },
     r"^/wordcloud\s+(?P<table>\w+)\.(?P<column>\w+)$": {
         "func": _generate_wordcloud_column,
         "description": "Generate a wordcloud visualization for a table column.",
         "sample_values": {"table": "wny_health", "column": "county"},
+        "category": "Visualizations",
+        "show_example": False,
     },
     
     # ==================== MACHINE LEARNING ====================
@@ -4024,11 +4174,15 @@ MAGIC_RENDERERS = {
         "func": _cluster_analysis,
         "description": "Perform K-means clustering analysis with optimal cluster selection",
         "sample_values": {"table": "wny_health"},
+        "category": "Machine Learning",
+        "show_example": True,
     },
     r"^/pca\s+(?P<table>\w+)$": {
         "func": _pca_analysis,
         "description": "Perform Principal Component Analysis and visualize results",
         "sample_values": {"table": "wny_health"},
+        "category": "Machine Learning",
+        "show_example": True,
     },
     
     # ==================== COMPREHENSIVE REPORTING ====================
@@ -4036,11 +4190,15 @@ MAGIC_RENDERERS = {
         "func": _generate_report,
         "description": "Generate comprehensive data analysis report",
         "sample_values": {"table": "wny_health"},
+        "category": "Comprehensive Reporting",
+        "show_example": True,
     },
     r"^/summary\s+(?P<table>\w+)$": {
         "func": _generate_summary,
         "description": "Executive summary of key findings and insights",
         "sample_values": {"table": "wny_health"},
+        "category": "Comprehensive Reporting",
+        "show_example": True,
     },
     
     # Add more as needed...
