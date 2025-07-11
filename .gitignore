@@ -188,3 +188,5 @@ INSTRUCTIONS.md
 tmp/
 
 GEMINI.md
+CLAUDE.md
+.claude/settings.local.json

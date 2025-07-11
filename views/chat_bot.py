@@ -98,7 +98,7 @@ with st.sidebar.expander("Settings"):
     st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
     st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
-st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True, type="primary")
+st.sidebar.button("Clear", on_click=lambda: set_question(None), use_container_width=True, type="primary")
 
 if st.session_state.get("voice_input", True):
     with st.sidebar.popover("🎤 Speak Your Question", use_container_width=True):
