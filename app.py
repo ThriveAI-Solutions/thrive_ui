@@ -1,7 +1,5 @@
 import logging
-
 import streamlit as st
-
 from utils.logging_config import setup_logging
 
 # Set the page configuration to wide mode
