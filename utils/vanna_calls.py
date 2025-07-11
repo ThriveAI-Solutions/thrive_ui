@@ -75,6 +75,24 @@ def extract_vanna_config_from_secrets() -> dict:
     }
 
 
+def get_configured_schema() -> str:
+    """Get the configured database schema name from secrets."""
+    schema_name = st.secrets.get("postgres", {}).get("schema_name", "public")
+    if not schema_name or not isinstance(schema_name, str):
+        logger.warning(f"Invalid schema_name '{schema_name}', defaulting to 'public'")
+        schema_name = "public"
+    return schema_name
+
+
+def get_configured_object_type() -> str:
+    """Get the configured database object type (tables or views) from secrets."""
+    object_type = st.secrets.get("postgres", {}).get("object_type", "tables").lower()
+    if object_type not in ["tables", "views"]:
+        logger.warning(f"Invalid object_type '{object_type}', defaulting to 'tables'")
+        object_type = "tables"
+    return object_type
+
+
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
     def __init__(self, config=None):
         try:
@@ -661,10 +679,18 @@ def training_plan():
             logger.warning(f"Error reading forbidden tables: {e}")
             forbidden_tables_str = ""
         
+        # Get object type and schema configuration
+        object_type = get_configured_object_type()
+        schema_name = get_configured_schema()
+        
+        object_name = "table" if object_type == "tables" else "view"
+        logger.info(f"Training plan will process {object_type} in schema '{schema_name}'")
+        
         # Build enhanced schema query with relationships and semantic information
-        if forbidden_tables_str:
-            enhanced_query = f"""
-                WITH foreign_keys AS (
+        # Note: Views don't have constraints like foreign keys or primary keys
+        if object_type == "tables":
+            constraint_ctes = """
+                foreign_keys AS (
                     SELECT
                         tc.table_name,
                         kcu.column_name,
@@ -675,7 +701,7 @@ def training_plan():
                     JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
                     JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
                     WHERE tc.constraint_type = 'FOREIGN KEY'
-                    AND tc.table_schema = 'public'
+                    AND tc.table_schema = '{schema_name}'
                 ),
                 primary_keys AS (
                     SELECT
@@ -685,7 +711,36 @@ def training_plan():
                     FROM information_schema.table_constraints tc
                     JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
                     WHERE tc.constraint_type = 'PRIMARY KEY'
-                    AND tc.table_schema = 'public'
+                    AND tc.table_schema = '{schema_name}'
+                ),"""
+            constraint_joins = """
+                LEFT JOIN foreign_keys fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
+                LEFT JOIN primary_keys pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name"""
+            constraint_columns = """
+                    -- Constraints and relationships  
+                    pk.constraint_name as primary_key,
+                    fk.referenced_table,
+                    fk.referenced_column,
+                    fk.constraint_name as foreign_key_name,"""
+            table_filter = f"AND c.table_name IN (SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema_name}' AND table_type = 'BASE TABLE')"
+        else:  # views
+            constraint_ctes = ""
+            constraint_joins = ""
+            constraint_columns = """
+                    -- Views don't have constraints
+                    NULL as primary_key,
+                    NULL as referenced_table,
+                    NULL as referenced_column,  
+                    NULL as foreign_key_name,"""
+            table_filter = f"AND c.table_name IN (SELECT table_name FROM information_schema.views WHERE table_schema = '{schema_name}')"
+
+        if forbidden_tables_str:
+            enhanced_query = f"""
+                WITH {constraint_ctes}
+                object_filter AS (
+                    SELECT table_name FROM information_schema.{object_type} 
+                    WHERE table_schema = '{schema_name}' 
+                    AND table_name NOT IN ({forbidden_tables_str})
                 )
                 SELECT DISTINCT
                     c.table_catalog as database_name,
@@ -700,13 +755,7 @@ def training_plan():
                     c.numeric_precision,
                     c.numeric_scale,
                     CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
-                    
-                    -- Constraints and relationships
-                    pk.constraint_name as primary_key,
-                    fk.referenced_table,
-                    fk.referenced_column,
-                    fk.constraint_name as foreign_key_name,
-                    
+                    {constraint_columns}
                     -- Semantic indicators based on column names
                     CASE 
                         WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' THEN 'identifier'
@@ -722,36 +771,17 @@ def training_plan():
                     END as semantic_type
                     
                 FROM information_schema.columns c
-                LEFT JOIN foreign_keys fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
-                LEFT JOIN primary_keys pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
-                WHERE c.table_schema = 'public'
-                AND c.table_name NOT IN ({forbidden_tables_str})
+                JOIN object_filter o ON o.table_name = c.table_name
+                {constraint_joins}
+                WHERE c.table_schema = '{schema_name}'
                 ORDER BY c.table_schema, c.table_name, c.ordinal_position
             """
         else:
-            enhanced_query = """
-                WITH foreign_keys AS (
-                    SELECT
-                        tc.table_name,
-                        kcu.column_name,
-                        ccu.table_name AS referenced_table,
-                        ccu.column_name AS referenced_column,
-                        tc.constraint_name
-                    FROM information_schema.table_constraints tc
-                    JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-                    JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
-                    WHERE tc.constraint_type = 'FOREIGN KEY'
-                    AND tc.table_schema = 'public'
-                ),
-                primary_keys AS (
-                    SELECT
-                        tc.table_name,
-                        kcu.column_name,
-                        tc.constraint_name
-                    FROM information_schema.table_constraints tc
-                    JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
-                    WHERE tc.constraint_type = 'PRIMARY KEY'
-                    AND tc.table_schema = 'public'
+            enhanced_query = f"""
+                WITH {constraint_ctes}
+                object_filter AS (
+                    SELECT table_name FROM information_schema.{object_type} 
+                    WHERE table_schema = '{schema_name}'
                 )
                 SELECT DISTINCT
                     c.table_catalog as database_name,
@@ -766,13 +796,7 @@ def training_plan():
                     c.numeric_precision,
                     c.numeric_scale,
                     CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
-                    
-                    -- Constraints and relationships
-                    pk.constraint_name as primary_key,
-                    fk.referenced_table,
-                    fk.referenced_column,
-                    fk.constraint_name as foreign_key_name,
-                    
+                    {constraint_columns}
                     -- Semantic indicators based on column names
                     CASE 
                         WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' THEN 'identifier'
@@ -788,9 +812,9 @@ def training_plan():
                     END as semantic_type
                     
                 FROM information_schema.columns c
-                LEFT JOIN foreign_keys fk ON fk.table_name = c.table_name AND fk.column_name = c.column_name
-                LEFT JOIN primary_keys pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
-                WHERE c.table_schema = 'public'
+                JOIN object_filter o ON o.table_name = c.table_name
+                {constraint_joins}
+                WHERE c.table_schema = '{schema_name}'
                 ORDER BY c.table_schema, c.table_name, c.ordinal_position
             """
         
@@ -802,9 +826,9 @@ def training_plan():
             st.warning("No schema information retrieved")
             return False
         
-        table_count = df_information_schema['table_name'].nunique()
+        object_count = df_information_schema['table_name'].nunique()
         column_count = len(df_information_schema)
-        logger.info(f"Retrieved enhanced schema for {table_count} tables with {column_count} columns")
+        logger.info(f"Retrieved enhanced schema for {object_count} {object_type} with {column_count} columns")
         
         # Train standard schema plan
         st.toast("🎓 Training enhanced schema plan...")
@@ -813,22 +837,23 @@ def training_plan():
             vanna_service.train(plan=plan)
             logger.info("Standard schema training plan executed")
         
-        # Train relationship documentation
-        st.toast("🔗 Training table relationships...")
+        # Train relationship documentation (only for tables, not views)
         relationships_trained = 0
-        for table in df_information_schema['table_name'].unique():
-            table_data = df_information_schema[df_information_schema['table_name'] == table]
-            
-            # Foreign key relationships
-            fk_relationships = table_data[table_data['referenced_table'].notna()]
-            for _, fk_row in fk_relationships.iterrows():
-                relationship_doc = f"""
-                Table {fk_row['table_name']} column {fk_row['column_name']} references {fk_row['referenced_table']}.{fk_row['referenced_column']}.
-                This creates a relationship where {fk_row['table_name']} belongs to {fk_row['referenced_table']}.
-                Use JOIN {fk_row['referenced_table']} ON {fk_row['table_name']}.{fk_row['column_name']} = {fk_row['referenced_table']}.{fk_row['referenced_column']} to connect these tables.
-                """
-                vanna_service.train(documentation=relationship_doc)
-                relationships_trained += 1
+        if object_type == "tables":
+            st.toast("🔗 Training table relationships...")
+            for table in df_information_schema['table_name'].unique():
+                table_data = df_information_schema[df_information_schema['table_name'] == table]
+                
+                # Foreign key relationships
+                fk_relationships = table_data[table_data['referenced_table'].notna()]
+                for _, fk_row in fk_relationships.iterrows():
+                    relationship_doc = f"""
+                    Table {fk_row['table_name']} column {fk_row['column_name']} references {fk_row['referenced_table']}.{fk_row['referenced_column']}.
+                    This creates a relationship where {fk_row['table_name']} belongs to {fk_row['referenced_table']}.
+                    Use JOIN {fk_row['referenced_table']} ON {fk_row['table_name']}.{fk_row['column_name']} = {fk_row['referenced_table']}.{fk_row['referenced_column']} to connect these tables.
+                    """
+                    vanna_service.train(documentation=relationship_doc)
+                    relationships_trained += 1
         
         # Train semantic column information
         st.toast("🏷️ Training semantic context...")
@@ -854,26 +879,26 @@ def training_plan():
             
             query_patterns = []
             if id_columns:
-                query_patterns.append(f"To find {table} by ID: SELECT * FROM {table} WHERE {id_columns[0]} = value")
+                query_patterns.append(f"To find {object_name} {table} by ID: SELECT * FROM {table} WHERE {id_columns[0]} = value")
             if name_columns:
-                query_patterns.append(f"To search {table} by name: SELECT * FROM {table} WHERE {name_columns[0]} ILIKE '%value%'")
+                query_patterns.append(f"To search {object_name} {table} by name: SELECT * FROM {table} WHERE {name_columns[0]} ILIKE '%value%'")
             if date_columns:
-                query_patterns.append(f"To get recent {table}: SELECT * FROM {table} ORDER BY {date_columns[0]} DESC")
+                query_patterns.append(f"To get recent {object_name} {table}: SELECT * FROM {table} ORDER BY {date_columns[0]} DESC")
             
             if query_patterns:
-                pattern_doc = f"Common query patterns for {table}:\n" + "\n".join(query_patterns)
+                pattern_doc = f"Common query patterns for {object_name} {table}:\n" + "\n".join(query_patterns)
                 vanna_service.train(documentation=pattern_doc)
                 patterns_trained += 1
         
         # Show final success message
+        relationship_msg = f"🔗 Trained {relationships_trained} relationships\n        " if object_type == "tables" else ""
         st.success(f"""
         🎉 RAG-optimized training plan completed successfully! 
-        📊 Processed {table_count} tables with {column_count} columns
-        🔗 Trained {relationships_trained} relationships
-        🏷️ Enhanced {semantics_trained} columns with semantic context
+        📊 Processed {object_count} {object_type} with {column_count} columns
+        {relationship_msg}🏷️ Enhanced {semantics_trained} columns with semantic context
         🎯 Added {patterns_trained} query pattern sets
         """)
-        logger.info(f"Enhanced training plan completed: {table_count} tables, {relationships_trained} relationships, {semantics_trained} semantics, {patterns_trained} patterns")
+        logger.info(f"Enhanced training plan completed: {object_count} {object_type}, {relationships_trained} relationships, {semantics_trained} semantics, {patterns_trained} patterns")
         return True
         
     except Exception as e:
@@ -912,6 +937,13 @@ def train_ddl(describe_ddl_from_llm: bool = False):
             logger.warning(f"Error reading forbidden tables: {e}")
             forbidden_tables_str = ""
         
+        # Get object type and schema configuration
+        object_type = get_configured_object_type()
+        schema_name = get_configured_schema()
+        
+        object_name = "table" if object_type == "tables" else "view"
+        logger.info(f"DDL training will process {object_type} in schema '{schema_name}'")
+        
         # Establish database connection with context manager
         from contextlib import closing
         conn = psycopg2.connect(
@@ -923,10 +955,11 @@ def train_ddl(describe_ddl_from_llm: bool = False):
         )
         
         with closing(conn), conn.cursor() as cursor:
-            # Build comprehensive schema query based on forbidden tables
-            if forbidden_tables_str:
-                schema_query = f"""
-                    WITH table_constraints AS (
+            # Build schema query based on object type and forbidden objects
+            # Note: Views don't have constraints like foreign keys or primary keys
+            if object_type == "tables":
+                constraint_ctes = """
+                    table_constraints AS (
                         SELECT 
                             tc.table_name,
                             tc.constraint_name,
@@ -944,29 +977,37 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                             ON tc.constraint_name = rc.constraint_name
                         LEFT JOIN information_schema.constraint_column_usage ccu 
                             ON rc.unique_constraint_name = ccu.constraint_name
-                        WHERE tc.table_schema = 'public'
-                        AND tc.table_name NOT IN ({forbidden_tables_str})
-                    ),
-                    table_indexes AS (
-                        SELECT 
-                            schemaname,
-                            tablename,
-                            indexname,
-                            indexdef
-                        FROM pg_indexes
-                        WHERE schemaname = 'public'
-                        AND tablename NOT IN ({forbidden_tables_str})
-                    ),
-                    column_stats AS (
-                        SELECT 
-                            schemaname,
-                            tablename,
-                            attname as column_name,
-                            n_distinct,
-                            correlation
-                        FROM pg_stats
-                        WHERE schemaname = 'public'
-                        AND tablename NOT IN ({forbidden_tables_str})
+                        WHERE tc.table_schema = '{schema_name}'
+                    ),"""
+                constraint_joins = """
+                    LEFT JOIN table_constraints tc ON tc.table_name = c.table_name AND tc.column_name = c.column_name"""
+                constraint_columns = """
+                        -- Constraint information
+                        tc.constraint_type,
+                        tc.constraint_name,
+                        tc.referenced_table_name,
+                        tc.referenced_column_name,
+                        tc.update_rule,
+                        tc.delete_rule,"""
+            else:  # views
+                constraint_ctes = ""
+                constraint_joins = ""
+                constraint_columns = """
+                        -- Views don't have constraints
+                        NULL as constraint_type,
+                        NULL as constraint_name,
+                        NULL as referenced_table_name,
+                        NULL as referenced_column_name,
+                        NULL as update_rule,
+                        NULL as delete_rule,"""
+
+            if forbidden_tables_str:
+                schema_query = f"""
+                    WITH {constraint_ctes}
+                    object_filter AS (
+                        SELECT table_name FROM information_schema.{object_type} 
+                        WHERE table_schema = '{schema_name}' 
+                        AND table_name NOT IN ({forbidden_tables_str})
                     )
                     SELECT DISTINCT
                         c.table_schema,
@@ -982,15 +1023,7 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                         c.datetime_precision,
                         c.udt_name,
                         CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
-                        
-                        -- Constraint information
-                        tc.constraint_type,
-                        tc.constraint_name,
-                        tc.referenced_table_name,
-                        tc.referenced_column_name,
-                        tc.update_rule,
-                        tc.delete_rule,
-                        
+                        {constraint_columns}
                         -- Enhanced semantic classification
                         CASE 
                             WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' OR c.column_name = 'id' THEN 'primary_key'
@@ -1011,32 +1044,17 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                         END as semantic_type
                         
                     FROM information_schema.columns c
-                    LEFT JOIN table_constraints tc ON tc.table_name = c.table_name AND tc.column_name = c.column_name
-                    WHERE c.table_schema = 'public'
-                    AND c.table_name NOT IN ({forbidden_tables_str})
+                    JOIN object_filter o ON o.table_name = c.table_name
+                    {constraint_joins}
+                    WHERE c.table_schema = '{schema_name}'
                     ORDER BY c.table_schema, c.table_name, c.ordinal_position
                 """
             else:
-                schema_query = """
-                    WITH table_constraints AS (
-                        SELECT 
-                            tc.table_name,
-                            tc.constraint_name,
-                            tc.constraint_type,
-                            kcu.column_name,
-                            rc.match_option,
-                            rc.update_rule,
-                            rc.delete_rule,
-                            ccu.table_name AS referenced_table_name,
-                            ccu.column_name AS referenced_column_name
-                        FROM information_schema.table_constraints tc
-                        LEFT JOIN information_schema.key_column_usage kcu 
-                            ON tc.constraint_name = kcu.constraint_name
-                        LEFT JOIN information_schema.referential_constraints rc 
-                            ON tc.constraint_name = rc.constraint_name
-                        LEFT JOIN information_schema.constraint_column_usage ccu 
-                            ON rc.unique_constraint_name = ccu.constraint_name
-                        WHERE tc.table_schema = 'public'
+                schema_query = f"""
+                    WITH {constraint_ctes}
+                    object_filter AS (
+                        SELECT table_name FROM information_schema.{object_type} 
+                        WHERE table_schema = '{schema_name}'
                     )
                     SELECT DISTINCT
                         c.table_schema,
@@ -1052,15 +1070,7 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                         c.datetime_precision,
                         c.udt_name,
                         CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
-                        
-                        -- Constraint information
-                        tc.constraint_type,
-                        tc.constraint_name,
-                        tc.referenced_table_name,
-                        tc.referenced_column_name,
-                        tc.update_rule,
-                        tc.delete_rule,
-                        
+                        {constraint_columns}
                         -- Enhanced semantic classification
                         CASE 
                             WHEN c.column_name ILIKE '%id' OR c.column_name ILIKE '%_id' OR c.column_name = 'id' THEN 'primary_key'
@@ -1081,8 +1091,9 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                         END as semantic_type
                         
                     FROM information_schema.columns c
-                    LEFT JOIN table_constraints tc ON tc.table_name = c.table_name AND tc.column_name = c.column_name
-                    WHERE c.table_schema = 'public'
+                    JOIN object_filter o ON o.table_name = c.table_name
+                    {constraint_joins}
+                    WHERE c.table_schema = '{schema_name}'
                     ORDER BY c.table_schema, c.table_name, c.ordinal_position
                 """
             
@@ -1230,13 +1241,13 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                         logger.warning(f"Failed to generate AI description for {table_name}: {e}")
         
         # Show comprehensive success message
+        relationship_msg = f"🔗 Documented {constraints_trained} constraint relationships\n        " if object_type == "tables" else ""
         st.success(f"""
         🎉 RAG-optimized DDL training completed successfully!
-        📊 Enhanced {tables_trained} table DDL structures
-        🔗 Documented {constraints_trained} constraint relationships  
-        🏷️ Classified {semantic_docs_trained} semantic column groups
+        📊 Enhanced {tables_trained} {object_name} DDL structures
+        {relationship_msg}🏷️ Classified {semantic_docs_trained} semantic column groups
         """)
-        logger.info(f"Enhanced DDL training completed: {tables_trained} tables, {constraints_trained} constraints, {semantic_docs_trained} semantic docs")
+        logger.info(f"Enhanced DDL training completed: {tables_trained} {object_type}, {constraints_trained} constraints, {semantic_docs_trained} semantic docs")
         return True
         
     except Exception as e:
