@@ -70,7 +70,7 @@ with tab1:
         with cols[0]:
             st.button("Train DDL", on_click=train_ddl)
         with cols[1]:
-            st.button("DDL Describe", type="primary", on_click=lambda: train_ddl(describe_ddl_from_llm=True))
+            st.button("DDL Describe", on_click=lambda: train_ddl(describe_ddl=True))
         with cols[2]:
             st.button("Train Plan", on_click=training_plan)
         with cols[3]:

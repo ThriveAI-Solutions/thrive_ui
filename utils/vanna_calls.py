@@ -908,13 +908,13 @@ def training_plan():
         return False
 
 
-def train_ddl(describe_ddl_from_llm: bool = False):
+def train_ddl(describe_ddl: bool = False):
     """
     RAG-optimized DDL training function that captures comprehensive schema information
     including constraints, indexes, triggers, and enhanced metadata for superior SQL generation.
     
     Args:
-        describe_ddl_from_llm (bool): Whether to generate AI descriptions for DDL structures
+        describe_ddl (bool): Whether to generate AI descriptions for DDL structures
         
     Returns:
         bool: True if training completed successfully, False otherwise
@@ -1234,7 +1234,7 @@ def train_ddl(describe_ddl_from_llm: bool = False):
                     semantic_docs_trained += 1
                 
                 # Optional: Generate AI descriptions
-                if describe_ddl_from_llm:
+                if describe_ddl:
                     try:
                         train_ddl_describe_to_rag(table_name, [enhanced_ddl])
                     except Exception as e:
@@ -1264,9 +1264,20 @@ def train_ddl(describe_ddl_from_llm: bool = False):
 
 
 def train_ddl_describe_to_rag(table: str, ddl: list):
-    conn = None  # Initialize conn for the finally block
+    """
+    Generate statistical profiles for table columns and train RAG model with the insights.
+    
+    This function analyzes column data using pandas statistical methods to create
+    comprehensive profiles that help the RAG model understand data characteristics
+    for better SQL query generation.
+    
+    Args:
+        table (str): Name of the table to analyze
+        ddl (list): DDL definition (unused in current implementation)
+    """
+    conn = None
     try:
-        # Establish a new connection for this function
+        # Establish database connection
         conn = psycopg2.connect(
             host=st.secrets["postgres"]["host"],
             port=st.secrets["postgres"]["port"],
@@ -1275,112 +1286,227 @@ def train_ddl_describe_to_rag(table: str, ddl: list):
             password=st.secrets["postgres"]["password"],
         )
 
-        # Use a cursor to get column names to avoid issues if table is empty or doesn't exist
-        with conn.cursor() as cur:
-            # Use sqlparse.sql.Identifier for safe table name formatting in query
-            # To correctly use Identifier for a plain string table name, wrap it in a TokenList
-            # containing a single Token of type Name.
-            # However, a simpler way for just quoting is to use psycopg2's quoting or f-string with careful quoting.
-            # Given sqlparse is already a dependency, let's try to use it correctly or fall back.
-            # For now, let's assume the direct use of Identifier on a string was problematic, and rely on psycopg2's parameterization or SQL object composition.
-            # Psycopg2 itself doesn't directly substitute table/column names in `execute`.
-            # `sqlparse.sql.Identifier` is for manipulating parsed SQL structures.
-            # A common way to safely quote identifiers is using `psycopg2.sql.Identifier`
-            try:
-                from psycopg2 import sql as psycopg2_sql  # Import it conditionally or at top if always used
+        # Get column names from table structure
+        column_names = _get_table_columns(conn, table)
+        if not column_names:
+            return
 
-                safe_table_ident = psycopg2_sql.Identifier(table)
-                query_string = psycopg2_sql.SQL("SELECT * FROM {} LIMIT 1;").format(safe_table_ident)
-                cur.execute(query_string)
-            except ImportError:
-                # Fallback if psycopg2.sql is not available or for some other reason, though it should be with psycopg2
-                # This might still be unsafe if table name contains quotes, but Identifier was also causing issues.
-                # The original code was: cur.execute(f"SELECT * FROM {sqlparse.sql.Identifier(table)} LIMIT 1;")
-                # The issue was `sqlparse.sql.Identifier(table)` when table is a string.
-                # For a direct f-string, one would need to ensure `table` is validated and sanitized.
-                # Let's revert to a simpler quoting for the purpose of the fix, assuming `table` is a simple name.
-                # A better fix would be to use psycopg2.sql.Identifier consistently.
-                cur.execute(f'SELECT * FROM "{table}" LIMIT 1;')  # Simple quoting, assumes table is valid
+        # Fetch sample data for statistical analysis
+        sample_data = _get_sample_data(conn, table)
+        if sample_data is None or sample_data.empty:
+            return
 
-            if cur.description is None:
-                logger.warning(f"Skipping DDL description for table {table} as it might be empty or not found.")
-                return
-            colnames = [desc[0] for desc in cur.description]
-
+        # Initialize Vanna service for training
         vanna_service = VannaService.from_streamlit_session()
+        st.toast(f"Analyzing {table} with statistical profiling...")
 
-        for column in colnames:
-            # Properly quote column name for the query
-            # Similar issue here as with table name for sqlparse.sql.Identifier
-            # Using psycopg2.sql.Identifier is preferred.
+        # Analyze each column and train RAG model
+        for column in column_names:
+            if column not in sample_data.columns:
+                logger.warning(f"Column {column} not found in sample data for table {table}")
+                continue
+
             try:
-                from psycopg2 import sql as psycopg2_sql
-
-                safe_table_ident = psycopg2_sql.Identifier(table)
-                safe_column_ident = psycopg2_sql.Identifier(column)
-                query_string = psycopg2_sql.SQL("SELECT DISTINCT {col} FROM {tab} ORDER BY {col} LIMIT 10;").format(
-                    col=safe_column_ident, tab=safe_table_ident
-                )
-                data = pd.read_sql_query(query_string.as_string(conn), conn)  # as_string(conn) for psycopg2 >2.8
-            except ImportError:
-                # Fallback for pd.read_sql_query, which can also take a SQL string directly
-                query = f'SELECT DISTINCT "{column}" FROM "{table}" ORDER BY "{column}" LIMIT 10;'
-                data = pd.read_sql_query(query, conn)
-            except psycopg2.Error as col_query_err:
-                logger.warning(f"Could not query column {column} from table {table}. Skipping. Error: {col_query_err}")
-                continue  # Skip this column if it can't be queried (e.g., complex type not directly usable in DISTINCT/ORDER BY)
-
-            st.toast(f"Describing column: {table}.{column}")
-            column_data = data[column].tolist()
-
-            system_message = "You are a PostgreSQL expert tasked with describing a specific column from a table. Your goal is to provide a detailed analysis of the column based on the provided information. Follow these steps:"
-            ddl_string = " ".join(ddl)  # Convert list of ddl parts to a string
-            prompt = textwrap.dedent(f"""
-                1. First, review the DDL (Data Definition Language) for the entire table:
-                <ddl>
-                {ddl_string}
-                </ddl>
-            
-                2. Now, focus on the specific column you need to describe:
-                Column name: {column}
-            
-                3. Examine the sample data for this column:
-                <sample_data>
-                {column_data}
-                </sample_data>
-            
-                4. Analyze the column based on the DDL and sample data. Consider the following aspects:
-                - Data type
-                - Constraints (e.g., NOT NULL, UNIQUE, PRIMARY KEY)
-                - Default values
-                - Any patterns or characteristics observed in the sample data
-                - Potential use or purpose of the column in the context of the table
-            
-                5. Provide your analysis in plain text. Your response should include:
-                - Observations about the sample data
-                - Any insights or inferences you can make about the column's role or importance in the table
-                - Potential considerations for querying or working with this column
-                - A brief description of the column's properties as defined in the DDL
-            
-                Remember to keep your response concise yet informative, focusing on the most relevant details for a PostgreSQL expert. Do not include any XML tags in your response.
-            """)
-
-            # The response should be a maximum of 1000 characters in length.
-
-            description = vanna_service.submit_prompt(system_message=system_message, user_message=prompt)
-            description = re.sub(r"[•●▪️–—\-•·►★✓✔✗✘➔➤➢➣➤➥➦➧➨➩➪➫➬➭➮➯➱➲➳➴➵➶➷➸➹➺➻➼➽➾]", "", description)
-            logger.info(f"Column: {table}.{column}, Description: {description}")
-            vanna_service.train(documentation=f"{table}.{column} {description}")
+                st.toast(f"Profiling column: {table}.{column}")
+                profile = _generate_column_profile(table, column, sample_data[column])
+                
+                # Train RAG model with statistical profile
+                vanna_service.train(documentation=f"{table}.{column} statistical profile: {profile}")
+                logger.info(f"Trained profile for {table}.{column}")
+                
+            except Exception as col_err:
+                logger.warning(f"Failed to analyze column {column} in table {table}: {col_err}")
+                continue
 
     except psycopg2.Error as db_err:
-        st.error(f"Database error during DDL description for {table}: {db_err}")
-        logger.exception(f"Database error during DDL description for {table}: %s", db_err)
+        st.error(f"Database error during statistical analysis for {table}: {db_err}")
+        logger.exception(f"Database error for table {table}: %s", db_err)
     except Exception as e:
-        st.error(f"Error training Table DDL to RAG for {table}: {e}")
-        logger.exception(f"Error training Table DDL to RAG for {table}: %s", e)
+        st.error(f"Error during statistical profiling for {table}: {e}")
+        logger.exception(f"Statistical profiling error for table {table}: %s", e)
     finally:
         if conn:
-            conn.close()  # Ensure connection is closed
+            conn.close()
+
+
+def _get_table_columns(conn, table: str) -> list:
+    """Get column names from table using safe SQL execution."""
+    try:
+        with conn.cursor() as cur:
+            # Use psycopg2.sql for safe identifier quoting
+            from psycopg2 import sql as psycopg2_sql
+            safe_table_ident = psycopg2_sql.Identifier(table)
+            query = psycopg2_sql.SQL("SELECT * FROM {} LIMIT 1;").format(safe_table_ident)
+            cur.execute(query)
+            
+            if cur.description is None:
+                logger.warning(f"Table {table} appears to be empty or inaccessible")
+                return []
+            
+            return [desc[0] for desc in cur.description]
+            
+    except ImportError:
+        # Fallback for systems without psycopg2.sql
+        with conn.cursor() as cur:
+            cur.execute(f'SELECT * FROM "{table}" LIMIT 1;')
+            if cur.description is None:
+                return []
+            return [desc[0] for desc in cur.description]
+    except Exception as e:
+        logger.warning(f"Could not retrieve columns for table {table}: {e}")
+        return []
+
+
+def _get_sample_data(conn, table: str) -> pd.DataFrame:
+    """Fetch sample data for statistical analysis."""
+    try:
+        # Use psycopg2.sql for safe table name handling
+        from psycopg2 import sql as psycopg2_sql
+        safe_table_ident = psycopg2_sql.Identifier(table)
+        query = psycopg2_sql.SQL("SELECT * FROM {} LIMIT 1000;").format(safe_table_ident)
+        return pd.read_sql_query(query.as_string(conn), conn)
+        
+    except ImportError:
+        # Fallback for systems without psycopg2.sql
+        query = f'SELECT * FROM "{table}" LIMIT 1000;'
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        logger.warning(f"Could not fetch sample data for table {table}: {e}")
+        return None
+
+
+def _generate_column_profile(table: str, column: str, column_data: pd.Series) -> str:
+    """
+    Generate comprehensive statistical profile for a single column.
+    
+    Returns a detailed description including data type, statistics, patterns,
+    and insights useful for SQL query generation.
+    """
+    # Basic statistics
+    total_rows = len(column_data)
+    non_null_count = column_data.count()
+    null_count = column_data.isnull().sum()
+    
+    # Guard against division by zero
+    null_percentage = (null_count / total_rows * 100) if total_rows > 0 else 0
+    unique_count = column_data.nunique()
+    unique_percentage = (unique_count / non_null_count * 100) if non_null_count > 0 else 0
+    
+    # Build profile description
+    profile_parts = [
+        f"Column '{column}' in table '{table}'",
+        f"Data type: {column_data.dtype}",
+        f"Total rows: {total_rows}, Non-null: {non_null_count}",
+    ]
+    
+    # Add null information if present
+    if null_count > 0:
+        profile_parts.append(f"Null values: {null_count} ({null_percentage:.1f}%)")
+    
+    profile_parts.append(f"Unique values: {unique_count} ({unique_percentage:.1f}%)")
+    
+    # Column role classification
+    if unique_percentage > 95:
+        profile_parts.append("Likely primary key or unique identifier")
+    elif unique_percentage < 10:
+        profile_parts.append("Low cardinality - likely categorical")
+    
+    # Type-specific analysis
+    if pd.api.types.is_numeric_dtype(column_data):
+        profile_parts.extend(_analyze_numeric_column(column_data, non_null_count))
+    elif pd.api.types.is_string_dtype(column_data):
+        profile_parts.extend(_analyze_string_column(column_data))
+    elif pd.api.types.is_datetime64_any_dtype(column_data):
+        profile_parts.extend(_analyze_datetime_column(column_data))
+    elif pd.api.types.is_bool_dtype(column_data):
+        profile_parts.extend(_analyze_boolean_column(column_data, non_null_count))
+    
+    # Most frequent values (for all types)
+    if non_null_count > 0:
+        top_values = column_data.value_counts().head(3)
+        if len(top_values) > 0:
+            top_values_str = ", ".join([f"'{val}' ({count}x)" for val, count in top_values.items()])
+            profile_parts.append(f"Most frequent: {top_values_str}")
+    
+    # Create final profile description
+    description = ". ".join(profile_parts) + "."
+    
+    # Ensure description fits within reasonable length limits
+    return description[:800] + "..." if len(description) > 800 else description
+
+
+def _analyze_numeric_column(column_data: pd.Series, non_null_count: int) -> list:
+    """Analyze numeric columns for statistical insights."""
+    desc_stats = column_data.describe()
+    analysis = [
+        f"Numeric range: {desc_stats['min']:.2f} to {desc_stats['max']:.2f}",
+        f"Mean: {desc_stats['mean']:.2f}, Median: {desc_stats['50%']:.2f}",
+        f"Standard deviation: {desc_stats['std']:.2f}",
+    ]
+    
+    # Outlier detection using IQR method
+    q1, q3 = desc_stats['25%'], desc_stats['75%']
+    iqr = q3 - q1
+    outliers = column_data[(column_data < q1 - 1.5 * iqr) | (column_data > q3 + 1.5 * iqr)]
+    
+    if len(outliers) > 0:
+        outlier_percentage = (len(outliers) / non_null_count * 100)
+        analysis.append(f"Potential outliers: {len(outliers)} ({outlier_percentage:.1f}%)")
+    
+    return analysis
+
+
+def _analyze_string_column(column_data: pd.Series) -> list:
+    """Analyze string columns for length and pattern insights."""
+    non_null_strings = column_data.dropna()
+    if len(non_null_strings) == 0:
+        return ["No non-null string values"]
+    
+    # Length statistics
+    lengths = non_null_strings.str.len()
+    analysis = [f"String length: avg {lengths.mean():.1f}, range {lengths.min()}-{lengths.max()}"]
+    
+    # Pattern detection
+    if non_null_strings.str.contains('@', na=False).any():
+        email_count = non_null_strings.str.contains('@', na=False).sum()
+        analysis.append(f"Contains {email_count} email-like values")
+    
+    if non_null_strings.str.match(r'^\d+$', na=False).any():
+        numeric_str_count = non_null_strings.str.match(r'^\d+$', na=False).sum()
+        analysis.append(f"Contains {numeric_str_count} numeric strings")
+    
+    if non_null_strings.str.contains(r'\d{4}-\d{2}-\d{2}', na=False).any():
+        date_like_count = non_null_strings.str.contains(r'\d{4}-\d{2}-\d{2}', na=False).sum()
+        analysis.append(f"Contains {date_like_count} date-like values")
+    
+    return analysis
+
+
+def _analyze_datetime_column(column_data: pd.Series) -> list:
+    """Analyze datetime columns for temporal insights."""
+    non_null_dates = column_data.dropna()
+    if len(non_null_dates) == 0:
+        return ["No non-null datetime values"]
+    
+    min_date, max_date = non_null_dates.min(), non_null_dates.max()
+    date_range = max_date - min_date
+    
+    return [
+        f"Date range: {min_date.date()} to {max_date.date()}",
+        f"Span: {date_range.days} days",
+    ]
+
+
+def _analyze_boolean_column(column_data: pd.Series, non_null_count: int) -> list:
+    """Analyze boolean columns for distribution insights."""
+    if non_null_count == 0:
+        return ["No non-null boolean values"]
+    
+    true_count = column_data.sum()
+    false_count = non_null_count - true_count
+    true_percentage = (true_count / non_null_count * 100)
+    
+    return [f"Boolean distribution: {true_count} true ({true_percentage:.1f}%), {false_count} false"]
 
 
 # Train Vanna on database question/query pairs from file
