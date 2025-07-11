@@ -18,9 +18,11 @@ from sklearn.ensemble import IsolationForest
 from orm.models import Message
 from utils.chat_bot_helper import add_message, set_question, vn
 from utils.enums import MessageType, RoleType
-from utils.vanna_calls import read_forbidden_from_json, run_sql_cached
+from utils.vanna_calls import read_forbidden_from_json, run_sql_cached, get_configured_schema
 
 unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
+
+
 
 
 def generate_example_from_pattern(pattern, sample_values=None):
@@ -66,8 +68,9 @@ def usage_from_pattern(pattern):
 def get_all_column_names(table):
     try:
         table_name = find_closest_table_name(table)
+        schema_name = get_configured_schema()
 
-        sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND  table_name = '{table_name}';"
+        sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_name}' AND  table_name = '{table_name}';"
         df = run_sql_cached(sql)
         if df.empty:
             raise Exception("No tables found in the database.")
@@ -80,8 +83,9 @@ def get_all_column_names(table):
 def get_all_table_names():
     try:
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+        schema_name = get_configured_schema()
 
-        sql = f"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND  table_name NOT IN ({forbidden_tables_str});"
+        sql = f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema_name}' AND  table_name NOT IN ({forbidden_tables_str});"
         df = run_sql_cached(sql)
         if df.empty:
             raise Exception("No tables found in the database.")
@@ -113,11 +117,12 @@ def find_closest_column_name(table_name, column_name):
     try:
         forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
         forbidden_columns_str = ", ".join(f"'{column}'" for column in forbidden_columns)
+        schema_name = get_configured_schema()
         # Query all column names for the given table
         sql = f"""
             SELECT column_name
             FROM information_schema.columns
-            WHERE table_schema = 'public'
+            WHERE table_schema = '{schema_name}'
             AND column_name NOT IN ({forbidden_columns_str})
             AND table_name = '{table_name}';
         """
