@@ -496,14 +496,107 @@ def _followup(question, tuple, previous_df):
             #     print(f"Response: {response}")
 
         if response is None:
-            response = vn.submit_prompt(command, last_assistant_msg.content)
+            response = _followup_llm(command, last_assistant_msg.content, df)
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, response, type, None, question, df, elapsed_time))
+        add_message(Message(RoleType.ASSISTANT, response, type, None, command, df, elapsed_time))
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error generating follow up message: {str(e)}", MessageType.ERROR))
+
+
+def _followup_llm(command, last_content, previous_df):
+    """Direct LLM query about the previous data result with enhanced context."""
+    try:
+        start_time = time.perf_counter()
+        
+        if previous_df is None or previous_df.empty:
+            add_message(
+                Message(RoleType.ASSISTANT, "No previous data available for LLM analysis.", MessageType.ERROR)
+            )
+            return
+        
+        if not command.strip():
+            add_message(
+                Message(RoleType.ASSISTANT, "Please provide a question for the LLM. Usage: /followup llm <your question>", MessageType.ERROR)
+            )
+            return
+        
+        # Get comprehensive data context
+        context = _get_data_context(previous_df)
+        
+        # Create rich context for the LLM
+        context_lines = []
+        context_lines.append(f"Dataset Overview: {context['total_rows']} rows, {context['total_columns']} columns")
+        
+        if context.get('numeric_columns'):
+            context_lines.append(f"Numeric columns ({len(context['numeric_columns'])}): {', '.join(context['numeric_columns'][:10])}")
+            if len(context['numeric_columns']) > 10:
+                context_lines.append(f"... and {len(context['numeric_columns']) - 10} more numeric columns")
+        
+        if context.get('text_columns'):
+            context_lines.append(f"Text columns ({len(context['text_columns'])}): {', '.join(context['text_columns'][:10])}")
+            if len(context['text_columns']) > 10:
+                context_lines.append(f"... and {len(context['text_columns']) - 10} more text columns")
+        
+        if context.get('datetime_columns'):
+            context_lines.append(f"Date/time columns: {', '.join(context['datetime_columns'])}")
+        
+        if context.get('has_nulls'):
+            null_counts = previous_df.isnull().sum()
+            null_cols = null_counts[null_counts > 0].head(5)
+            context_lines.append(f"Missing data detected in: {', '.join([f'{col} ({count} nulls)' for col, count in null_cols.items()])}")
+        
+        # Add basic statistics for numeric columns
+        if context.get('numeric_columns'):
+            numeric_stats = previous_df[context['numeric_columns'][:5]].describe()
+            context_lines.append(f"Sample statistics available for: {', '.join(numeric_stats.columns)}")
+        
+        # Add sample data
+        sample_data = previous_df.head(3).to_string(max_cols=8, max_colwidth=50)
+        
+        # Construct enhanced prompt
+        enhanced_prompt = f"""
+Data Context:
+{chr(10).join(context_lines)}
+
+Sample Data (first 3 rows):
+{sample_data}
+
+Other Context or visualizations:
+{last_content}
+
+User Question: {command}
+
+Please analyze this data and provide insights based on the user's question. Be specific and reference actual data characteristics when possible.
+"""
+        
+        # Get LLM response
+        return vn.submit_prompt(enhanced_prompt, "Data analysis request")
+
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error in LLM followup: {str(e)}", MessageType.ERROR))
+
+
+def _get_data_context(df):
+    """Analyze DataFrame to provide context for intelligent suggestions."""
+    if df is None or df.empty:
+        return {}
+    
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    text_cols = df.select_dtypes(include=['object', 'string']).columns.tolist()
+    datetime_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+    
+    return {
+        'total_columns': len(df.columns),
+        'total_rows': len(df),
+        'numeric_columns': numeric_cols,
+        'text_columns': text_cols,
+        'datetime_columns': datetime_cols,
+        'has_nulls': df.isnull().any().any(),
+        'memory_usage': df.memory_usage(deep=True).sum()
+    }
 
 
 def _generate_heatmap(question, tuple, previous_df):
