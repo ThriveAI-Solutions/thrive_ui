@@ -326,10 +326,13 @@ def _render_followup(message: Message, index: int):
 
         for question_text in content_array[:5]:  # Max 5 follow-up questions
             if isinstance(question_text, str) and len(question_text) > 0:
+                question_value = question_text.strip()
+                if "/" in question_text:
+                    question_value = "/" + question_text.partition("/")[2]
                 st.button(
                     question_text,
                     on_click=set_question,
-                    args=(question_text,),
+                    args=(question_value,),
                     key=generate_guid(),
                     use_container_width=True,
                 )
