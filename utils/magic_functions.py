@@ -220,6 +220,28 @@ def find_closest_column_name(table_name, column_name):
         raise
 
 
+def find_closest_column_name_from_list(column_names, column_name):
+    """
+    Find the closest matching column name from a list of column names using fuzzy string matching.
+    
+    Args:
+        column_names (list): List of available column names
+        column_name (str): Column name to search for
+        
+    Returns:
+        str: Best matching column name
+    """
+    try:
+        matches = difflib.get_close_matches(column_name, column_names, n=1, cutoff=0.6)
+        
+        if not matches:
+            raise Exception(f"Could not find column similar to '{column_name}' in the provided columns")
+        
+        return matches[0]
+    except Exception:
+        raise
+
+
 def is_magic_do_magic(question, previous_df=None):
     try:
         if question is None or question.strip() == "":
@@ -4169,7 +4191,7 @@ def _suggestions(question, tuple, previous_df):
             return
         
         df = previous_df
-        suggestions = []
+        suggestion_commands = []
         
         # Analyze data characteristics
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -4178,56 +4200,56 @@ def _suggestions(question, tuple, previous_df):
         
         # Data shape and quality suggestions
         if len(df) > 1000:
-            suggestions.append("📊 **Data Quality**: Consider running `sample 10` to work with a smaller dataset for faster analysis")
+            suggestion_commands.append("📊 Data Quality: /followup sample 10")
         
         if df.isnull().sum().sum() > 0:
-            suggestions.append("🔍 **Missing Data**: Run `missing` to analyze missing values and their patterns")
+            suggestion_commands.append("🔍 Missing Data Analysis: /followup missing")
         
         if len(df) != len(df.drop_duplicates()):
-            suggestions.append("🔄 **Duplicates**: Run `duplicates` to identify and analyze duplicate records")
+            suggestion_commands.append("🔄 Duplicate Analysis: /followup duplicates")
         
         # Statistical analysis suggestions
         if len(numeric_cols) > 0:
-            suggestions.append("📈 **Statistical Overview**: Run `describe` for comprehensive descriptive statistics")
+            suggestion_commands.append("📈 Statistical Overview: /followup describe")
             
             if len(numeric_cols) > 1:
-                suggestions.append("🔗 **Correlation Analysis**: Run `heatmap` to see relationships between numeric variables")
+                suggestion_commands.append("🔗 Correlation Analysis: /followup heatmap")
             
             # Suggest specific column analysis for interesting numeric columns
             for col in numeric_cols[:2]:  # Limit to first 2 columns
                 if df[col].nunique() > 10:  # Skip if too few unique values
-                    suggestions.append(f"📊 **Distribution**: Run `distribution {col}` to analyze the distribution of {col}")
-                    suggestions.append(f"🎯 **Outliers**: Run `outliers {col}` to detect outliers in {col}")
+                    suggestion_commands.append(f"📊 Distribution of {col}: /followup distribution {col}")
+                    suggestion_commands.append(f"🎯 Outliers in {col}: /followup outliers {col}")
         
         # Visualization suggestions
         if len(numeric_cols) > 0:
             col = numeric_cols[0]
-            suggestions.append(f"📦 **Visualization**: Run `boxplot {col}` to visualize the distribution of {col}")
+            suggestion_commands.append(f"📦 Boxplot of {col}: /followup boxplot {col}")
         
         if len(categorical_cols) > 0:
-            suggestions.append("☁️ **Text Analysis**: Run `wordcloud` to visualize text patterns in categorical data")
+            suggestion_commands.append("☁️ Text Analysis: /followup wordcloud")
         
         # Advanced analysis suggestions
         if len(numeric_cols) >= 2:
-            suggestions.append("🎯 **Clustering**: Run `clusters` to identify natural groupings in your data")
-            suggestions.append("📉 **Dimensionality**: Run `pca` to reduce dimensionality and identify key components")
+            suggestion_commands.append("🎯 Clustering Analysis: /followup clusters")
+            suggestion_commands.append("📉 PCA Analysis: /followup pca")
         
         # Data profiling suggestions
         if len(df.columns) > 5:
-            suggestions.append("🔍 **Data Profiling**: Run `profile` for a comprehensive data quality report")
+            suggestion_commands.append("🔍 Data Profiling: /followup profile")
         
         # Reporting suggestions
-        if len(suggestions) > 3:
-            suggestions.append("📋 **Comprehensive Report**: Run `report` to generate a complete analysis report")
-            suggestions.append("📄 **Executive Summary**: Run `summary` for key insights and findings")
+        if len(suggestion_commands) > 3:
+            suggestion_commands.append("📋 Comprehensive Report: /followup report")
+            suggestion_commands.append("📄 Executive Summary: /followup summary")
         
         # Display suggestions
-        if suggestions:
-            # Create a single message with all suggestions separated by newlines
-            suggestions_text = "🔮 **Suggested Next Steps**\n\n" + "\n\n".join(suggestions)
-            suggestions_text += "\n\n💡 **Usage**: Type `/followup <command>` to run any of these suggestions (e.g., `/followup describe`)"
+        if suggestion_commands:
+            # Display as text message first
+            # add_message(Message(RoleType.ASSISTANT, "🔮 **Suggested Next Steps**\n\nClick any button below to run the suggested analysis:", MessageType.TEXT))
             
-            add_message(Message(RoleType.ASSISTANT, suggestions_text, MessageType.TEXT))
+            # Create clickable buttons using FOLLOWUP message type
+            add_message(Message(RoleType.ASSISTANT, str(suggestion_commands), MessageType.FOLLOWUP))
         else:
             add_message(Message(RoleType.ASSISTANT, "🤔 No specific suggestions available for this dataset.", MessageType.TEXT))
     
