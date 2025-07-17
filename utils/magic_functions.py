@@ -4161,6 +4161,80 @@ def _transform_data(question, tuple, previous_df):
         add_message(Message(RoleType.ASSISTANT, f"Error in data transformation: {str(e)}", MessageType.ERROR))
 
 
+def _suggestions(question, tuple, previous_df):
+    """Generate intelligent suggestions for next analysis steps based on data characteristics."""
+    try:
+        if previous_df is None or previous_df.empty:
+            add_message(Message(RoleType.ASSISTANT, "No data available for suggestions. Please run a query first.", MessageType.ERROR))
+            return
+        
+        df = previous_df
+        suggestions = []
+        
+        # Analyze data characteristics
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        datetime_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+        
+        # Data shape and quality suggestions
+        if len(df) > 1000:
+            suggestions.append("📊 **Data Quality**: Consider running `sample 10` to work with a smaller dataset for faster analysis")
+        
+        if df.isnull().sum().sum() > 0:
+            suggestions.append("🔍 **Missing Data**: Run `missing` to analyze missing values and their patterns")
+        
+        if len(df) != len(df.drop_duplicates()):
+            suggestions.append("🔄 **Duplicates**: Run `duplicates` to identify and analyze duplicate records")
+        
+        # Statistical analysis suggestions
+        if len(numeric_cols) > 0:
+            suggestions.append("📈 **Statistical Overview**: Run `describe` for comprehensive descriptive statistics")
+            
+            if len(numeric_cols) > 1:
+                suggestions.append("🔗 **Correlation Analysis**: Run `heatmap` to see relationships between numeric variables")
+            
+            # Suggest specific column analysis for interesting numeric columns
+            for col in numeric_cols[:2]:  # Limit to first 2 columns
+                if df[col].nunique() > 10:  # Skip if too few unique values
+                    suggestions.append(f"📊 **Distribution**: Run `distribution {col}` to analyze the distribution of {col}")
+                    suggestions.append(f"🎯 **Outliers**: Run `outliers {col}` to detect outliers in {col}")
+        
+        # Visualization suggestions
+        if len(numeric_cols) > 0:
+            col = numeric_cols[0]
+            suggestions.append(f"📦 **Visualization**: Run `boxplot {col}` to visualize the distribution of {col}")
+        
+        if len(categorical_cols) > 0:
+            suggestions.append("☁️ **Text Analysis**: Run `wordcloud` to visualize text patterns in categorical data")
+        
+        # Advanced analysis suggestions
+        if len(numeric_cols) >= 2:
+            suggestions.append("🎯 **Clustering**: Run `clusters` to identify natural groupings in your data")
+            suggestions.append("📉 **Dimensionality**: Run `pca` to reduce dimensionality and identify key components")
+        
+        # Data profiling suggestions
+        if len(df.columns) > 5:
+            suggestions.append("🔍 **Data Profiling**: Run `profile` for a comprehensive data quality report")
+        
+        # Reporting suggestions
+        if len(suggestions) > 3:
+            suggestions.append("📋 **Comprehensive Report**: Run `report` to generate a complete analysis report")
+            suggestions.append("📄 **Executive Summary**: Run `summary` for key insights and findings")
+        
+        # Display suggestions
+        if suggestions:
+            # Create a single message with all suggestions separated by newlines
+            suggestions_text = "🔮 **Suggested Next Steps**\n\n" + "\n\n".join(suggestions)
+            suggestions_text += "\n\n💡 **Usage**: Type `/followup <command>` to run any of these suggestions (e.g., `/followup describe`)"
+            
+            add_message(Message(RoleType.ASSISTANT, suggestions_text, MessageType.TEXT))
+        else:
+            add_message(Message(RoleType.ASSISTANT, "🤔 No specific suggestions available for this dataset.", MessageType.TEXT))
+    
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error generating suggestions: {str(e)}", MessageType.ERROR))
+
+
 FOLLOW_UP_MAGIC_RENDERERS = {
     # ==================== DATA EXPLORATION & BASIC INFO ====================
     r"^head$": {
@@ -4275,6 +4349,12 @@ FOLLOW_UP_MAGIC_RENDERERS = {
     r"^summary$": {
         "func": _generate_summary,
         "category": "Reporting",
+    },
+    
+    # ==================== SUGGESTIONS ====================
+    r"^suggestions$": {
+        "func": _suggestions,
+        "category": "Help & System Commands",
     },
 }
 
