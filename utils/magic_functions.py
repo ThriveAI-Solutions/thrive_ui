@@ -242,24 +242,188 @@ def find_closest_column_name_from_list(column_names, column_name):
         raise
 
 
+def find_closest_magic_command(question, command_dict):
+    """
+    Find the closest matching magic command using fuzzy string matching and natural language inference.
+    
+    Args:
+        question (str): User's input question/command
+        command_dict (dict): Dictionary of magic commands (FOLLOW_UP_MAGIC_RENDERERS or MAGIC_RENDERERS)
+        
+    Returns:
+        tuple: (pattern, metadata, match_groups) or (None, None, None) if no match found
+    """
+    try:
+        question = question.strip()
+        
+        # First try exact regex matching (existing behavior)
+        for pattern, meta in command_dict.items():
+            match = re.match(pattern, question)
+            if match:
+                return pattern, meta, match.groupdict()
+        
+        # If no exact match, try fuzzy matching on command keywords
+        command_keywords = {}
+        
+        # Extract command keywords from regex patterns
+        for pattern, meta in command_dict.items():
+            # Extract the main command word from regex pattern
+            clean_pattern = pattern.replace("^", "").replace("$", "").replace("\\s+", " ")
+            clean_pattern = re.sub(r"\(\?P<\w+>[^)]+\)", "", clean_pattern)  # Remove named groups
+            clean_pattern = re.sub(r"[\\(){}[\]|*+?.]", "", clean_pattern)  # Remove regex chars
+            clean_pattern = clean_pattern.strip()
+            
+            # Get the first word as the command keyword
+            if clean_pattern:
+                command_word = clean_pattern.split()[0] if clean_pattern.split() else clean_pattern
+                if command_word:
+                    command_keywords[command_word] = (pattern, meta)
+        
+        # Create list of command words for fuzzy matching
+        available_commands = list(command_keywords.keys())
+        
+        # Clean the user question for matching
+        user_words = question.lower().split()
+        
+        # Try to find fuzzy matches for each word in the user's question
+        for word in user_words:
+            matches = difflib.get_close_matches(word, available_commands, n=1, cutoff=0.6)
+            if matches:
+                matched_command = matches[0]
+                pattern, meta = command_keywords[matched_command]
+                
+                # Try to extract parameters from the original question
+                # This is a simplified approach - for more complex commands,
+                # we might need more sophisticated parameter extraction
+                remaining_words = [w for w in user_words if w != word]
+                
+                # Create a mock match object with potential parameters
+                mock_groups = {}
+                
+                # Try to infer common parameters
+                if remaining_words:
+                    # Look for column names in the remaining words
+                    if 'column' in pattern:
+                        mock_groups['column'] = remaining_words[0] if remaining_words else ''
+                    if 'column1' in pattern and len(remaining_words) > 0:
+                        mock_groups['column1'] = remaining_words[0]
+                    if 'column2' in pattern and len(remaining_words) > 1:
+                        mock_groups['column2'] = remaining_words[1]
+                    if 'table' in pattern:
+                        mock_groups['table'] = remaining_words[0] if remaining_words else ''
+                    if 'command' in pattern:
+                        mock_groups['command'] = ' '.join(remaining_words) if remaining_words else ''
+                    if 'percentage' in pattern:
+                        # Look for numbers in remaining words
+                        for w in remaining_words:
+                            if w.isdigit():
+                                mock_groups['percentage'] = w
+                                break
+                    if 'operation' in pattern:
+                        mock_groups['operation'] = remaining_words[-1] if remaining_words else 'log'
+                    if 'x' in pattern and 'y' in pattern:  # For scatter plots, etc.
+                        if len(remaining_words) >= 2:
+                            mock_groups['x'] = remaining_words[0]
+                            mock_groups['y'] = remaining_words[1]
+                            mock_groups['color'] = remaining_words[2] if len(remaining_words) > 2 else ''
+                
+                return pattern, meta, mock_groups
+        
+        # If no fuzzy match found, try natural language inference
+        question_lower = question.lower()
+        
+        # Common natural language mappings
+        nlp_mappings = {
+            'show': ['head', 'describe', 'profile'],
+            'display': ['head', 'describe', 'profile'],
+            'analyze': ['describe', 'profile', 'distribution'],
+            'visualize': ['boxplot', 'heatmap', 'wordcloud'],
+            'plot': ['boxplot', 'heatmap', 'wordcloud'],
+            'chart': ['boxplot', 'heatmap', 'wordcloud'],
+            'statistics': ['describe', 'distribution'],
+            'stats': ['describe', 'distribution'],
+            'missing': ['missing'],
+            'null': ['missing'],
+            'duplicate': ['duplicates'],
+            'correlation': ['heatmap', 'correlation'],
+            'relationship': ['heatmap', 'correlation'],
+            'distribution': ['distribution', 'boxplot'],
+            'outlier': ['outliers'],
+            'anomaly': ['anomaly'],
+            'cluster': ['clusters'],
+            'group': ['clusters'],
+            'pca': ['pca'],
+            'principal': ['pca'],
+            'component': ['pca'],
+            'report': ['report'],
+            'summary': ['summary'],
+            'wordcloud': ['wordcloud'],
+            'cloud': ['wordcloud'],
+            'text': ['wordcloud'],
+            'help': ['help'],
+            'clear': ['clear'],
+            'tables': ['tables'],
+            'columns': ['columns'],
+            'sample': ['sample'],
+            'transform': ['transform'],
+            'violin': ['violin'],
+            'pair': ['pairplot'],
+            'scatter': ['scatter'],
+            'bar': ['bar'],
+            'line': ['line']
+        }
+        
+        # Try to match natural language to commands
+        for nlp_word, possible_commands in nlp_mappings.items():
+            if nlp_word in question_lower:
+                for cmd in possible_commands:
+                    if cmd in command_keywords:
+                        pattern, meta = command_keywords[cmd]
+                        
+                        # Extract parameters from the question
+                        mock_groups = {}
+                        words = question.split()
+                        
+                        # Simple parameter extraction
+                        if 'column' in pattern:
+                            # Look for words that might be column names
+                            for word in words:
+                                if word.isalpha() and word.lower() not in ['show', 'display', 'analyze', 'the', 'of', 'for', 'in', 'on']:
+                                    mock_groups['column'] = word
+                                    break
+                        
+                        if 'table' in pattern:
+                            for word in words:
+                                if word.isalpha() and word.lower() not in ['show', 'display', 'analyze', 'the', 'of', 'for', 'in', 'on']:
+                                    mock_groups['table'] = word
+                                    break
+                        
+                        return pattern, meta, mock_groups
+        
+        return None, None, None
+        
+    except Exception as e:
+        return None, None, None
+
+
 def is_magic_do_magic(question, previous_df=None):
     try:
         if question is None or question.strip() == "":
             return False
 
         if previous_df is not None:
-            for key, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
-                match = re.match(key, question.strip())
-                if match:
-                    meta["func"](question, match.groupdict(), previous_df)
-                    return True
+            # Try fuzzy matching for follow-up commands
+            pattern, meta, match_groups = find_closest_magic_command(question, FOLLOW_UP_MAGIC_RENDERERS)
+            if pattern and meta:
+                meta["func"](question, match_groups, previous_df)
+                return True
         else:
-            for key, meta in MAGIC_RENDERERS.items():
-                match = re.match(key, question.strip())
-                if match:
-                    add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
-                    meta["func"](question, match.groupdict(), None)
-                    return True
+            # Try fuzzy matching for regular magic commands
+            pattern, meta, match_groups = find_closest_magic_command(question, MAGIC_RENDERERS)
+            if pattern and meta:
+                add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
+                meta["func"](question, match_groups, None)
+                return True
         return False
     except Exception as e:
         add_message(Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR))
