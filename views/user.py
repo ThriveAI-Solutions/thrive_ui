@@ -1,4 +1,5 @@
 import logging
+import json
 
 import streamlit as st
 
@@ -8,6 +9,11 @@ from utils.vanna_calls import VannaService, train_ddl, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
+if user_id and isinstance(user_id, str):
+    try:
+        user_id = json.loads(user_id)
+    except (json.JSONDecodeError, ValueError):
+        user_id = None
 # Get the current user role from session state (not cookies) and default to least privileged
 user_role = st.session_state.get("user_role", RoleTypeEnum.PATIENT.value)
 vn = VannaService.from_streamlit_session()
@@ -106,20 +112,41 @@ with tab1:
                 st.toast("Training Data Deleted Successfully!")
                 st.rerun()
 with tab2:
+    st.markdown("### Change Password")
+    
+    # Display password requirements
+    with st.expander("Password Requirements"):
+        st.markdown("""
+        **Strong passwords must contain:**
+        - At least 8 characters
+        - At least one uppercase letter
+        - At least one lowercase letter  
+        - At least one number
+        - At least one special character (!@#$%^&*()_+-=[]{}|;:,.<>?)
+        - Cannot be a common password (e.g., "password", "123456", etc.)
+        """)
+    
     with st.form("change_password_form"):
-        current_password = st.text_input("Current Password", type="password")
-        new_password = st.text_input("New Password", type="password")
-        confirm_new_password = st.text_input("Confirm New Password", type="password")
-        submit_button = st.form_submit_button("Change Password")
+        current_password = st.text_input("Current Password", type="password", max_chars=128)
+        new_password = st.text_input("New Password", type="password", max_chars=128)
+        confirm_new_password = st.text_input("Confirm New Password", type="password", max_chars=128)
+        submit_button = st.form_submit_button("Change Password", type="primary")
 
         if submit_button:
-            if new_password != confirm_new_password:
+            if not current_password or not new_password or not confirm_new_password:
+                st.error("Please fill in all password fields.")
+            elif new_password != confirm_new_password:
                 st.error("New password and confirmation do not match.")
+            elif current_password == new_password:
+                st.error("New password must be different from current password.")
             else:
-                if change_password(user_id, current_password, new_password):
-                    st.success("Password changed successfully.")
+                if user_id:
+                    if change_password(user_id, current_password, new_password):
+                        st.success("Password changed successfully! You will need to log in again with your new password.")
+                    else:
+                        st.error("Failed to change password. Please check your current password and try again.")
                 else:
-                    st.error("Current password is incorrect.")
+                    st.error("User session not found. Please log in again.")
 
 if st.session_state.cookies.get("role_name") == "Admin":
     st.sidebar.button("Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary")

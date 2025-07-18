@@ -126,8 +126,18 @@ def verify_user_credentials(username: str, password: str) -> bool:
             )
 
             if user:
-                # For backward compatibility, check if password is old SHA-256 hash
-                if len(user.password) == 64 and user.password.isalnum():
+                # Check if user has new secure hash (has salt) or old SHA-256 hash (no salt)
+                if hasattr(user, 'salt') and user.salt:
+                    # New secure hash, verify normally
+                    if verify_password(password, user.password, user.salt):
+                        # Set session data
+                        st.session_state.cookies["user_id"] = json.dumps(user.id)
+                        userRole = session.query(UserRole).filter(UserRole.id == user.user_role_id).one_or_none()
+                        st.session_state.cookies["role_name"] = userRole.role_name
+                        
+                        reset_login_attempts(username)
+                        return True
+                elif len(user.password) == 64 and user.password.isalnum():
                     # Old SHA-256 hash, verify and upgrade
                     old_hash = hashlib.sha256(password.encode()).hexdigest()
                     if old_hash == user.password:
@@ -145,17 +155,6 @@ def verify_user_credentials(username: str, password: str) -> bool:
                         
                         reset_login_attempts(username)
                         return True
-                else:
-                    # New secure hash, verify normally
-                    if hasattr(user, 'salt') and user.salt:
-                        if verify_password(password, user.password, user.salt):
-                            # Set session data
-                            st.session_state.cookies["user_id"] = json.dumps(user.id)
-                            userRole = session.query(UserRole).filter(UserRole.id == user.user_role_id).one_or_none()
-                            st.session_state.cookies["role_name"] = userRole.role_name
-                            
-                            reset_login_attempts(username)
-                            return True
             
             # Record failed login attempt
             record_failed_login(username)
@@ -215,14 +214,14 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
                 # Check if current password is correct
                 current_password_valid = False
                 
-                # Handle old SHA-256 hashes for backward compatibility
-                if len(user.password) == 64 and user.password.isalnum():
+                # Check if user has new secure hash (has salt) or old SHA-256 hash (no salt)
+                if hasattr(user, 'salt') and user.salt:
+                    # New secure hash
+                    current_password_valid = verify_password(current_password, user.password, user.salt)
+                elif len(user.password) == 64 and user.password.isalnum():
+                    # Old SHA-256 hash
                     current_password_hashed = hashlib.sha256(current_password.encode()).hexdigest()
                     current_password_valid = current_password_hashed == user.password
-                else:
-                    # New secure hash
-                    if hasattr(user, 'salt') and user.salt:
-                        current_password_valid = verify_password(current_password, user.password, user.salt)
                 
                 if current_password_valid:
                     # Update the user's password with new secure hash
