@@ -447,6 +447,7 @@ def is_magic_do_magic(question, previous_df=None):
                 if match:
                     if meta["func"] != _followup:
                         add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
+                    print(f"Running magic command: {match.groupdict()}")
                     meta["func"](question, match.groupdict(), None)
                     return True
         return False
@@ -649,13 +650,19 @@ def _head(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
         sql = ""
+        count = 20  # Default to 20 rows
+        print(f"Tuple: {tuple}")
+        print(tuple.keys())
+        if "num_rows" in tuple:
+            print(f"Count in tuple: {tuple['num_rows']}")
+            count = int(tuple["num_rows"])
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
-
-            sql = f"SELECT *  FROM {table_name} LIMIT 5;"
+            
+            sql = f"SELECT *  FROM {table_name} LIMIT {count};"
             df = run_sql_cached(sql)
         else:
-            df = previous_df.head(5)
+            df = previous_df.head(count)
 
         if df.empty:
             raise Exception("No rows found in the database.")
@@ -4450,6 +4457,10 @@ def _suggestions(question, tuple, previous_df):
 
 FOLLOW_UP_MAGIC_RENDERERS = {
     # ==================== DATA EXPLORATION & BASIC INFO ====================
+     r"^head\s+(?P<num_rows>\d+)$": {
+        "func": _head,
+        "category": "Data Exploration & Basic Info",
+    },
     r"^head$": {
         "func": _head,
         "category": "Data Exploration & Basic Info",
@@ -4593,14 +4604,21 @@ MAGIC_RENDERERS = {
         "category": "Database Exploration",
         "show_example": False,
     },
+     r"^/head\s+(?P<table>\w+)\.(?P<num_rows>\d+)$": {
+        "func": _head,
+        "description": "Show the first {num_rows} rows of a given table",
+        "sample_values": {"table": "wny_health", "num_rows": 50},
+        "category": "Database Exploration",
+        "show_example": False,
+    },
     r"^/head\s+(?P<table>.+)$": {
         "func": _head,
-        "description": "Show the first 5 rows of a given table",
+        "description": "Show the first 20 rows of a given table",
         "sample_values": {"table": "wny_health"},
         "category": "Database Exploration",
         "show_example": False,
     },
-    
+   
     # ==================== DATA EXPLORATION & BASIC INFO ====================
     r"^/describe\s+(?P<table>\w+)$": {
         "func": _describe_table,
