@@ -438,13 +438,15 @@ def is_magic_do_magic(question, previous_df=None):
             for key, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
                 match = re.match(key, question.strip())
                 if match:
+                    add_message(Message(RoleType.ASSISTANT, "Sounds like followup magic!", MessageType.TEXT))
                     meta["func"](question, match.groupdict(), previous_df)
                     return True
         else:
             for key, meta in MAGIC_RENDERERS.items():
                 match = re.match(key, question.strip())
                 if match:
-                    add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
+                    if meta["func"] != _followup:
+                        add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
                     meta["func"](question, match.groupdict(), None)
                     return True
         return False
@@ -719,6 +721,8 @@ def _followup_llm(command, last_content, previous_df):
     """Direct LLM query about the previous data result with enhanced context."""
     try:
         start_time = time.perf_counter()
+
+        add_message(Message(RoleType.ASSISTANT, "Asking LLM!", MessageType.TEXT))
         
         if previous_df is None or previous_df.empty:
             add_message(
