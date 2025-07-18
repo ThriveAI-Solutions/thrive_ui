@@ -91,7 +91,7 @@ def get_all_column_names(table):
         # Extract just the table name from schema.table_name format
         table_name = schema_qualified_name.split('.')[-1]
 
-        sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_name}' AND table_name = '{table_name}';"
+        sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_name}' AND table_name = '{table_name}' order by column_name;"
         df = run_sql_cached(sql)
         if df.empty:
             raise Exception(f"No columns found for {object_name} '{schema_qualified_name}' in schema '{schema_name}'.")
@@ -118,9 +118,9 @@ def get_all_object_names():
         
         # Build query based on configured object type (tables or views)
         if forbidden_tables_str:
-            sql = f"SELECT table_name FROM information_schema.{object_type} WHERE table_schema = '{schema_name}' AND table_name NOT IN ({forbidden_tables_str});"
+            sql = f"SELECT table_name FROM information_schema.{object_type} WHERE table_schema = '{schema_name}' AND table_name NOT IN ({forbidden_tables_str}) order by table_name;"
         else:
-            sql = f"SELECT table_name FROM information_schema.{object_type} WHERE table_schema = '{schema_name}';"
+            sql = f"SELECT table_name FROM information_schema.{object_type} WHERE table_schema = '{schema_name}' AND table_name NOT IN ({forbidden_tables_str}) order by table_name;";
         
         df = run_sql_cached(sql)
         if df.empty:
@@ -447,7 +447,6 @@ def is_magic_do_magic(question, previous_df=None):
                 if match:
                     if meta["func"] != _followup:
                         add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
-                    print(f"Running magic command: {match.groupdict()}")
                     meta["func"](question, match.groupdict(), None)
                     return True
         return False
@@ -651,10 +650,8 @@ def _head(question, tuple, previous_df):
         start_time = time.perf_counter()
         sql = ""
         count = 20  # Default to 20 rows
-        print(f"Tuple: {tuple}")
-        print(tuple.keys())
+
         if "num_rows" in tuple:
-            print(f"Count in tuple: {tuple['num_rows']}")
             count = int(tuple["num_rows"])
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
