@@ -4,7 +4,7 @@ import logging
 from decimal import Decimal
 import pandas as pd
 import streamlit as st
-from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, Numeric, String, create_engine, func
+from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, Numeric, String, LargeBinary, create_engine, func
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
@@ -67,6 +67,7 @@ class User(Base):
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
     password = Column(String(255), nullable=False)
+    salt = Column(LargeBinary, nullable=True)  # Salt for password hashing
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     show_sql = Column(Boolean, default=True)

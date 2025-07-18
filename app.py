@@ -7,6 +7,7 @@ st.set_page_config(layout="wide")
 from streamlit_cookies_manager_ext import EncryptedCookieManager
 
 from utils.auth import check_authenticate
+from utils.security import apply_security_headers, SecurityMiddleware
 
 # setup logging
 setup_logging(debug=True)
@@ -19,7 +20,14 @@ logging.getLogger("chromadb").setLevel(logging.INFO)
 logging.getLogger("httpcore").setLevel(logging.INFO)
 logging.getLogger("httpx").setLevel(logging.INFO)
 
-# Initialize the cookie manager
+# Apply security headers
+apply_security_headers()
+
+# Generate session ID for security tracking
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = SecurityMiddleware.generate_session_id()
+
+# Initialize the cookie manager with secure settings
 st.session_state.cookies = EncryptedCookieManager(
     prefix="thrive_ai_",
     password=st.secrets["cookie"]["password"],
