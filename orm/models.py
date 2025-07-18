@@ -13,6 +13,20 @@ from utils.enums import MessageType, RoleType
 
 logger = logging.getLogger(__name__)
 
+# Import secure password hashing function
+def hash_password_for_seed(password: str) -> tuple[str, bytes]:
+    """
+    Hash a password using PBKDF2 with SHA-256 and a random salt for seeding.
+    This uses the same algorithm as the auth functions to ensure consistency.
+    """
+    import hashlib
+    import secrets
+    
+    salt = secrets.token_bytes(32)
+    # Use PBKDF2 with 100,000 iterations for strong password hashing
+    hashed = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
+    return hashed.hex(), salt
+
 # Load database settings from st.secrets
 # db_settings = st.secrets["postgres"]
 db_settings = st.secrets.get("sqlite", {"database": "./pgDatabase/db.sqlite3"})
@@ -227,14 +241,14 @@ def seed_initial_data(session):
 
     session.commit()  # Commit roles before users to ensure role IDs are available
 
-    # Seed Users
+    # Seed Users with secure password hashing
     users_to_seed = [
         {
             "username": "thriveai-kr",
             "first_name": "Kyle",
             "last_name": "Root",
             "show_summary": True,
-            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "plaintext_password": "password",  # Default password
             "role_name": "Admin",
         },
         {
@@ -242,7 +256,7 @@ def seed_initial_data(session):
             "first_name": "Joseph",
             "last_name": "Eberle",
             "show_summary": True,
-            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "plaintext_password": "password",  # Default password
             "role_name": "Admin",
         },
         {
@@ -250,7 +264,7 @@ def seed_initial_data(session):
             "first_name": "Al",
             "last_name": "Seoud",
             "show_summary": True,
-            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "plaintext_password": "password",  # Default password
             "role_name": "Admin",
         },
         {
@@ -258,7 +272,7 @@ def seed_initial_data(session):
             "first_name": "Frank",
             "last_name": "Metty",
             "show_summary": True,
-            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "plaintext_password": "password",  # Default password
             "role_name": "Admin",
         },
         {
@@ -266,7 +280,7 @@ def seed_initial_data(session):
             "first_name": "Dr.",
             "last_name": "Smith",
             "show_summary": True,
-            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "plaintext_password": "password",  # Default password
             "role_name": "Doctor",
         },
         {
@@ -274,7 +288,7 @@ def seed_initial_data(session):
             "first_name": "Rob",
             "last_name": "Enderle",
             "show_summary": True,
-            "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+            "plaintext_password": "password",  # Default password
             "role_name": "Admin",
         },
     ]
@@ -283,10 +297,18 @@ def seed_initial_data(session):
         user = session.query(User).filter_by(username=user_data["username"]).first()
         if not user:
             role_name = user_data.pop("role_name")  # Remove role_name from user_data
+            plaintext_password = user_data.pop("plaintext_password")  # Remove plaintext password
+            
+            # Generate secure password hash and salt
+            password_hash, salt = hash_password_for_seed(plaintext_password)
+            user_data["password"] = password_hash
+            user_data["salt"] = salt
+            
             role = session.query(UserRole).filter_by(role_name=role_name).first()
             if role:  # Ensure role exists
                 new_user = User(**user_data, user_role_id=role.id)
                 session.add(new_user)
+                logger.info(f"Created user '{user_data['username']}' with secure password hash")
             else:
                 logger.warning(f"Role '{role_name}' not found for user '{user_data['username']}'. User not created.")
 
