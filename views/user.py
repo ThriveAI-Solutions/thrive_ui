@@ -93,7 +93,7 @@ with tab1:
         # header
         col.write(field_name)
 
-    if not df.empty:
+    if df:
         for index, row in df.iterrows():
             col1, col2, col3, col4 = st.columns((1, 2, 3, 1))
             col1.write(row["training_data_type"])
