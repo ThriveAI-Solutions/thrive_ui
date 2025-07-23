@@ -221,18 +221,6 @@ The application creates secure default accounts on first run:
 
 **⚠️ Security Note**: Change default passwords immediately after first login. All passwords use PBKDF2 hashing with 100,000 iterations.
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature-name`
-3. Make changes and add tests
-4. Run test suite: `uv run python -m pytest`
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## 🆘 Support
 
 For issues and questions:
