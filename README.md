@@ -1,116 +1,252 @@
-# Thrive UI Streamlit App
+# Thrive AI - Intelligent Data Analysis Platform
 
-## Install Docker
+[![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://python.org)
+[![Streamlit](https://img.shields.io/badge/streamlit-1.43+-red.svg)](https://streamlit.io)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[Docker Desktop](https://www.docker.com/products/docker-desktop/)
+Thrive AI is an intelligent data analysis platform that combines natural language processing with SQL generation, advanced analytics, and interactive visualizations. Built with Streamlit, it provides an intuitive chat interface for database interactions, comprehensive data analysis, and machine learning insights.
 
-Complete the full setup/install (requires restart and system admin)
+## 🚀 Features
 
-**You can skip the account setup stuff**
+### AI-Powered SQL Generation
+- **Natural Language to SQL**: Convert plain English questions into SQL queries using Vanna AI
+- **Multiple LLM Support**: Integration with Anthropic Claude, OpenAI, and local Ollama models
+- **Smart Query Optimization**: Automatic query refinement and error handling
 
-## Install UV
+### Advanced Analytics & Visualizations
+- **Magic Commands**: 20+ specialized commands for statistical analysis, data profiling, and ML
+- **Interactive Charts**: Plotly-powered visualizations with statistical annotations
+- **Machine Learning**: Built-in clustering, PCA, and outlier detection
+- **Data Quality**: Comprehensive profiling, missing data analysis, and duplicate detection
 
-Mac OS/Linux - Install uv
+### Security & Authentication
+- **Secure Authentication**: Cookie-based session management with PBKDF2 password hashing
+- **Ethical Guardrails**: Content filtering and safety measures
+- **Role-Based Access**: Admin and Doctor user roles with appropriate permissions
+- **Data Privacy**: Configurable data visibility controls
 
+### Flexible Architecture
+- **Multi-Database Support**: PostgreSQL and SQLite compatibility
+- **Hybrid Deployment**: Cloud, hybrid, or fully local configurations
+- **Vector Storage**: ChromaDB integration for embeddings and similarity search
+- **Voice Interaction**: Speech-to-text and text-to-speech capabilities
+
+## 📋 Prerequisites
+
+- **Docker Desktop** - [Download here](https://www.docker.com/products/docker-desktop/)
+- **Python 3.13** - Required for the application
+- **UV Package Manager** - Fast Python package management
+
+## 🛠️ Installation
+
+### 1. Install UV Package Manager
+
+**macOS/Linux:**
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Windows - Install uv
-
+**Windows:**
 ```powershell
 powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-## Configure Application
+### 2. Clone and Setup Project
 
-Copy the .streamlit/secrets_example.toml and Paste it to .streamlit/secrets.toml
+```bash
+git clone <repository-url>
+cd thrive_ui
+uv sync
+```
 
-Modify the values in the secrets.toml to connect to your desired configuration.
+### 3. Configure Application
 
-You can configure secrets in `.streamlit/secrets.toml` and access them in your app using `st.secrets.get(...)`.
+Copy the configuration template:
+```bash
+cp .streamlit/secrets_example.toml .streamlit/secrets.toml
+```
 
-Cloud based configuration:
-set vanna_api, vanna_model
+Edit `.streamlit/secrets.toml` with your configuration:
 
-or set vanna_api, vanna_model, anthropic_api, anthropic_model
+#### Cloud Configuration
+```toml
+[ai_keys]
+vanna_api = "your_vanna_api_key"
+vanna_model = "your_model_name"
+# Optional: Add Anthropic for enhanced responses
+anthropic_api = "your_anthropic_key"
+anthropic_model = "claude-3-5-sonnet-latest"
+```
 
-Hybrid configuration:
-set anthropic_api, anthropic_model, chroma_path
+#### Hybrid Configuration
+```toml
+[ai_keys]
+anthropic_api = "your_anthropic_key"
+anthropic_model = "claude-3-5-sonnet-latest"
 
-or set ollama_model, vanna_api, vanna_model
+[rag_model]
+chroma_path = "./chromadb"
+```
 
-\*\*Local based configuration:
-set ollama_model, chroma_path
+#### Local Configuration
+```toml
+[ai_keys]
+ollama_model = "llama3.2"
 
-`utils/config/training_data.json` Here you can configure your custom training data per your database. No need to pass in DDL, the application will automatically read the DDL and populate that on its own.
+[rag_model]
+chroma_path = "./chromadb"
+```
 
-`utils/config/forbidden_references.json` Here you can specify any table or column names you want to actively block from querying or training on.
-
-## Start the PostgreSQL Docker Container
+### 4. Start Database
 
 ```bash
 docker compose up -d
 ```
 
-**restart the powershell**
-
-## Run Streamlit
+### 5. Run Application
 
 ```bash
 uv run streamlit run app.py
 ```
 
-## Database
+Access the application at `http://localhost:8501`
 
-Upon starting the docker container, the database and data will be initialized with the following tables:
+## 📊 Sample Data
 
-- `public.penguins`
-- `public.titanic_train`
-- `public.wny_health`
+The application includes sample datasets for immediate testing:
+- **Penguins Dataset** - Species classification data
+- **Titanic Dataset** - Historical passenger data
+- **WNY Health Dataset** - Regional health statistics
 
-## Using UV
+## 🔧 Configuration Files
 
-To get help with uv, run:
+### Training Data (`utils/config/training_data.json`)
+Configure custom training examples for your database schema. The application automatically reads DDL and populates schema information.
 
-```bash
-uv help
+### Forbidden References (`utils/config/forbidden_references.json`)
+Specify tables or columns to exclude from queries and training data for security compliance.
+
+## 🎯 Magic Commands
+
+Thrive AI includes powerful magic commands for advanced analysis:
+
+### Statistical Analysis
+- `/describe <table>` - Comprehensive descriptive statistics
+- `/distribution <table>.<column>` - Distribution analysis with tests
+- `/correlation <table>.<column1>.<column2>` - Detailed correlation analysis
+- `/outliers <table>.<column>` - Multi-method outlier detection
+
+### Data Quality & Profiling
+- `/profile <table>` - Comprehensive data profiling
+- `/missing <table>` - Missing data analysis
+- `/duplicates <table>` - Duplicate detection and analysis
+
+### Visualizations
+- `/boxplot <table>.<column>` - Statistical box plots
+- `/heatmap <table>` - Correlation heatmaps
+- `/wordcloud <table>` - Text visualization
+
+### Machine Learning
+- `/clusters <table>` - K-means clustering analysis
+- `/pca <table>` - Principal Component Analysis
+
+### Reporting
+- `/report <table>` - Comprehensive analysis report
+- `/summary <table>` - Executive summary
+
+## 🏗️ Architecture
+
+```
+thrive_ui/
+├── app.py                 # Main Streamlit application
+├── views/                 # UI components
+│   ├── chat_bot.py       # Chat interface
+│   └── user.py           # User management
+├── utils/                 # Core utilities
+│   ├── vanna_calls.py    # AI/ML integration
+│   ├── magic_functions.py # Advanced analytics
+│   ├── auth.py           # Authentication
+│   └── security.py       # Security measures
+├── orm/                   # Database layer
+│   ├── models.py         # SQLAlchemy models
+│   └── functions.py      # Database operations
+└── tests/                # Comprehensive test suite
 ```
 
-### Init a new project
+## 🧪 Testing
+
+Run the comprehensive test suite:
 
 ```bash
-uv init my-project
+# All tests
+uv run python -m pytest
+
+# Specific test categories
+uv run python -m pytest -m unit
+uv run python -m pytest -m integration
+uv run python -m pytest -m slow
+
+# With coverage
+uv run python -m pytest --cov=utils --cov-report=html
+
+# Verbose debugging
+uv run python -m pytest -vs
 ```
 
-or within an existing directory:
+## 🔍 Code Quality
 
 ```bash
-uv init .
+# Linting
+uv run ruff check
+
+# Formatting
+uv run ruff format
+
+# Test cleanup
+python scripts/cleanup_test_artifacts.py
 ```
 
-### Update the projects environment
+## 👥 Default Users
 
-```bash
-uv sync
-```
+The application creates secure default accounts on first run:
 
-### Add dependencies
+| Username | Role | Password |
+|----------|------|----------|
+| thriveai-kr | Admin | password |
+| thriveai-je | Admin | password |
+| thriveai-as | Admin | password |
+| thriveai-fm | Admin | password |
+| thriveai-dr | Doctor | password |
+| thriveai-re | Admin | password |
 
-```bash
-uv add package
-```
+**⚠️ Security Note**: Change default passwords immediately after first login. All passwords use PBKDF2 hashing with 100,000 iterations.
 
-### Add development dependancies
+## 🤝 Contributing
 
-```bash
-uv add package --dev
-```
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature-name`
+3. Make changes and add tests
+4. Run test suite: `uv run python -m pytest`
+5. Submit a pull request
 
-### Create a virtual environment
+## 📄 License
 
-Note: This will automatically be created with uv run and uv sync
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-```bash
-uv venv
-```
+## 🆘 Support
+
+For issues and questions:
+- Check the [troubleshooting guide](docs/TROUBLESHOOTING.md)
+- Review test examples in the `tests/` directory
+- Open an issue on GitHub
+
+## 🔗 Dependencies
+
+Key technologies powering Thrive AI:
+- **Streamlit** - Web application framework
+- **Vanna AI** - SQL generation and NLP
+- **Anthropic Claude** - Advanced language model
+- **ChromaDB** - Vector database for embeddings
+- **PostgreSQL** - Primary database
+- **Plotly** - Interactive visualizations
+- **scikit-learn** - Machine learning algorithms
