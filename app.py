@@ -1,6 +1,7 @@
 import logging
 import streamlit as st
 from utils.logging_config import setup_logging
+from utils.discord_logging import initialize_discord_logging_after_streamlit, add_discord_handler_if_configured
 
 # Set the page configuration to wide mode
 st.set_page_config(layout="wide")
@@ -13,6 +14,10 @@ from utils.security import apply_security_headers, SecurityMiddleware
 setup_logging(debug=True)
 
 logger = logging.getLogger(__name__)
+
+# Initialize Discord logging after Streamlit is ready
+
+#add_discord_handler_if_configured(logger)
 
 # silence watchdog warnings
 logging.getLogger("fsevents").setLevel(logging.INFO)
@@ -53,5 +58,7 @@ user_page = st.Page(
 pg = st.navigation(pages=[chat_bot_page, user_page])
 
 check_authenticate()
+
+initialize_discord_logging_after_streamlit(st.session_state.username)
 
 pg.run()

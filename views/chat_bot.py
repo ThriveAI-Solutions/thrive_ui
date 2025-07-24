@@ -45,8 +45,6 @@ if st.session_state.messages is None:
 
 
 ######### Sidebar settings #########
-
-
 def save_settings_on_click():
     """Update session state with temporary settings values and save to database"""
     # Update session state with temporary values
