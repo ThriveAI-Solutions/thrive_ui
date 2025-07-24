@@ -1,6 +1,7 @@
 import logging
 
 import streamlit as st
+from pandas import DataFrame
 
 from orm.functions import change_password, delete_all_messages
 from orm.models import RoleTypeEnum
@@ -93,18 +94,19 @@ with tab1:
         # header
         col.write(field_name)
 
-    for index, row in df.iterrows():
-        col1, col2, col3, col4 = st.columns((1, 2, 3, 1))
-        col1.write(row["training_data_type"])
-        col2.write(row["question"])
-        col3.write(row["content"])
-        if st.session_state.cookies.get("role_name") == "Admin":
-            button_phold = col4.empty()
-            do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
-            if do_action:
-                vn.remove_from_training(row["id"])
-                st.toast("Training Data Deleted Successfully!")
-                st.rerun()
+    if isinstance(df, DataFrame) and not df.empty:
+        for index, row in df.iterrows():
+            col1, col2, col3, col4 = st.columns((1, 2, 3, 1))
+            col1.write(row["training_data_type"])
+            col2.write(row["question"])
+            col3.write(row["content"])
+            if st.session_state.cookies.get("role_name") == "Admin":
+                button_phold = col4.empty()
+                do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
+                if do_action:
+                    vn.remove_from_training(row["id"])
+                    st.toast("Training Data Deleted Successfully!")
+                    st.rerun()
 with tab2:
     with st.form("change_password_form"):
         current_password = st.text_input("Current Password", type="password")
