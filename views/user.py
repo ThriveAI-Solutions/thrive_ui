@@ -1,6 +1,7 @@
 import logging
 
 import streamlit as st
+from pandas import DataFrame
 
 from orm.functions import change_password, delete_all_messages
 from orm.models import RoleTypeEnum
@@ -93,7 +94,7 @@ with tab1:
         # header
         col.write(field_name)
 
-    if df:
+    if isinstance(df, DataFrame) and not df.empty:
         for index, row in df.iterrows():
             col1, col2, col3, col4 = st.columns((1, 2, 3, 1))
             col1.write(row["training_data_type"])
