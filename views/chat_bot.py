@@ -1,21 +1,23 @@
 import logging
 import random
 import time
+
 import pandas as pd
 import streamlit as st
 from ethical_guardrails_lib import get_ethical_guideline
+
+from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
+from orm.models import Message
 from utils.chat_bot_helper import (
-    set_question,
-    vn,
-    get_unique_messages,
-    render_message,
     add_message,
     call_llm,
     get_chart,
     get_followup_questions,
+    get_unique_messages,
+    get_vn,
+    render_message,
+    set_question,
 )
-from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
-from orm.models import Message
 from utils.communicate import listen, speak
 from utils.enums import MessageType, RoleType
 from utils.magic_functions import is_magic_do_magic
@@ -112,7 +114,7 @@ if st.session_state.get("voice_input", True):
 # Show suggested questions
 if st.session_state.get("show_suggested", True):
     with st.sidebar.popover("Click to show suggested questions", use_container_width=True):
-        questions = vn.generate_questions()
+        questions = get_vn().generate_questions()
         for i, question in enumerate(questions):
             time.sleep(0.05)
             button = st.button(
@@ -202,11 +204,11 @@ if my_question:
     with st.chat_message(RoleType.ASSISTANT.value):
         st.write(random_acknowledgment)
 
-    sql, elapsed_time = vn.generate_sql(question=my_question)
+    sql, elapsed_time = get_vn().generate_sql(question=my_question)
     st.session_state.my_question = None
 
     if sql:
-        if vn.is_sql_valid(sql=sql):
+        if get_vn().is_sql_valid(sql=sql):
             if st.session_state.get("show_sql", True):
                 add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
         else:
@@ -218,7 +220,7 @@ if my_question:
                 call_llm(my_question)
             st.stop()
 
-        df = vn.run_sql(sql=sql)
+        df = get_vn().run_sql(sql=sql)
 
         # if sql doesn't return a dataframe, stop
         if not isinstance(df, pd.DataFrame):
@@ -234,7 +236,7 @@ if my_question:
             get_chart(my_question, sql, df)
 
         if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
-            summary, elapsed_time = vn.generate_summary(question=my_question, df=df)
+            summary, elapsed_time = get_vn().generate_summary(question=my_question, df=df)
             if summary is not None:
                 if st.session_state.get("show_summary", True):
                     add_message(
