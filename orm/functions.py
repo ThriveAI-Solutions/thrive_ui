@@ -82,6 +82,7 @@ def set_user_preferences_in_session_state():
         st.session_state.min_message_id = user.min_message_id
         st.session_state.user_role = user.role.role.value
         st.session_state.loaded = True  # dont call after initial load
+        st.session_state.username = f"{user.first_name} {user.last_name}"
 
         return user
     except Exception as e:

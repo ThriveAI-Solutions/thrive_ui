@@ -9,6 +9,8 @@ import logging
 import logging.config
 from pathlib import Path
 
+from .discord_logging import add_discord_handler_if_configured
+
 LOG_DIR = Path(__file__).with_name("logs")
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -69,6 +71,12 @@ def _dict_config(debug: bool = False) -> dict:
                 "level": "DEBUG",
                 "handlers": ["console", "file.daily", "file.error"],
             },
+            # Silence noisy third-party loggers
+            "urllib3.connectionpool": {
+                "level": "WARNING",
+                "handlers": [],
+                "propagate": False,
+            },
         },
     }
 
@@ -79,4 +87,8 @@ def setup_logging(*, debug: bool = False) -> None:
     Configure logging.  Call exactly once, early in the main process.
     """
     logging.config.dictConfig(_dict_config(debug))
+    
+    # Discord handler will be added later when Streamlit secrets are available
+    print("Basic logging configuration complete - Discord handler will be added when secrets are available")
+    
     logging.getLogger(__name__).debug("Logging configured (debug=%s)", debug)
