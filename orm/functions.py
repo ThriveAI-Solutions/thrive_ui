@@ -29,6 +29,7 @@ def verify_user_credentials(username: str, password: str) -> bool:
                 st.session_state.cookies["user_id"] = json.dumps(user.id)
                 userRole = session.query(UserRole).filter(UserRole.id == user.user_role_id).one_or_none()
                 st.session_state.cookies["role_name"] = userRole.role_name
+                st.session_state.user_role = userRole.role.value
 
             # Return True if the user exists, otherwise return False
             return user is not None
@@ -63,7 +64,11 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
 
 def set_user_preferences_in_session_state():
     try:
-        user_id = st.session_state.cookies.get("user_id")
+        user_id_str = st.session_state.cookies.get("user_id")
+        if not user_id_str:
+            return None
+
+        user_id = json.loads(user_id_str)
         user = get_user(user_id)
 
         # if "loaded" not in st.session_state:

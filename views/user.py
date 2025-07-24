@@ -5,13 +5,13 @@ from pandas import DataFrame
 
 from orm.functions import change_password, delete_all_messages
 from orm.models import RoleTypeEnum
+from utils.chat_bot_helper import get_vn
 from utils.vanna_calls import VannaService, train_ddl, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
 # Get the current user role from session state (not cookies) and default to least privileged
 user_role = st.session_state.get("user_role", RoleTypeEnum.PATIENT.value)
-vn = VannaService.from_streamlit_session()
 # Don't get training data at module load time - get it when rendering the page
 # df = vn.get_training_data()
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 def delete_all_training():
     try:
         # Get training data with role-based filtering - users can only delete what they can see
+        vn = get_vn()
         training_data = vn.get_training_data()
         for index, row in training_data.iterrows():
             vn.remove_from_training(row["id"])
@@ -43,7 +44,7 @@ def pop_train(type):
                     if question == "" or content1 == "":
                         st.error("Please fill all fields.")
                     else:
-                        vn.train(question=question, sql=content1)
+                        get_vn().train(question=question, sql=content1)
                         st.toast("Training Data Added Successfully!")
                         st.rerun()
         else:
@@ -53,7 +54,7 @@ def pop_train(type):
                     if content2 == "":
                         st.error("Please fill all fields.")
                     else:
-                        vn.train(documentation=content2)
+                        get_vn().train(documentation=content2)
                         st.toast("Training Data Added Successfully!")
                         st.rerun()
     except Exception as e:
@@ -86,7 +87,7 @@ with tab1:
             st.button("Remove All", type="primary", on_click=delete_all_training)
 
     # Get training data with current user's role-based filtering
-    df = vn.get_training_data()
+    df = get_vn().get_training_data()
 
     colms = st.columns((1, 2, 3, 1))
     fields = ["Type", "Question", "Sql", "Action"]
@@ -104,7 +105,7 @@ with tab1:
                 button_phold = col4.empty()
                 do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
                 if do_action:
-                    vn.remove_from_training(row["id"])
+                    get_vn().remove_from_training(row["id"])
                     st.toast("Training Data Deleted Successfully!")
                     st.rerun()
 with tab2:

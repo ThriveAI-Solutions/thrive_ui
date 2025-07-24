@@ -6,18 +6,37 @@ from io import StringIO
 import pandas as pd
 import streamlit as st
 
-from orm.functions import save_user_settings
+from orm.functions import save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
 from utils.communicate import speak
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
-# Initialize VannaService singleton
-vn = VannaService.from_streamlit_session()
+
+def get_vanna_service():
+    """Get VannaService instance, ensuring user preferences are loaded first."""
+    # Ensure user preferences are loaded into session state
+    set_user_preferences_in_session_state()
+    return VannaService.from_streamlit_session()
+
+
+# Get the VannaService instance when needed, not at module import time
+def get_vn():
+    """Get the VannaService instance, ensuring it's created with correct user context."""
+    if not hasattr(st.session_state, '_vn_instance') or st.session_state._vn_instance is None:
+        st.session_state._vn_instance = get_vanna_service()
+    return st.session_state._vn_instance
+
+
+@property
+def vn():
+    """Property to access VannaService instance."""
+    return get_vn()
 
 
 def call_llm(my_question: str):
-    response = vn.submit_prompt(
+    vn_instance = get_vn()
+    response = vn_instance.submit_prompt(
         "You are a helpful AI assistant trained to provide detailed and accurate responses. Be concise yet informative, and maintain a friendly and professional tone. If asked about controversial topics, provide balanced and well-researched information without expressing personal opinions.",
         my_question,
     )
@@ -25,17 +44,18 @@ def call_llm(my_question: str):
 
 
 def get_chart(my_question, sql, df):
+    vn_instance = get_vn()
     elapsed_sum = 0
     code = None
-    if vn.should_generate_chart(question=my_question, sql=sql, df=df):
-        code, elapsed_time = vn.generate_plotly_code(question=my_question, sql=sql, df=df)
+    if vn_instance.should_generate_chart(question=my_question, sql=sql, df=df):
+        code, elapsed_time = vn_instance.generate_plotly_code(question=my_question, sql=sql, df=df)
         elapsed_sum += elapsed_time if elapsed_time is not None else 0
 
         if st.session_state.get("show_plotly_code", False):
             add_message(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time))
 
         if code is not None and code != "":
-            fig, elapsed_time = vn.generate_plot(code=code, df=df)
+            fig, elapsed_time = vn_instance.generate_plot(code=code, df=df)
             elapsed_sum += elapsed_time if elapsed_time is not None else 0
             if fig is not None:
                 add_message(
@@ -53,17 +73,28 @@ def get_chart(my_question, sql, df):
                         elapsed_sum,
                     )
                 )
+        else:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "I couldn't generate a chart",
+                    MessageType.ERROR,
+                    sql,
+                    my_question,
+                    None,
+                    elapsed_sum,
+                )
+            )
     else:
-        # If a chart should not be generated, inform the user.
         add_message(
             Message(
                 RoleType.ASSISTANT,
-                "I am unable to generate a chart for this data. The data might be unsuitable for visualization (e.g., empty or non-numeric).",
+                "I was unable to generate a chart for this question. Please ask another question.",
                 MessageType.ERROR,
                 sql,
                 my_question,
                 None,
-                elapsed_sum,  # elapsed_sum would be 0 here
+                0,
             )
         )
 
@@ -120,7 +151,8 @@ def generate_guid():
 
 
 def get_followup_questions(my_question, sql, df):
-    followup_questions = vn.generate_followup_questions(question=my_question, sql=sql, df=df)
+    vn_instance = get_vn()
+    followup_questions = vn_instance.generate_followup_questions(question=my_question, sql=sql, df=df)
 
     add_message(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP, sql, my_question))
 

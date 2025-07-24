@@ -255,11 +255,11 @@ class VannaService:
         # Create cache key that includes both user_id and user_role
         cache_key = f"vanna_service_{user_context.user_id}_{user_context.user_role}"
 
-        # Check if we already have an instance for this specific user
-        if user_context.user_id not in cls._instances:
-            cls._instances[user_context.user_id] = cls._create_instance_for_user(user_context, config, cache_key)
+        # Check if we already have an instance for this specific user and role
+        if cache_key not in cls._instances:
+            cls._instances[cache_key] = cls._create_instance_for_user(user_context, config, cache_key)
 
-        return cls._instances[user_context.user_id]
+        return cls._instances[cache_key]
 
     @classmethod
     def from_streamlit_session(cls):
@@ -596,7 +596,6 @@ def generate_questions_cached():
     return VannaService.from_streamlit_session().generate_questions()
 
 
-@st.cache_data(show_spinner="Generating SQL query ...")
 def generate_sql_cached(question: str):
     return VannaService.from_streamlit_session().generate_sql(question=question)
 

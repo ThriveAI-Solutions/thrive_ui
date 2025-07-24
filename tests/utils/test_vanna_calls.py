@@ -5,6 +5,7 @@ import pytest
 
 from utils.chromadb_vector import ThriveAI_ChromaDB
 from utils.vanna_calls import (
+    MyVannaGeminiChromaDB,
     MyVannaOllamaChromaDB,
     UserContext,
     VannaService,
@@ -26,6 +27,8 @@ def mock_streamlit_secrets(test_chromadb_path):
                 "vanna_model": "mock_vanna_model",
                 "anthropic_api": "mock_anthropic_api",
                 "anthropic_model": "claude-3-sonnet-20240229",
+                "gemini_model": "gemini-1.5-flash",
+                "gemini_api": "mock_gemini_api",
             },
             "rag_model": {"chroma_path": test_chromadb_path},
             "postgres": {
@@ -659,7 +662,47 @@ class TestVannaServiceUIScenario:
 
 
 @pytest.mark.usefixtures("mock_streamlit_secrets")
+class TestMyVannaGeminiChromaDB:
+    @patch("utils.vanna_calls.GoogleGeminiChat.__init__", MagicMock(return_value=None))
+    @patch("utils.vanna_calls.ThriveAI_ChromaDB.__init__", MagicMock(return_value=None))
+    def test_generate_sql_with_rag(self, test_chromadb_path):
+        # 1. Setup
+        user_role_test = 1
+        question = "What are the patient's latest vital signs?"
+
+        vanna_gemini = MyVannaGeminiChromaDB(user_role=user_role_test, config={"path": test_chromadb_path})
+        
+        # Manually set the config and dialect because we mocked the initializers
+        vanna_gemini.config = {"path": test_chromadb_path}
+        vanna_gemini.dialect = "postgres"
+        vanna_gemini.max_tokens = 4096
+        vanna_gemini.static_documentation = ""
+
+        # Mock the RAG and LLM methods on the instance
+        vanna_gemini.get_related_ddl = MagicMock(return_value=["CREATE TABLE vitals (patient_id INT, heart_rate INT)"])
+        vanna_gemini.get_similar_question_sql = MagicMock(return_value=[])
+        vanna_gemini.get_related_documentation = MagicMock(return_value=["Vitals are important for patient monitoring."])
+        vanna_gemini.submit_prompt = MagicMock(return_value="SELECT heart_rate FROM vitals WHERE patient_id = 123")
+        vanna_gemini.extract_sql = MagicMock(return_value="SELECT heart_rate FROM vitals WHERE patient_id = 123")
+
+        # 2. Execution
+        sql = vanna_gemini.generate_sql(question=question)
+
+        # 3. Assertion
+        vanna_gemini.submit_prompt.assert_called_once()
+        prompt_messages = vanna_gemini.submit_prompt.call_args[0][0]
+        
+        full_prompt_str = "".join(str(p) for p in prompt_messages)
+        assert "CREATE TABLE vitals" in full_prompt_str
+        assert "Vitals are important for patient monitoring." in full_prompt_str
+        
+        vanna_gemini.extract_sql.assert_called_with("SELECT heart_rate FROM vitals WHERE patient_id = 123")
+        assert sql == "SELECT heart_rate FROM vitals WHERE patient_id = 123"
+
+
+@pytest.mark.usefixtures("mock_streamlit_secrets")
 class TestVannaServiceSecurity:
+
     """Test security aspects of VannaService, especially role handling."""
 
     def test_defaults_to_patient_role_when_session_state_missing(self):
