@@ -24,6 +24,7 @@ dependencies = [
     "streamlit-cookies-manager-ext>=0.1.0",
     "vanna[anthropic,chromadb,gemini,ollama,postgres]==0.7.5",
     "wordcloud>=1.9.4",
+    "vertexai>=1.71.1",
 ]
 
 [dependency-groups]
