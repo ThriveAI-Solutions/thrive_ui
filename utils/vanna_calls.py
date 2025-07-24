@@ -1,11 +1,10 @@
 import json
 import logging
-import re
-import textwrap
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
 import pandas as pd
 import psycopg2
 import sqlparse
@@ -14,6 +13,7 @@ from pandas import DataFrame
 from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import DML, Keyword
 from vanna.anthropic import Anthropic_Chat
+from vanna.google import GoogleGeminiChat
 from vanna.ollama import Ollama
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
@@ -170,6 +170,49 @@ class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, Ollama):
         logger.debug("%s: %s", title, message)
 
 
+class MyVannaGeminiChromaDB(ThriveAI_ChromaDB, GoogleGeminiChat):
+    def __init__(self, user_role: int, config=None):
+        try:
+            logger.info("Using Gemini and ChromaDB")
+            logger.info(f"model: {st.secrets['ai_keys']['gemini_model']}")
+            logger.info(f"api_key: {st.secrets['ai_keys']['gemini_api']}")
+
+            # Initialize ThriveAI_ChromaDB first
+            ThriveAI_ChromaDB.__init__(self, user_role=user_role, config=config)
+
+            # IMPORTANT: Store the model configuration before calling GoogleGeminiChat.__init__
+            self.configured_model = st.secrets["ai_keys"]["gemini_model"]
+            self.configured_api_key = st.secrets["ai_keys"]["gemini_api"]
+
+            # Initialize GoogleGeminiChat with the config
+            GoogleGeminiChat.__init__(
+                self,
+                config={"model": self.configured_model, "api_key": self.configured_api_key},
+            )
+
+            # BUG FIX: Vanna 0.7.5 GoogleGeminiChat ignores the model config
+            # We need to manually fix the chat_model after initialization
+            import google.generativeai as genai
+
+            genai.configure(api_key=self.configured_api_key)
+
+            # Replace the incorrectly configured chat_model with the correct one
+            self.chat_model = genai.GenerativeModel(self.configured_model)
+
+            # Also set the model attribute for debugging
+            self.model = self.configured_model
+
+            logger.info(f"🎉 Fixed GoogleGeminiChat to use: {self.configured_model}")
+
+        except Exception as e:
+            logger.exception("Error Configuring MyVannaGeminiChromaDB: %s", e)
+            raise
+
+    # override the log function to stop vannas annoying print statements
+    def log(self, message: str, title: str = "Info"):
+        logger.debug("%s: %s", title, message)
+
+
 def read_forbidden_from_json():
     try:
         # Path to the forbidden_references.json file
@@ -265,6 +308,11 @@ class VannaService:
                     self.vn = MyVannaAnthropic()
                 else:
                     raise ValueError("Missing anthropic Configuration Values")
+            elif "gemini_model" in self.config["ai_keys"] and "gemini_api" in self.config["ai_keys"]:
+                if chroma_config:
+                    self.vn = MyVannaGeminiChromaDB(user_role=self.user_context.user_role, config=chroma_config)
+                else:
+                    raise ValueError("Missing Gemini Configuration Values")
             else:
                 logger.info("Using Default")
                 self.vn = VannaDefault(
@@ -658,19 +706,19 @@ def training_plan():
     """
     RAG-optimized training plan that captures comprehensive database schema information
     including relationships, constraints, sample data, and semantic context for superior SQL generation.
-    
+
     Returns:
         bool: True if training completed successfully, False otherwise
     """
     try:
         st.toast("🚀 Starting RAG-optimized training plan...")
         logger.info("Starting RAG-optimized training plan generation")
-        
+
         vanna_service = VannaService.from_streamlit_session()
         if not vanna_service:
             st.error("Failed to initialize VannaService")
             return False
-        
+
         # Get forbidden tables with proper error handling
         try:
             forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
@@ -678,14 +726,14 @@ def training_plan():
         except Exception as e:
             logger.warning(f"Error reading forbidden tables: {e}")
             forbidden_tables_str = ""
-        
+
         # Get object type and schema configuration
         object_type = get_configured_object_type()
         schema_name = get_configured_schema()
-        
+
         object_name = "table" if object_type == "tables" else "view"
         logger.info(f"Training plan will process {object_type} in schema '{schema_name}'")
-        
+
         # Build enhanced schema query with relationships and semantic information
         # Note: Views don't have constraints like foreign keys or primary keys
         if object_type == "tables":
@@ -817,90 +865,100 @@ def training_plan():
                 WHERE c.table_schema = '{schema_name}'
                 ORDER BY c.table_schema, c.table_name, c.ordinal_position
             """
-        
+
         # Execute enhanced schema query
         st.toast("📊 Retrieving enhanced schema information...")
         df_information_schema = vanna_service.run_sql(enhanced_query)
-        
+
         if df_information_schema is None or df_information_schema.empty:
             st.warning("No schema information retrieved")
             return False
-        
-        object_count = df_information_schema['table_name'].nunique()
+
+        object_count = df_information_schema["table_name"].nunique()
         column_count = len(df_information_schema)
         logger.info(f"Retrieved enhanced schema for {object_count} {object_type} with {column_count} columns")
-        
+
         # Train standard schema plan
         st.toast("🎓 Training enhanced schema plan...")
         plan = vanna_service.get_training_plan_generic(df_information_schema)
         if plan:
             vanna_service.train(plan=plan)
             logger.info("Standard schema training plan executed")
-        
+
         # Train relationship documentation (only for tables, not views)
         relationships_trained = 0
         if object_type == "tables":
             st.toast("🔗 Training table relationships...")
-            for table in df_information_schema['table_name'].unique():
-                table_data = df_information_schema[df_information_schema['table_name'] == table]
-                
+            for table in df_information_schema["table_name"].unique():
+                table_data = df_information_schema[df_information_schema["table_name"] == table]
+
                 # Foreign key relationships
-                fk_relationships = table_data[table_data['referenced_table'].notna()]
+                fk_relationships = table_data[table_data["referenced_table"].notna()]
                 for _, fk_row in fk_relationships.iterrows():
                     relationship_doc = f"""
-                    Table {fk_row['table_name']} column {fk_row['column_name']} references {fk_row['referenced_table']}.{fk_row['referenced_column']}.
-                    This creates a relationship where {fk_row['table_name']} belongs to {fk_row['referenced_table']}.
-                    Use JOIN {fk_row['referenced_table']} ON {fk_row['table_name']}.{fk_row['column_name']} = {fk_row['referenced_table']}.{fk_row['referenced_column']} to connect these tables.
+                    Table {fk_row["table_name"]} column {fk_row["column_name"]} references {fk_row["referenced_table"]}.{fk_row["referenced_column"]}.
+                    This creates a relationship where {fk_row["table_name"]} belongs to {fk_row["referenced_table"]}.
+                    Use JOIN {fk_row["referenced_table"]} ON {fk_row["table_name"]}.{fk_row["column_name"]} = {fk_row["referenced_table"]}.{fk_row["referenced_column"]} to connect these tables.
                     """
                     vanna_service.train(documentation=relationship_doc)
                     relationships_trained += 1
-        
+
         # Train semantic column information
         st.toast("🏷️ Training semantic context...")
         semantics_trained = 0
         for _, row in df_information_schema.iterrows():
-            if row.get('semantic_type') and row['semantic_type'] != 'general':
+            if row.get("semantic_type") and row["semantic_type"] != "general":
                 semantic_doc = f"""
-                Column {row['table_name']}.{row['column_name']} ({row['data_type']}) is a {row['semantic_type']} field.
+                Column {row["table_name"]}.{row["column_name"]} ({row["data_type"]}) is a {row["semantic_type"]} field.
                 """
                 vanna_service.train(documentation=semantic_doc)
                 semantics_trained += 1
-        
+
         # Train query patterns
         st.toast("🎯 Training query patterns...")
         patterns_trained = 0
-        for table in df_information_schema['table_name'].unique():
-            table_data = df_information_schema[df_information_schema['table_name'] == table]
-            
+        for table in df_information_schema["table_name"].unique():
+            table_data = df_information_schema[df_information_schema["table_name"] == table]
+
             # Generate common query pattern documentation
-            id_columns = table_data[table_data['semantic_type'] == 'identifier']['column_name'].tolist()
-            name_columns = table_data[table_data['semantic_type'] == 'name']['column_name'].tolist()
-            date_columns = table_data[table_data['semantic_type'] == 'temporal']['column_name'].tolist()
-            
+            id_columns = table_data[table_data["semantic_type"] == "identifier"]["column_name"].tolist()
+            name_columns = table_data[table_data["semantic_type"] == "name"]["column_name"].tolist()
+            date_columns = table_data[table_data["semantic_type"] == "temporal"]["column_name"].tolist()
+
             query_patterns = []
             if id_columns:
-                query_patterns.append(f"To find {object_name} {table} by ID: SELECT * FROM {table} WHERE {id_columns[0]} = value")
+                query_patterns.append(
+                    f"To find {object_name} {table} by ID: SELECT * FROM {table} WHERE {id_columns[0]} = value"
+                )
             if name_columns:
-                query_patterns.append(f"To search {object_name} {table} by name: SELECT * FROM {table} WHERE {name_columns[0]} ILIKE '%value%'")
+                query_patterns.append(
+                    f"To search {object_name} {table} by name: SELECT * FROM {table} WHERE {name_columns[0]} ILIKE '%value%'"
+                )
             if date_columns:
-                query_patterns.append(f"To get recent {object_name} {table}: SELECT * FROM {table} ORDER BY {date_columns[0]} DESC")
-            
+                query_patterns.append(
+                    f"To get recent {object_name} {table}: SELECT * FROM {table} ORDER BY {date_columns[0]} DESC"
+                )
+
             if query_patterns:
                 pattern_doc = f"Common query patterns for {object_name} {table}:\n" + "\n".join(query_patterns)
                 vanna_service.train(documentation=pattern_doc)
                 patterns_trained += 1
-        
+
         # Show final success message
-        relationship_msg = f"🔗 Trained {relationships_trained} relationships\n        " if object_type == "tables" else ""
+        relationship_msg = (
+            f"🔗 Trained {relationships_trained} relationships\n        " if object_type == "tables" else ""
+        )
         st.success(f"""
         🎉 RAG-optimized training plan completed successfully! 
         📊 Processed {object_count} {object_type} with {column_count} columns
         {relationship_msg}🏷️ Enhanced {semantics_trained} columns with semantic context
         🎯 Added {patterns_trained} query pattern sets
         """)
-        logger.info(f"Enhanced training plan completed: {object_count} {object_type}, {relationships_trained} relationships, {semantics_trained} semantics, {patterns_trained} patterns")
+        logger.info(
+            f"Enhanced training plan completed: {object_count} {object_type}, {relationships_trained} relationships, {semantics_trained} semantics, {patterns_trained} patterns"
+        )
         return True
-        
+
     except Exception as e:
         error_msg = f"Error in RAG-optimized training plan: {e}"
         st.error(error_msg)
@@ -912,10 +970,10 @@ def train_ddl(describe_ddl: bool = False):
     """
     RAG-optimized DDL training function that captures comprehensive schema information
     including constraints, indexes, triggers, and enhanced metadata for superior SQL generation.
-    
+
     Args:
         describe_ddl (bool): Whether to generate AI descriptions for DDL structures
-        
+
     Returns:
         bool: True if training completed successfully, False otherwise
     """
@@ -923,12 +981,12 @@ def train_ddl(describe_ddl: bool = False):
     try:
         st.toast("🚀 Starting RAG-optimized DDL training...")
         logger.info("Starting comprehensive DDL training")
-        
+
         vanna_service = VannaService.from_streamlit_session()
         if not vanna_service:
             st.error("Failed to initialize VannaService")
             return False
-            
+
         # Get forbidden tables with proper error handling
         try:
             forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
@@ -936,16 +994,17 @@ def train_ddl(describe_ddl: bool = False):
         except Exception as e:
             logger.warning(f"Error reading forbidden tables: {e}")
             forbidden_tables_str = ""
-        
+
         # Get object type and schema configuration
         object_type = get_configured_object_type()
         schema_name = get_configured_schema()
-        
+
         object_name = "table" if object_type == "tables" else "view"
         logger.info(f"DDL training will process {object_type} in schema '{schema_name}'")
-        
+
         # Establish database connection with context manager
         from contextlib import closing
+
         conn = psycopg2.connect(
             host=st.secrets["postgres"]["host"],
             port=st.secrets["postgres"]["port"],
@@ -953,7 +1012,7 @@ def train_ddl(describe_ddl: bool = False):
             user=st.secrets["postgres"]["user"],
             password=st.secrets["postgres"]["password"],
         )
-        
+
         with closing(conn), conn.cursor() as cursor:
             # Build schema query based on object type and forbidden objects
             # Note: Views don't have constraints like foreign keys or primary keys
@@ -1096,160 +1155,159 @@ def train_ddl(describe_ddl: bool = False):
                     WHERE c.table_schema = '{schema_name}'
                     ORDER BY c.table_schema, c.table_name, c.ordinal_position
                 """
-            
+
             # Execute comprehensive schema query
             st.toast("📊 Retrieving comprehensive schema information...")
             cursor.execute(schema_query)
             schema_info = cursor.fetchall()
-            
+
             if not schema_info:
                 st.warning("No schema information found")
                 return False
-            
+
             # Organize data by table for enhanced DDL generation
             tables_data = {}
             for row in schema_info:
                 table_name = row[1]
                 if table_name not in tables_data:
-                    tables_data[table_name] = {
-                        'columns': [],
-                        'constraints': [],
-                        'indexes': [],
-                        'semantic_info': []
-                    }
-                
+                    tables_data[table_name] = {"columns": [], "constraints": [], "indexes": [], "semantic_info": []}
+
                 # Column information
                 column_info = {
-                    'name': row[2],
-                    'type': row[3],
-                    'nullable': row[4],
-                    'default': row[5],
-                    'position': row[6],
-                    'max_length': row[7],
-                    'precision': row[8],
-                    'scale': row[9],
-                    'datetime_precision': row[10],
-                    'udt_name': row[11],
-                    'enum_type': row[12],
-                    'semantic_type': row[19] if len(row) > 19 else 'general'
+                    "name": row[2],
+                    "type": row[3],
+                    "nullable": row[4],
+                    "default": row[5],
+                    "position": row[6],
+                    "max_length": row[7],
+                    "precision": row[8],
+                    "scale": row[9],
+                    "datetime_precision": row[10],
+                    "udt_name": row[11],
+                    "enum_type": row[12],
+                    "semantic_type": row[19] if len(row) > 19 else "general",
                 }
-                tables_data[table_name]['columns'].append(column_info)
-                
+                tables_data[table_name]["columns"].append(column_info)
+
                 # Constraint information
                 if row[13]:  # constraint_type exists
                     constraint_info = {
-                        'type': row[13],
-                        'name': row[14],
-                        'column': row[2],
-                        'referenced_table': row[15],
-                        'referenced_column': row[16],
-                        'update_rule': row[17],
-                        'delete_rule': row[18]
+                        "type": row[13],
+                        "name": row[14],
+                        "column": row[2],
+                        "referenced_table": row[15],
+                        "referenced_column": row[16],
+                        "update_rule": row[17],
+                        "delete_rule": row[18],
                     }
-                    if constraint_info not in tables_data[table_name]['constraints']:
-                        tables_data[table_name]['constraints'].append(constraint_info)
-                
+                    if constraint_info not in tables_data[table_name]["constraints"]:
+                        tables_data[table_name]["constraints"].append(constraint_info)
+
                 # Note: Index information removed to simplify query
-            
+
             # Generate and train enhanced DDL for each table
             st.toast("🎓 Training enhanced DDL structures...")
             tables_trained = 0
             constraints_trained = 0
             semantic_docs_trained = 0
-            
+
             for table_name, table_data in tables_data.items():
                 # Generate enhanced DDL
                 ddl_lines = [f"\nCREATE TABLE {table_name} ("]
-                
+
                 # Add columns with enhanced information
                 column_definitions = []
-                for col in sorted(table_data['columns'], key=lambda x: x['position']):
-                    nullable = "NULL" if col['nullable'] == "YES" else "NOT NULL"
-                    default_clause = f" DEFAULT {col['default']}" if col['default'] else ""
-                    
+                for col in sorted(table_data["columns"], key=lambda x: x["position"]):
+                    nullable = "NULL" if col["nullable"] == "YES" else "NOT NULL"
+                    default_clause = f" DEFAULT {col['default']}" if col["default"] else ""
+
                     # Enhanced type information
-                    data_type = col['type']
-                    if col['max_length']:
+                    data_type = col["type"]
+                    if col["max_length"]:
                         data_type += f"({col['max_length']})"
-                    elif col['precision'] and col['scale']:
+                    elif col["precision"] and col["scale"]:
                         data_type += f"({col['precision']},{col['scale']})"
-                    elif col['datetime_precision']:
+                    elif col["datetime_precision"]:
                         data_type += f"({col['datetime_precision']})"
-                    
+
                     column_def = f"    {col['name']} {data_type}{default_clause} {nullable}"
                     column_definitions.append(column_def)
-                
-                ddl_lines.extend([',\n'.join(column_definitions)])
+
+                ddl_lines.extend([",\n".join(column_definitions)])
                 ddl_lines.append(");")
-                
+
                 # Train basic DDL
-                enhanced_ddl = '\n'.join(ddl_lines)
+                enhanced_ddl = "\n".join(ddl_lines)
                 success = vanna_service.train(ddl=enhanced_ddl)
                 if success:
                     tables_trained += 1
                     st.toast(f"✓ Trained enhanced DDL for table: {table_name}")
-                
+
                 # Train constraint documentation
-                for constraint in table_data['constraints']:
-                    if constraint['type'] == 'FOREIGN KEY':
+                for constraint in table_data["constraints"]:
+                    if constraint["type"] == "FOREIGN KEY":
                         constraint_doc = f"""
-                        Table {table_name} has a foreign key constraint on {constraint['column']} 
-                        referencing {constraint['referenced_table']}.{constraint['referenced_column']}.
-                        Update rule: {constraint['update_rule']}, Delete rule: {constraint['delete_rule']}.
-                        This enforces referential integrity between {table_name} and {constraint['referenced_table']}.
+                        Table {table_name} has a foreign key constraint on {constraint["column"]} 
+                        referencing {constraint["referenced_table"]}.{constraint["referenced_column"]}.
+                        Update rule: {constraint["update_rule"]}, Delete rule: {constraint["delete_rule"]}.
+                        This enforces referential integrity between {table_name} and {constraint["referenced_table"]}.
                         """
                         vanna_service.train(documentation=constraint_doc)
                         constraints_trained += 1
-                    elif constraint['type'] == 'PRIMARY KEY':
+                    elif constraint["type"] == "PRIMARY KEY":
                         constraint_doc = f"""
-                        Table {table_name} has primary key constraint on {constraint['column']}.
+                        Table {table_name} has primary key constraint on {constraint["column"]}.
                         This uniquely identifies each row in {table_name}.
                         """
                         vanna_service.train(documentation=constraint_doc)
                         constraints_trained += 1
-                    elif constraint['type'] == 'UNIQUE':
+                    elif constraint["type"] == "UNIQUE":
                         constraint_doc = f"""
-                        Table {table_name} has unique constraint on {constraint['column']}.
-                        This ensures no duplicate values in {constraint['column']}.
+                        Table {table_name} has unique constraint on {constraint["column"]}.
+                        This ensures no duplicate values in {constraint["column"]}.
                         """
                         vanna_service.train(documentation=constraint_doc)
                         constraints_trained += 1
-                
+
                 # Note: Index training removed to simplify implementation
-                
+
                 # Train semantic type documentation
                 semantic_groups = {}
-                for col in table_data['columns']:
-                    if col['semantic_type'] != 'general':
-                        if col['semantic_type'] not in semantic_groups:
-                            semantic_groups[col['semantic_type']] = []
-                        semantic_groups[col['semantic_type']].append(col['name'])
-                
+                for col in table_data["columns"]:
+                    if col["semantic_type"] != "general":
+                        if col["semantic_type"] not in semantic_groups:
+                            semantic_groups[col["semantic_type"]] = []
+                        semantic_groups[col["semantic_type"]].append(col["name"])
+
                 for semantic_type, columns in semantic_groups.items():
                     semantic_doc = f"""
-                    Table {table_name} has {semantic_type} columns: {', '.join(columns)}.
+                    Table {table_name} has {semantic_type} columns: {", ".join(columns)}.
                     These columns contain {semantic_type} data and should be handled accordingly in queries.
                     """
                     vanna_service.train(documentation=semantic_doc)
                     semantic_docs_trained += 1
-                
+
                 # Optional: Generate AI descriptions
                 if describe_ddl:
                     try:
                         train_ddl_describe_to_rag(table_name, [enhanced_ddl])
                     except Exception as e:
                         logger.warning(f"Failed to generate AI description for {table_name}: {e}")
-        
+
         # Show comprehensive success message
-        relationship_msg = f"🔗 Documented {constraints_trained} constraint relationships\n        " if object_type == "tables" else ""
+        relationship_msg = (
+            f"🔗 Documented {constraints_trained} constraint relationships\n        " if object_type == "tables" else ""
+        )
         st.success(f"""
         🎉 RAG-optimized DDL training completed successfully!
         📊 Enhanced {tables_trained} {object_name} DDL structures
         {relationship_msg}🏷️ Classified {semantic_docs_trained} semantic column groups
         """)
-        logger.info(f"Enhanced DDL training completed: {tables_trained} {object_type}, {constraints_trained} constraints, {semantic_docs_trained} semantic docs")
+        logger.info(
+            f"Enhanced DDL training completed: {tables_trained} {object_type}, {constraints_trained} constraints, {semantic_docs_trained} semantic docs"
+        )
         return True
-        
+
     except Exception as e:
         error_msg = f"Error in RAG-optimized DDL training: {e}"
         st.error(error_msg)
@@ -1266,11 +1324,11 @@ def train_ddl(describe_ddl: bool = False):
 def train_ddl_describe_to_rag(table: str, ddl: list):
     """
     Generate statistical profiles for table columns and train RAG model with the insights.
-    
+
     This function analyzes column data using pandas statistical methods to create
     comprehensive profiles that help the RAG model understand data characteristics
     for better SQL query generation.
-    
+
     Args:
         table (str): Name of the table to analyze
         ddl (list): DDL definition (unused in current implementation)
@@ -1309,11 +1367,11 @@ def train_ddl_describe_to_rag(table: str, ddl: list):
             try:
                 st.toast(f"Profiling column: {table}.{column}")
                 profile = _generate_column_profile(table, column, sample_data[column])
-                
+
                 # Train RAG model with statistical profile
                 vanna_service.train(documentation=f"{table}.{column} statistical profile: {profile}")
                 logger.info(f"Trained profile for {table}.{column}")
-                
+
             except Exception as col_err:
                 logger.warning(f"Failed to analyze column {column} in table {table}: {col_err}")
                 continue
@@ -1335,16 +1393,17 @@ def _get_table_columns(conn, table: str) -> list:
         with conn.cursor() as cur:
             # Use psycopg2.sql for safe identifier quoting
             from psycopg2 import sql as psycopg2_sql
+
             safe_table_ident = psycopg2_sql.Identifier(table)
             query = psycopg2_sql.SQL("SELECT * FROM {} LIMIT 1;").format(safe_table_ident)
             cur.execute(query)
-            
+
             if cur.description is None:
                 logger.warning(f"Table {table} appears to be empty or inaccessible")
                 return []
-            
+
             return [desc[0] for desc in cur.description]
-            
+
     except ImportError:
         # Fallback for systems without psycopg2.sql
         with conn.cursor() as cur:
@@ -1362,10 +1421,11 @@ def _get_sample_data(conn, table: str) -> pd.DataFrame:
     try:
         # Use psycopg2.sql for safe table name handling
         from psycopg2 import sql as psycopg2_sql
+
         safe_table_ident = psycopg2_sql.Identifier(table)
         query = psycopg2_sql.SQL("SELECT * FROM {} LIMIT 1000;").format(safe_table_ident)
         return pd.read_sql_query(query.as_string(conn), conn)
-        
+
     except ImportError:
         # Fallback for systems without psycopg2.sql
         query = f'SELECT * FROM "{table}" LIMIT 1000;'
@@ -1378,7 +1438,7 @@ def _get_sample_data(conn, table: str) -> pd.DataFrame:
 def _generate_column_profile(table: str, column: str, column_data: pd.Series) -> str:
     """
     Generate comprehensive statistical profile for a single column.
-    
+
     Returns a detailed description including data type, statistics, patterns,
     and insights useful for SQL query generation.
     """
@@ -1386,31 +1446,31 @@ def _generate_column_profile(table: str, column: str, column_data: pd.Series) ->
     total_rows = len(column_data)
     non_null_count = column_data.count()
     null_count = column_data.isnull().sum()
-    
+
     # Guard against division by zero
     null_percentage = (null_count / total_rows * 100) if total_rows > 0 else 0
     unique_count = column_data.nunique()
     unique_percentage = (unique_count / non_null_count * 100) if non_null_count > 0 else 0
-    
+
     # Build profile description
     profile_parts = [
         f"Column '{column}' in table '{table}'",
         f"Data type: {column_data.dtype}",
         f"Total rows: {total_rows}, Non-null: {non_null_count}",
     ]
-    
+
     # Add null information if present
     if null_count > 0:
         profile_parts.append(f"Null values: {null_count} ({null_percentage:.1f}%)")
-    
+
     profile_parts.append(f"Unique values: {unique_count} ({unique_percentage:.1f}%)")
-    
+
     # Column role classification
     if unique_percentage > 95:
         profile_parts.append("Likely primary key or unique identifier")
     elif unique_percentage < 10:
         profile_parts.append("Low cardinality - likely categorical")
-    
+
     # Type-specific analysis
     if pd.api.types.is_numeric_dtype(column_data):
         profile_parts.extend(_analyze_numeric_column(column_data, non_null_count))
@@ -1420,17 +1480,17 @@ def _generate_column_profile(table: str, column: str, column_data: pd.Series) ->
         profile_parts.extend(_analyze_datetime_column(column_data))
     elif pd.api.types.is_bool_dtype(column_data):
         profile_parts.extend(_analyze_boolean_column(column_data, non_null_count))
-    
+
     # Most frequent values (for all types)
     if non_null_count > 0:
         top_values = column_data.value_counts().head(3)
         if len(top_values) > 0:
             top_values_str = ", ".join([f"'{val}' ({count}x)" for val, count in top_values.items()])
             profile_parts.append(f"Most frequent: {top_values_str}")
-    
+
     # Create final profile description
     description = ". ".join(profile_parts) + "."
-    
+
     # Ensure description fits within reasonable length limits
     return description[:800] + "..." if len(description) > 800 else description
 
@@ -1443,16 +1503,16 @@ def _analyze_numeric_column(column_data: pd.Series, non_null_count: int) -> list
         f"Mean: {desc_stats['mean']:.2f}, Median: {desc_stats['50%']:.2f}",
         f"Standard deviation: {desc_stats['std']:.2f}",
     ]
-    
+
     # Outlier detection using IQR method
-    q1, q3 = desc_stats['25%'], desc_stats['75%']
+    q1, q3 = desc_stats["25%"], desc_stats["75%"]
     iqr = q3 - q1
     outliers = column_data[(column_data < q1 - 1.5 * iqr) | (column_data > q3 + 1.5 * iqr)]
-    
+
     if len(outliers) > 0:
-        outlier_percentage = (len(outliers) / non_null_count * 100)
+        outlier_percentage = len(outliers) / non_null_count * 100
         analysis.append(f"Potential outliers: {len(outliers)} ({outlier_percentage:.1f}%)")
-    
+
     return analysis
 
 
@@ -1461,24 +1521,24 @@ def _analyze_string_column(column_data: pd.Series) -> list:
     non_null_strings = column_data.dropna()
     if len(non_null_strings) == 0:
         return ["No non-null string values"]
-    
+
     # Length statistics
     lengths = non_null_strings.str.len()
     analysis = [f"String length: avg {lengths.mean():.1f}, range {lengths.min()}-{lengths.max()}"]
-    
+
     # Pattern detection
-    if non_null_strings.str.contains('@', na=False).any():
-        email_count = non_null_strings.str.contains('@', na=False).sum()
+    if non_null_strings.str.contains("@", na=False).any():
+        email_count = non_null_strings.str.contains("@", na=False).sum()
         analysis.append(f"Contains {email_count} email-like values")
-    
-    if non_null_strings.str.match(r'^\d+$', na=False).any():
-        numeric_str_count = non_null_strings.str.match(r'^\d+$', na=False).sum()
+
+    if non_null_strings.str.match(r"^\d+$", na=False).any():
+        numeric_str_count = non_null_strings.str.match(r"^\d+$", na=False).sum()
         analysis.append(f"Contains {numeric_str_count} numeric strings")
-    
-    if non_null_strings.str.contains(r'\d{4}-\d{2}-\d{2}', na=False).any():
-        date_like_count = non_null_strings.str.contains(r'\d{4}-\d{2}-\d{2}', na=False).sum()
+
+    if non_null_strings.str.contains(r"\d{4}-\d{2}-\d{2}", na=False).any():
+        date_like_count = non_null_strings.str.contains(r"\d{4}-\d{2}-\d{2}", na=False).sum()
         analysis.append(f"Contains {date_like_count} date-like values")
-    
+
     return analysis
 
 
@@ -1487,10 +1547,10 @@ def _analyze_datetime_column(column_data: pd.Series) -> list:
     non_null_dates = column_data.dropna()
     if len(non_null_dates) == 0:
         return ["No non-null datetime values"]
-    
+
     min_date, max_date = non_null_dates.min(), non_null_dates.max()
     date_range = max_date - min_date
-    
+
     return [
         f"Date range: {min_date.date()} to {max_date.date()}",
         f"Span: {date_range.days} days",
@@ -1501,11 +1561,11 @@ def _analyze_boolean_column(column_data: pd.Series, non_null_count: int) -> list
     """Analyze boolean columns for distribution insights."""
     if non_null_count == 0:
         return ["No non-null boolean values"]
-    
+
     true_count = column_data.sum()
     false_count = non_null_count - true_count
-    true_percentage = (true_count / non_null_count * 100)
-    
+    true_percentage = true_count / non_null_count * 100
+
     return [f"Boolean distribution: {true_count} true ({true_percentage:.1f}%), {false_count} false"]
 
 
