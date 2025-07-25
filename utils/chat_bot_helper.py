@@ -28,12 +28,6 @@ def get_vn():
     return st.session_state._vn_instance
 
 
-@property
-def vn():
-    """Property to access VannaService instance."""
-    return get_vn()
-
-
 def call_llm(my_question: str):
     vn_instance = get_vn()
     response = vn_instance.submit_prompt(
