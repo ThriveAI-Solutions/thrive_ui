@@ -16,7 +16,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from orm.models import Message
-from utils.chat_bot_helper import add_message, set_question, vn
+from utils.chat_bot_helper import add_message, set_question, get_vn
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import read_forbidden_from_json, run_sql_cached, get_configured_schema, get_configured_object_type
 
@@ -790,6 +790,7 @@ Please analyze this data and provide insights based on the user's question. Be s
 """
         
         # Get LLM response
+        vn = get_vn()
         return vn.submit_prompt(enhanced_prompt, "Data analysis request")
 
     except Exception as e:
