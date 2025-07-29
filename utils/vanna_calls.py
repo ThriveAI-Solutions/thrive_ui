@@ -19,6 +19,7 @@ from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
 
 from utils.chromadb_vector import ThriveAI_ChromaDB
+from utils.thriveai_ollama import ThriveAI_Ollama
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ class MyVannaAnthropicChromaDB(ThriveAI_ChromaDB, Anthropic_Chat):
         logger.debug("%s: %s", title, message)
 
 
-class MyVannaOllama(VannaDB_VectorStore, Ollama):
+class MyVannaOllama(VannaDB_VectorStore, ThriveAI_Ollama):
     def __init__(self, config=None):
         try:
             logger.info("Using Ollama and VannaDB")
@@ -145,7 +146,7 @@ class MyVannaOllama(VannaDB_VectorStore, Ollama):
                 vanna_api_key=st.secrets["ai_keys"]["vanna_api"],
                 config=config,
             )
-            Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
+            ThriveAI_Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllama: %s", e)
             raise
@@ -155,12 +156,12 @@ class MyVannaOllama(VannaDB_VectorStore, Ollama):
         logger.debug("%s: %s", title, message)
 
 
-class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, Ollama):
+class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, ThriveAI_Ollama):
     def __init__(self, user_role: int, config=None):
         try:
             logger.info("Using Ollama and ChromaDB")
             ThriveAI_ChromaDB.__init__(self, user_role=user_role, config=config)
-            Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
+            ThriveAI_Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllamaChromaDB: %s", e)
             raise
