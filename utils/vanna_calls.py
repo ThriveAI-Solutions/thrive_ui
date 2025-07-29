@@ -146,7 +146,13 @@ class MyVannaOllama(VannaDB_VectorStore, ThriveAI_Ollama):
                 vanna_api_key=st.secrets["ai_keys"]["vanna_api"],
                 config=config,
             )
-            ThriveAI_Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
+            ThriveAI_Ollama.__init__(
+                self,
+                config={
+                    "model": st.secrets["ai_keys"]["ollama_model"],
+                    "ollama_host": st.secrets["ai_keys"]["ollama_host"],
+                },
+            )
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllama: %s", e)
             raise
@@ -161,7 +167,13 @@ class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, ThriveAI_Ollama):
         try:
             logger.info("Using Ollama and ChromaDB")
             ThriveAI_ChromaDB.__init__(self, user_role=user_role, config=config)
-            ThriveAI_Ollama.__init__(self, config={"model": st.secrets["ai_keys"]["ollama_model"]})
+            ThriveAI_Ollama.__init__(
+                self,
+                config={
+                    "model": st.secrets["ai_keys"]["ollama_model"],
+                    "ollama_host": st.secrets["ai_keys"]["ollama_host"],
+                },
+            )
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllamaChromaDB: %s", e)
             raise
