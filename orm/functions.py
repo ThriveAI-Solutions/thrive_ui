@@ -245,7 +245,11 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
 
 def set_user_preferences_in_session_state():
     try:
-        user_id = st.session_state.cookies.get("user_id")
+        user_id_str = st.session_state.cookies.get("user_id")
+        if not user_id_str:
+            return None
+
+        user_id = json.loads(user_id_str)
         user = get_user(user_id)
 
         # if "loaded" not in st.session_state:
