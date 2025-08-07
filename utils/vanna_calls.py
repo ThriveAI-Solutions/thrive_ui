@@ -175,6 +175,7 @@ class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, ThriveAI_Ollama):
                     "model": st.secrets["ai_keys"]["ollama_model"],
                     "ollama_host": st.secrets["ai_keys"]["ollama_host"],
                     "schema": st.secrets["postgres"].get("schema_name", "public"),
+                    "dialect": st.secrets["postgres"].get("dialect", "postgresql"),
                 },
             )
         except Exception as e:

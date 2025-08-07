@@ -275,9 +275,9 @@ if my_question:
                     st.caption(f"Database error: {error_msg}")
                 cols = st.columns([0.2, 0.8])
                 with cols[0]:
-                    retry_clicked = st.button("Retry", type="primary")
+                    retry_clicked = st.button("Retry", type="primary", key="retry_inline")
                 with cols[1]:
-                    show_sql_clicked = st.button("Show Failed SQL")
+                    show_sql_clicked = st.button("Show Failed SQL", key="show_failed_sql_inline")
                 if show_sql_clicked and failed_sql:
                     st.code(failed_sql, language="sql", line_numbers=True)
 
