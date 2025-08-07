@@ -123,6 +123,10 @@
         {
             "question": "How many people smoke in wny? Please bucket age by decade and group by gender.",
             "query": "SELECT \n    floor(age / 10) * 10 AS age_decade,\n    sex,\n    COUNT(*) as count \nFROM \n    wny_health \nWHERE \n    tobacco = 'Y' \nGROUP BY \n    age_decade, sex"
+        },
+        {
+            "question": "How many rows are in the wny_health table?",
+            "query": "SELECT COUNT(*) AS total_rows FROM public.wny_health"
         }
     ],
     "sample_documents": [

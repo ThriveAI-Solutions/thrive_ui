@@ -2,12 +2,13 @@ import json
 import re
 
 from httpx import Timeout
-from vanna.base import VannaBase
 from vanna.exceptions import DependencyError
 
+from utils.thriveai_base import ThriveAI_Base
 
-class ThriveAI_Ollama(VannaBase):
-    def __init__(self, config=None):
+
+class ThriveAI_Ollama(ThriveAI_Base):
+    def __init__(self, config=None, **kwargs):
         try:
             ollama = __import__("ollama")
         except ImportError:
@@ -23,6 +24,11 @@ class ThriveAI_Ollama(VannaBase):
         self.model = config["model"]
         if ":" not in self.model:
             self.model += ":latest"
+
+        # Ensure schema is available for prompt generation logic in ThriveAI_Base.get_sql_prompt
+        # We intentionally avoid calling super().__init__ here to prevent double-initialization
+        # when used alongside other mixins that already initialize VannaBase.
+        self.schema = config.get("schema", "public")
 
         self.ollama_timeout = config.get("ollama_timeout", 240.0)
 
