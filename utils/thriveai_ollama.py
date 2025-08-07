@@ -25,10 +25,11 @@ class ThriveAI_Ollama(ThriveAI_Base):
         if ":" not in self.model:
             self.model += ":latest"
 
-        # Ensure schema is available for prompt generation logic in ThriveAI_Base.get_sql_prompt
+        # Ensure schema/dialect are available for prompt generation logic in ThriveAI_Base.get_sql_prompt
         # We intentionally avoid calling super().__init__ here to prevent double-initialization
         # when used alongside other mixins that already initialize VannaBase.
         self.schema = config.get("schema", "public")
+        self.dialect = config.get("dialect", getattr(self, "dialect", "postgresql"))
 
         self.ollama_timeout = config.get("ollama_timeout", 240.0)
 
