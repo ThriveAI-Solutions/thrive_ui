@@ -23,7 +23,7 @@ def get_vanna_service():
 # Get the VannaService instance when needed, not at module import time
 def get_vn():
     """Get the VannaService instance, ensuring it's created with correct user context."""
-    if not hasattr(st.session_state, '_vn_instance') or st.session_state._vn_instance is None:
+    if not hasattr(st.session_state, "_vn_instance") or st.session_state._vn_instance is None:
         st.session_state._vn_instance = get_vanna_service()
     return st.session_state._vn_instance
 

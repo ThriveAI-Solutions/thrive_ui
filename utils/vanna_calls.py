@@ -14,7 +14,8 @@ from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import DML, Keyword
 from vanna.anthropic import Anthropic_Chat
 from vanna.google import GoogleGeminiChat
-from vanna.ollama import Ollama
+
+# from vanna.ollama import Ollama  # not used directly; keep import commented to avoid linter warning
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
 
@@ -466,6 +467,27 @@ class VannaService:
         else:
             return response, elapsed_time
 
+    @st.cache_data(show_spinner="Regenerating SQL after failure ...")
+    def generate_sql_retry(_self, question: str, failed_sql: str | None = None, error_message: str | None = None):
+        """Regenerate SQL including prior failure context so the LLM can correct mistakes."""
+        try:
+            # Build a retry-aware question while preserving the user's original intent
+            augmented_question_parts = [
+                f"Original question: {question}",
+                "The previous SQL failed to execute. Please return only a corrected, executable SQL query.",
+            ]
+            if failed_sql:
+                augmented_question_parts.append("Failed SQL:\n" + failed_sql)
+            if error_message:
+                augmented_question_parts.append("Database error: " + error_message)
+            augmented_question = "\n\n".join(augmented_question_parts)
+
+            return _self.generate_sql(augmented_question)
+        except Exception as e:
+            st.error(f"Error regenerating SQL: {e}")
+            logger.exception("%s", e)
+            return None, 0
+
     @st.cache_data(show_spinner="Checking for valid SQL ...")
     def is_sql_valid(_self, sql: str) -> bool:
         """Check if SQL is valid."""
@@ -482,8 +504,21 @@ class VannaService:
     def run_sql(_self, sql: str) -> DataFrame | None:
         """Run SQL query and return results as DataFrame."""
         try:
+            # Clear any previous error context before executing a new query
+            try:
+                st.session_state["last_run_sql_error"] = None
+                st.session_state["last_failed_sql"] = None
+            except Exception:
+                # Session state may not be initialized in some contexts; ignore
+                pass
             df = _self.vn.run_sql(sql=sql)
         except Exception as e:
+            # Persist error context for downstream UI/logic (e.g., retry flow)
+            try:
+                st.session_state["last_run_sql_error"] = str(e)
+                st.session_state["last_failed_sql"] = sql
+            except Exception:
+                pass
             st.error(f"Error running SQL: {e}")
             logger.exception("%s", e)
             return None
@@ -854,7 +889,8 @@ def training_plan():
                     fk.referenced_table,
                     fk.referenced_column,
                     fk.constraint_name as foreign_key_name,"""
-            table_filter = f"AND c.table_name IN (SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema_name}' AND table_type = 'BASE TABLE')"
+            # Note: retained for reference; not used in the final query assembly
+            # table_filter = f"AND c.table_name IN (SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema_name}' AND table_type = 'BASE TABLE')"
         else:  # views
             constraint_ctes = ""
             constraint_joins = ""
@@ -864,7 +900,8 @@ def training_plan():
                     NULL as referenced_table,
                     NULL as referenced_column,  
                     NULL as foreign_key_name,"""
-            table_filter = f"AND c.table_name IN (SELECT table_name FROM information_schema.views WHERE table_schema = '{schema_name}')"
+            # Note: retained for reference; not used in the final query assembly
+            # table_filter = f"AND c.table_name IN (SELECT table_name FROM information_schema.views WHERE table_schema = '{schema_name}')"
 
         if forbidden_tables_str:
             enhanced_query = f"""

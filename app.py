@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize Discord logging after Streamlit is ready
 
-#add_discord_handler_if_configured(logger)
+# add_discord_handler_if_configured(logger)
 
 # silence watchdog warnings
 logging.getLogger("fsevents").setLevel(logging.INFO)

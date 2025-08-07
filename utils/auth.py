@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-import utils.chat_bot_helper as chat_helper # need to do this even though its not used,  so that the class is initialized before its used.
+import utils.chat_bot_helper as chat_helper  # need to do this even though its not used,  so that the class is initialized before its used.
 import streamlit as st
 from orm.functions import set_user_preferences_in_session_state, verify_user_credentials
 
