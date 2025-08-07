@@ -151,6 +151,7 @@ class MyVannaOllama(VannaDB_VectorStore, ThriveAI_Ollama):
                 config={
                     "model": st.secrets["ai_keys"]["ollama_model"],
                     "ollama_host": st.secrets["ai_keys"]["ollama_host"],
+                    "schema": st.secrets["postgres"].get("schema_name", "public"),
                 },
             )
         except Exception as e:
@@ -172,6 +173,7 @@ class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, ThriveAI_Ollama):
                 config={
                     "model": st.secrets["ai_keys"]["ollama_model"],
                     "ollama_host": st.secrets["ai_keys"]["ollama_host"],
+                    "schema": st.secrets["postgres"].get("schema_name", "public"),
                 },
             )
         except Exception as e:
