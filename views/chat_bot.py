@@ -166,6 +166,38 @@ if chat_input:
 # Get question from session state
 my_question = st.session_state.get("my_question", None)
 
+# If we have a pending SQL error from a prior run, render a persistent retry panel
+if not my_question and st.session_state.get("pending_sql_error", False):
+    pending_question = st.session_state.get("pending_question")
+    error_msg = st.session_state.get("last_run_sql_error")
+    failed_sql = st.session_state.get("last_failed_sql")
+    with st.chat_message(RoleType.ASSISTANT.value):
+        st.error("I couldn't execute the generated SQL.")
+        if error_msg:
+            st.caption(f"Database error: {error_msg}")
+        cols = st.columns([0.25, 0.25, 0.5])
+        with cols[0]:
+            retry_clicked = st.button("Retry", type="primary", key="retry_persist")
+        with cols[1]:
+            show_sql_clicked = st.button("Show Failed SQL", key="show_failed_sql_persist")
+        if show_sql_clicked:
+            st.session_state["show_failed_sql_open"] = True
+            st.rerun()
+        if st.session_state.get("show_failed_sql_open") and failed_sql:
+            st.code(failed_sql, language="sql", line_numbers=True)
+
+    if retry_clicked:
+        st.session_state["use_retry_context"] = True
+        st.session_state["retry_failed_sql"] = failed_sql
+        st.session_state["retry_error_msg"] = error_msg
+        st.session_state["my_question"] = pending_question
+        # Clear the pending panel and open state
+        st.session_state["pending_sql_error"] = False
+        st.session_state["show_failed_sql_open"] = False
+        st.rerun()
+    else:
+        st.stop()
+
 if my_question:
     magic_response = is_magic_do_magic(my_question)
     if magic_response == True:
@@ -204,7 +236,18 @@ if my_question:
     with st.chat_message(RoleType.ASSISTANT.value):
         st.write(random_acknowledgment)
 
-    sql, elapsed_time = get_vn().generate_sql(question=my_question)
+    if st.session_state.get("use_retry_context"):
+        sql, elapsed_time = get_vn().generate_sql_retry(
+            question=my_question,
+            failed_sql=st.session_state.get("retry_failed_sql"),
+            error_message=st.session_state.get("retry_error_msg"),
+        )
+        # Clear retry context after use
+        st.session_state["use_retry_context"] = False
+        st.session_state["retry_failed_sql"] = None
+        st.session_state["retry_error_msg"] = None
+    else:
+        sql, elapsed_time = get_vn().generate_sql(question=my_question)
     st.session_state.my_question = None
 
     if sql:
@@ -222,9 +265,37 @@ if my_question:
 
         df = get_vn().run_sql(sql=sql)
 
-        # if sql doesn't return a dataframe, stop
+        # if sql doesn't return a dataframe, offer retry with LLM guidance
         if not isinstance(df, pd.DataFrame):
-            st.stop()
+            error_msg = st.session_state.get("last_run_sql_error")
+            failed_sql = st.session_state.get("last_failed_sql")
+            with st.chat_message(RoleType.ASSISTANT.value):
+                st.error("I couldn't execute the generated SQL.")
+                if error_msg:
+                    st.caption(f"Database error: {error_msg}")
+                cols = st.columns([0.2, 0.8])
+                with cols[0]:
+                    retry_clicked = st.button("Retry", type="primary")
+                with cols[1]:
+                    show_sql_clicked = st.button("Show Failed SQL")
+                if show_sql_clicked and failed_sql:
+                    st.code(failed_sql, language="sql", line_numbers=True)
+
+            if retry_clicked:
+                # Persist retry intent and context, then rerun so it flows through normal pipeline
+                st.session_state["use_retry_context"] = True
+                st.session_state["retry_failed_sql"] = failed_sql
+                st.session_state["retry_error_msg"] = error_msg
+                # Set a persistent flag so the panel can be re-rendered if needed
+                st.session_state["pending_sql_error"] = False
+                st.session_state["pending_question"] = my_question
+                st.session_state["my_question"] = my_question
+                st.rerun()
+            else:
+                # Mark pending error so a persistent panel can be shown if page reruns without action
+                st.session_state["pending_sql_error"] = True
+                st.session_state["pending_question"] = my_question
+                st.stop()
         else:
             st.session_state["df"] = df
 

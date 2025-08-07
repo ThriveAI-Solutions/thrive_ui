@@ -671,7 +671,7 @@ class TestMyVannaGeminiChromaDB:
         question = "What are the patient's latest vital signs?"
 
         vanna_gemini = MyVannaGeminiChromaDB(user_role=user_role_test, config={"path": test_chromadb_path})
-        
+
         # Manually set the config and dialect because we mocked the initializers
         vanna_gemini.config = {"path": test_chromadb_path}
         vanna_gemini.dialect = "postgres"
@@ -681,7 +681,9 @@ class TestMyVannaGeminiChromaDB:
         # Mock the RAG and LLM methods on the instance
         vanna_gemini.get_related_ddl = MagicMock(return_value=["CREATE TABLE vitals (patient_id INT, heart_rate INT)"])
         vanna_gemini.get_similar_question_sql = MagicMock(return_value=[])
-        vanna_gemini.get_related_documentation = MagicMock(return_value=["Vitals are important for patient monitoring."])
+        vanna_gemini.get_related_documentation = MagicMock(
+            return_value=["Vitals are important for patient monitoring."]
+        )
         vanna_gemini.submit_prompt = MagicMock(return_value="SELECT heart_rate FROM vitals WHERE patient_id = 123")
         vanna_gemini.extract_sql = MagicMock(return_value="SELECT heart_rate FROM vitals WHERE patient_id = 123")
 
@@ -691,18 +693,17 @@ class TestMyVannaGeminiChromaDB:
         # 3. Assertion
         vanna_gemini.submit_prompt.assert_called_once()
         prompt_messages = vanna_gemini.submit_prompt.call_args[0][0]
-        
+
         full_prompt_str = "".join(str(p) for p in prompt_messages)
         assert "CREATE TABLE vitals" in full_prompt_str
         assert "Vitals are important for patient monitoring." in full_prompt_str
-        
+
         vanna_gemini.extract_sql.assert_called_with("SELECT heart_rate FROM vitals WHERE patient_id = 123")
         assert sql == "SELECT heart_rate FROM vitals WHERE patient_id = 123"
 
 
 @pytest.mark.usefixtures("mock_streamlit_secrets")
 class TestVannaServiceSecurity:
-
     """Test security aspects of VannaService, especially role handling."""
 
     def test_defaults_to_patient_role_when_session_state_missing(self):

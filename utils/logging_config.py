@@ -87,8 +87,8 @@ def setup_logging(*, debug: bool = False) -> None:
     Configure logging.  Call exactly once, early in the main process.
     """
     logging.config.dictConfig(_dict_config(debug))
-    
+
     # Discord handler will be added later when Streamlit secrets are available
     print("Basic logging configuration complete - Discord handler will be added when secrets are available")
-    
+
     logging.getLogger(__name__).debug("Logging configured (debug=%s)", debug)
