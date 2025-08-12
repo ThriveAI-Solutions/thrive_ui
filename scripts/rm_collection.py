@@ -6,21 +6,36 @@ import chromadb
 
 
 def remove_collections(db_path: str, collection_names: list[str]) -> int:
-    """Remove one or more collections from a ChromaDB persistent client.
+    """Clear all items from one or more collections in a ChromaDB persistent client.
 
-    Returns process exit code (0 on success, non-zero if any deletion failed).
+    Leaves the collections themselves intact. Returns process exit code (0 on success,
+    non-zero if any collection could not be cleared or does not exist).
     """
     client = chromadb.PersistentClient(path=db_path)
 
     exit_code = 0
     for name in collection_names:
+        print(f"Clearing collection: '{name}' in '{db_path}' ...")
         try:
-            print(f"Deleting collection: '{name}' from '{db_path}' ...")
-            client.delete_collection(name=name)
-            print(f"Deleted: '{name}'")
+            collection = client.get_collection(name=name)
+        except Exception as exc:
+            print(f"Failed to access collection '{name}': {exc}")
+            exit_code = 1
+            continue
+
+        try:
+            cleared_total = 0
+            batch_size = 100
+            while True:
+                batch = collection.get(limit=batch_size)
+                ids = batch.get("ids", [])
+                if not ids:
+                    break
+                collection.delete(ids=ids)
+                cleared_total += len(ids)
+            print(f"Cleared {cleared_total} items from collection '{name}'.")
         except Exception as exc:  # Chroma may raise different exceptions across versions
-            # Do not fail the whole run; report and continue
-            print(f"Failed to delete collection '{name}': {exc}")
+            print(f"Failed to clear collection '{name}': {exc}")
             exit_code = 1
 
     return exit_code
@@ -29,7 +44,7 @@ def remove_collections(db_path: str, collection_names: list[str]) -> int:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Remove one or more collections from a ChromaDB persistent store.\n\n"
+            "Remove all documents from one or more ChromaDB collections (leave collections intact).\n\n"
             "Examples:\n"
             "  uv run scripts/rm_collection.py --collection ddl\n"
             "  uv run scripts/rm_collection.py --path ./chromadb --collection ddl sql\n"
@@ -48,7 +63,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         dest="collections",
         nargs="+",
         required=True,
-        help="One or more collection names to remove",
+        help="One or more collection names to clear",
     )
 
     return parser.parse_args(argv)
