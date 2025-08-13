@@ -69,9 +69,18 @@
         "list_patients_by_metric_v5_v",
         "metric_federated_data_v",
         "org_node_info_v",
-        "perform_facility_inpatient_claims_v"
+        "perform_facility_inpatient_claims_v",
+        "xraw_edh_claims_hghmrkcm_raw_med_v",
+        "xraw_edh_claims_hghmrkcm_raw_member_eligibility_v",
+        "xraw_edh_claims_hghmrkcm_raw_member_v",
+        "xraw_edh_claims_hghmrkcm_raw_rx_v",
+        "xraw_edh_claims_hghmrkma_raw_med_v",
+        "xraw_edh_claims_hghmrkma_raw_member_eligibility_v",
+        "xraw_edh_claims_hghmrkma_raw_member_v",
+        "xraw_edh_claims_hghmrkma_raw_rx_v"
     ],
     "columns": [
         "password"
     ]
 }
+
