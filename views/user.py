@@ -1,5 +1,7 @@
 import logging
+import io
 
+import pandas as pd
 import streamlit as st
 from pandas import DataFrame
 
@@ -31,6 +33,108 @@ def delete_all_training():
     except Exception as e:
         st.error(f"An error occurred: {e}")
         logger.error(f"An error occurred: {e}")
+
+
+def export_training_data_to_csv():
+    try:
+        # Get training data with current user's role-based filtering
+        vn = get_vn()
+        training_data = vn.get_training_data()
+        
+        if isinstance(training_data, DataFrame) and not training_data.empty:
+            # Create CSV buffer
+            csv_buffer = io.StringIO()
+            training_data.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+            
+            # Generate filename with timestamp
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"training_data_{timestamp}.csv"
+            
+            # Provide download button
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv_data,
+                file_name=filename,
+                mime="text/csv",
+                help="Download training data as CSV file"
+            )
+            st.toast("CSV export ready for download!")
+        else:
+            st.warning("No training data available to export.")
+    except Exception as e:
+        st.error(f"An error occurred during CSV export: {e}")
+        logger.error(f"CSV export error: {e}")
+
+
+def import_training_data_from_csv(uploaded_file):
+    try:
+        # Read the uploaded CSV file
+        df = pd.read_csv(uploaded_file)
+        
+        # Validate required columns
+        required_columns = ["training_data_type", "question", "content"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            st.error(f"Missing required columns: {', '.join(missing_columns)}")
+            return
+        
+        # Get Vanna instance
+        vn = get_vn()
+        success_count = 0
+        error_count = 0
+        
+        # Process each row
+        progress_bar = st.progress(0)
+        total_rows = len(df)
+        
+        for index, row in df.iterrows():
+            try:
+                # Update progress
+                progress_bar.progress((index + 1) / total_rows)
+                
+                # Skip rows with missing essential data
+                if pd.isna(row["content"]) or str(row["content"]).strip() == "":
+                    error_count += 1
+                    continue
+                
+                training_type = str(row["training_data_type"]).lower()
+                question = str(row["question"]) if not pd.isna(row["question"]) else None
+                content = str(row["content"])
+                
+                # Train based on the data type
+                if training_type == "sql" and question and question.strip():
+                    # SQL training data
+                    vn.train(question=question, sql=content)
+                elif training_type in ["ddl", "documentation"]:
+                    # Documentation or DDL training data
+                    vn.train(documentation=content)
+                else:
+                    # Default to documentation if unclear
+                    vn.train(documentation=content)
+                
+                success_count += 1
+                
+            except Exception as row_error:
+                error_count += 1
+                logger.error(f"Error processing row {index}: {row_error}")
+        
+        progress_bar.empty()
+        
+        # Show results
+        if success_count > 0:
+            st.success(f"Successfully imported {success_count} training entries!")
+            if error_count > 0:
+                st.warning(f"{error_count} entries failed to import. Check logs for details.")
+            st.rerun()
+        else:
+            st.error("No training data was successfully imported.")
+            
+    except Exception as e:
+        st.error(f"An error occurred during CSV import: {e}")
+        logger.error(f"CSV import error: {e}")
 
 
 @st.dialog("Cast your vote")
@@ -68,7 +172,7 @@ tab1, tab2 = st.tabs(["Training Data", "Change Password"])
 
 with tab1:
     if st.session_state.cookies.get("role_name") == "Admin":
-        cols = st.columns((0.2, 0.3, 0.2, 0.2, 0.2, 0.3, 0.2))
+        cols = st.columns((0.15, 0.25, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15))
         with cols[0]:
             st.button("Train DDL", on_click=train_ddl)
         with cols[1]:
@@ -85,6 +189,32 @@ with tab1:
                 pop_train("documentation")
         with cols[6]:
             st.button("Remove All", type="primary", on_click=delete_all_training)
+        with cols[7]:
+            if st.button("Export CSV"):
+                export_training_data_to_csv()
+
+        # Add CSV import functionality
+        st.divider()
+        st.subheader("Import Training Data from CSV")
+        uploaded_file = st.file_uploader(
+            "Choose a CSV file to upload training data",
+            type=["csv"],
+            help="Upload a CSV file with columns: training_data_type, question, content"
+        )
+        
+        if uploaded_file is not None:
+            # Show file details
+            st.info(f"📁 File: {uploaded_file.name} ({uploaded_file.size} bytes)")
+            
+            # Add confirmation button
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📤 Import Training Data", type="primary"):
+                    with st.spinner("Importing training data..."):
+                        import_training_data_from_csv(uploaded_file)
+            with col2:
+                if st.button("❌ Cancel"):
+                    st.rerun()
 
     # Get training data with current user's role-based filtering
     df = get_vn().get_training_data()
