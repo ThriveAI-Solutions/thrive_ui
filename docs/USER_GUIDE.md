@@ -580,4 +580,36 @@ If you encounter data quality problems:
 
 ---
 
+## Vector Store
+
+The app supports ChromaDB and Milvus Lite for vectorized documentation/training.
+
+### ChromaDB
+Configure in `.streamlit/secrets.toml`:
+```
+[rag_model]
+chroma_path = "./chromadb"
+```
+
+### Milvus Lite (file-backed)
+Configure in `.streamlit/secrets.toml`:
+```
+[rag_model.milvus]
+persist_path = "./milvus_demo.db"
+text_dim = 768
+collection_prefix = "thrive"
+```
+
+Optional: Use Ollama embeddings for higher quality (defaults to deterministic dev embeddings otherwise):
+```
+[ai_keys]
+ollama_host = "http://localhost:11434"
+ollama_embed_model = "nomic-embed-text"
+```
+
+Seed a sample Milvus dataset for local testing:
+```
+uv run python scripts/seed_milvus_sample.py --path ./milvus_demo.db --prefix sample --role 1
+```
+
 *Happy analyzing with Thrive AI! 🚀📊*
