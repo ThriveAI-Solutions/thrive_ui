@@ -193,6 +193,21 @@ uv run python -m pytest --cov=utils --cov-report=html
 uv run python -m pytest -vs
 ```
 
+### Milvus tests
+
+Milvus Lite hybrid search tests are marked `@pytest.mark.milvus` and require `pymilvus`.
+
+- Run only Milvus tests:
+```bash
+uv run pytest -m milvus
+```
+- Skip Milvus tests:
+```bash
+uv run pytest -m "not milvus"
+```
+
+Comparison tests report top-1 accuracy and MRR@k; Milvus should meet or exceed Chroma on the sample corpus.
+
 ## 🔍 Code Quality
 
 ```bash

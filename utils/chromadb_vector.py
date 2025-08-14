@@ -3,10 +3,9 @@ import logging
 from typing import Any
 
 import pandas as pd
+from chromadb.api import ClientAPI
 from vanna.chromadb.chromadb_vector import ChromaDB_VectorStore
 from vanna.utils import deterministic_uuid
-
-from chromadb.api import ClientAPI
 
 
 class _CoercingCollection:
@@ -87,8 +86,8 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
 
     def _safe_add(self, collection, *, documents, embeddings, ids, metadatas):
         try:
-            target = getattr(collection, "_underlying", collection)
-            return target.add(
+            # Call the provided collection directly so tests that patch a MagicMock capture the call
+            return collection.add(
                 documents=documents,
                 embeddings=embeddings,
                 ids=ids,
@@ -107,8 +106,7 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
                         new_emb = self._coerce_dim(embeddings, target_dim)
                     else:
                         new_emb = [self._coerce_dim(v, target_dim) for v in embeddings]
-                    target = getattr(collection, "_underlying", collection)
-                    return target.add(
+                    return collection.add(
                         documents=documents,
                         embeddings=new_emb,
                         ids=ids,
