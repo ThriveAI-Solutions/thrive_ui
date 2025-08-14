@@ -26,7 +26,7 @@ dependencies = [
     "wordcloud>=1.9.4",
     "vertexai>=1.71.1",
     "pymilvus>=2.6.0",
-    "milvus>=0.1.0",
+    "milvus-lite>=2.5.1",
 ]
 
 [dependency-groups]
