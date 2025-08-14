@@ -46,6 +46,12 @@ class ThriveAI_Milvus:
             # Deterministic hashing vectorizer for dense embeddings (dev-time)
             # n_features must equal the configured dim
             self._vectorizer = HashingVectorizer(n_features=self._dim, alternate_sign=False, norm="l2")
+
+            # Default retrieval sizes (parity with Chroma = 10), overridable via config
+            _top_k = int(self.config.get("top_k", 10))
+            self.n_results_sql = int(self.config.get("n_results_sql", _top_k))
+            self.n_results_ddl = int(self.config.get("n_results_ddl", _top_k))
+            self.n_results_documentation = int(self.config.get("n_results_documentation", _top_k))
         except Exception as e:
             logger.exception("Error initializing ThriveAI_Milvus: %s", e)
             raise
@@ -320,7 +326,7 @@ class ThriveAI_Milvus:
         Uses the same robust path as documentation/ddl to avoid hybrid_search metric/index issues.
         """
         try:
-            texts = self._hybrid_docs(self.sql_collection, question, limit=5, metadata=metadata)
+            texts = self._hybrid_docs(self.sql_collection, question, limit=self.n_results_sql, metadata=metadata)
             out: list[dict] = []
             for t in texts:
                 try:
@@ -420,19 +426,19 @@ class ThriveAI_Milvus:
 
     def get_related_ddl(self, question: str, metadata: dict[str, Any] | None = None, **kwargs) -> list:
         try:
-            return self._hybrid_docs(self.ddl_collection, question, limit=5, metadata=metadata)
+            return self._hybrid_docs(self.ddl_collection, question, limit=self.n_results_ddl, metadata=metadata)
         except Exception as e:
             logger.exception("Error in get_related_ddl: %s", e)
             return []
 
     def get_related_documentation(self, question: str, metadata: dict[str, Any] | None = None, **kwargs) -> list:
         try:
-            return self._hybrid_docs(self.documentation_collection, question, limit=5, metadata=metadata)
+            return self._hybrid_docs(self.documentation_collection, question, limit=self.n_results_documentation, metadata=metadata)
         except Exception as e:
             logger.exception("Error in get_related_documentation: %s", e)
             return []
 
-    def hybrid_query_text(self, collection_name: str, question: str, top_k: int = 5, metadata: dict[str, Any] | None = None) -> list[str]:
+    def hybrid_query_text(self, collection_name: str, question: str, top_k: int = 10, metadata: dict[str, Any] | None = None) -> list[str]:
         """Generic hybrid query over a named collection, returns raw text documents."""
         try:
             return self._hybrid_docs(collection_name, question, limit=top_k, metadata=metadata)
