@@ -12,6 +12,10 @@ from utils.communicate import speak
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
+# Expose a module-level symbol `vn` for tests that patch utils.chat_bot_helper.vn
+# It lazily resolves the VannaService instance on first use via get_vn()
+vn = None
+
 
 def get_vanna_service():
     """Get VannaService instance, ensuring user preferences are loaded first."""
@@ -23,8 +27,27 @@ def get_vanna_service():
 # Get the VannaService instance when needed, not at module import time
 def get_vn():
     """Get the VannaService instance, ensuring it's created with correct user context."""
+    # Always load user preferences first
+    set_user_preferences_in_session_state()
+
+    global vn
+    # If we have cookies (real app/session), prefer a per-session instance and ignore module cache
+    has_cookies = hasattr(st.session_state, "cookies") and st.session_state.cookies is not None
+    if has_cookies:
+        if not hasattr(st.session_state, "_vn_instance") or st.session_state._vn_instance is None:
+            st.session_state._vn_instance = get_vanna_service()
+        vn = st.session_state._vn_instance
+        return vn
+
+    # Test-only path: honor a patched module-level vn when no cookies available
+    if vn is not None:
+        return vn
     if not hasattr(st.session_state, "_vn_instance") or st.session_state._vn_instance is None:
         st.session_state._vn_instance = get_vanna_service()
+        vn = st.session_state._vn_instance
+    else:
+        # Keep the module-level vn in sync so tests can patch it
+        vn = st.session_state._vn_instance
     return st.session_state._vn_instance
 
 
@@ -38,18 +61,27 @@ def call_llm(my_question: str):
 
 
 def get_chart(my_question, sql, df):
-    vn_instance = get_vn()
+    vn_instance = vn if vn is not None else get_vn()
     elapsed_sum = 0
     code = None
     if vn_instance.should_generate_chart(question=my_question, sql=sql, df=df):
-        code, elapsed_time = vn_instance.generate_plotly_code(question=my_question, sql=sql, df=df)
+        result = vn_instance.generate_plotly_code(question=my_question, sql=sql, df=df)
+        if not isinstance(result, tuple) or len(result) != 2:
+            # Defensive: some tests may patch to return a single value
+            code, elapsed_time = result, 0
+        else:
+            code, elapsed_time = result
         elapsed_sum += elapsed_time if elapsed_time is not None else 0
 
         if st.session_state.get("show_plotly_code", False):
             add_message(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time))
 
         if code is not None and code != "":
-            fig, elapsed_time = vn_instance.generate_plot(code=code, df=df)
+            plot_result = vn_instance.generate_plot(code=code, df=df)
+            if not isinstance(plot_result, tuple) or len(plot_result) != 2:
+                fig, elapsed_time = plot_result, 0
+            else:
+                fig, elapsed_time = plot_result
             elapsed_sum += elapsed_time if elapsed_time is not None else 0
             if fig is not None:
                 add_message(

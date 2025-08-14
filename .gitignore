@@ -190,3 +190,9 @@ tmp/
 GEMINI.md
 CLAUDE.md
 .claude/settings.local.json
+
+LLM_GUIDE.md
+MILVUS_DELIVERY_PLAN.md
+MILVUS_TASKS.md
+PROJECT_OUTLINE.md
+milvus_demo.db
