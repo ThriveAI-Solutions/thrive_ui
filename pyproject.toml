@@ -25,6 +25,8 @@ dependencies = [
     "vanna[anthropic,chromadb,gemini,ollama,postgres]==0.7.5",
     "wordcloud>=1.9.4",
     "vertexai>=1.71.1",
+    "pymilvus>=2.6.0",
+    "milvus>=0.1.0",
 ]
 
 [dependency-groups]
