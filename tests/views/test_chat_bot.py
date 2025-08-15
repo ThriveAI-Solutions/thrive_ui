@@ -389,7 +389,7 @@ class TestRenderMessage:
         sql_query = "SELECT * FROM summary_table;"
         question_text = "What is the summary?"
         df_for_actions = pd.DataFrame({"column1": [1], "column2": [2]})  # Need at least 2 columns for chart buttons
-        df_json_for_actions = df_for_actions.to_json(orient="records")
+        df_json_for_actions = df_for_actions.to_json(date_format='iso')
 
         msg = Message(
             role=RoleType.ASSISTANT,
