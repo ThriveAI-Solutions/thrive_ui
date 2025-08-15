@@ -75,8 +75,9 @@
         "xraw_edh_claims_hghmrkma_raw_member_eligibility_v",
         "xraw_edh_claims_hghmrkma_raw_member_v",
         "xraw_edh_claims_hghmrkma_raw_rx_v",
-        "edh_raw_acg_risk_list_v"
-
+        "edh_raw_acg_risk_list_v",
+        "aggregate_cost_pmpm_v",
+        "aggregate_cost_pmpm_risk_adjusted_v "
     ],
     "columns": [
         "password"
