@@ -863,7 +863,12 @@ def is_sql_valid_cached(sql: str):
 
 @st.cache_data(show_spinner="Running SQL query ...")
 def run_sql_cached(sql: str) -> DataFrame:
-    return VannaService.from_streamlit_session().run_sql(sql)
+    df = VannaService.from_streamlit_session().run_sql(sql)
+    # Apply row limit to all SQL query results
+    if df is not None:
+        from utils.config_helper import apply_dataframe_limit
+        df = apply_dataframe_limit(df)
+    return df
 
 
 @st.cache_data(show_spinner="Checking if we should generate a chart ...")
@@ -1126,6 +1131,11 @@ def training_plan():
         # Execute enhanced schema query
         st.toast("📊 Retrieving enhanced schema information...")
         df_information_schema = vanna_service.run_sql(enhanced_query)
+        
+        # Apply row limit to schema information
+        if df_information_schema is not None:
+            from utils.config_helper import apply_dataframe_limit
+            df_information_schema = apply_dataframe_limit(df_information_schema)
 
         if df_information_schema is None or df_information_schema.empty:
             st.warning("No schema information retrieved")
