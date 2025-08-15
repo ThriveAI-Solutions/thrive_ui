@@ -265,6 +265,14 @@ if my_question:
 
         df = get_vn().run_sql(sql=sql)
 
+        # Truncate DataFrame if it exceeds max display rows
+        if isinstance(df, pd.DataFrame):
+            from utils.config_helper import truncate_dataframe
+            df, was_truncated, original_count = truncate_dataframe(df)
+            
+            if was_truncated:
+                st.warning(f"⚠️ Results truncated: Showing first {len(df):,} rows of {original_count:,} total rows")
+
         # if sql doesn't return a dataframe, offer retry with LLM guidance
         if not isinstance(df, pd.DataFrame):
             error_msg = st.session_state.get("last_run_sql_error")
