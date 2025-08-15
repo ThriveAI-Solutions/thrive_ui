@@ -682,6 +682,40 @@ def _head(question, tuple, previous_df):
         add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
 
 
+def _tail(question, tuple, previous_df):
+    try:
+        start_time = time.perf_counter()
+        sql = ""
+        count = 20  # Default to 20 rows
+
+        if "num_rows" in tuple:
+            count = int(tuple["num_rows"])
+        if previous_df is None:
+            table_name = find_closest_object_name(tuple["table"])
+
+            # For tail, we need to get the total count first, then offset appropriately
+            count_sql = f"SELECT COUNT(*) as total FROM {table_name};"
+            count_df = run_sql_cached(count_sql)
+            total_rows = count_df.iloc[0]['total']
+            
+            # Calculate offset to get the last 'count' rows
+            offset = max(0, total_rows - count)
+            sql = f"SELECT * FROM {table_name} OFFSET {offset};"
+            df = run_sql_cached(sql)
+        else:
+            df = previous_df.tail(count)
+
+        if df.empty:
+            raise Exception("No rows found in the database.")
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+
+        add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, question, df, elapsed_time))
+    except Exception as e:
+        add_message(Message(RoleType.ASSISTANT, f"Error retrieving tables: {str(e)}", MessageType.ERROR))
+
+
 def _followup(question, tuple, previous_df):
     try:
         start_time = time.perf_counter()
@@ -4801,6 +4835,14 @@ FOLLOW_UP_MAGIC_RENDERERS = {
         "func": _head,
         "category": "Data Exploration & Basic Info",
     },
+    r"^tail\s+(?P<num_rows>\d+)$": {
+        "func": _tail,
+        "category": "Data Exploration & Basic Info",
+    },
+    r"^tail$": {
+        "func": _tail,
+        "category": "Data Exploration & Basic Info",
+    },
     r"^describe$": {
         "func": _describe_table,
         "category": "Data Exploration & Basic Info",
@@ -4966,6 +5008,20 @@ MAGIC_RENDERERS = {
     r"^/head\s+(?P<table>.+)$": {
         "func": _head,
         "description": "Show the first 20 rows of a given table",
+        "sample_values": {"table": "wny_health"},
+        "category": "Database Exploration",
+        "show_example": False,
+    },
+    r"^/tail\s+(?P<table>\w+)\.(?P<num_rows>\d+)$": {
+        "func": _tail,
+        "description": "Show the last {num_rows} rows of a given table",
+        "sample_values": {"table": "wny_health", "num_rows": 50},
+        "category": "Database Exploration",
+        "show_example": False,
+    },
+    r"^/tail\s+(?P<table>.+)$": {
+        "func": _tail,
+        "description": "Show the last 20 rows of a given table",
         "sample_values": {"table": "wny_health"},
         "category": "Database Exploration",
         "show_example": False,

@@ -247,7 +247,7 @@ def _render_error(message: Message, index: int):
 
 
 def _render_dataframe(message: Message, index: int):
-    df = pd.read_json(StringIO(message.content))
+    df = pd.read_json(StringIO(message.content), convert_dates=True)
     st.dataframe(df, key=f"message_{index}")
 
 
@@ -262,7 +262,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
         )
         if st.button("Generate Table", key=f"table_{index}"):
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
-            df_json_content = my_df.to_json(orient="records")
+            df_json_content = my_df.to_json(date_format='iso')
             add_message(
                 Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question),
                 False,
