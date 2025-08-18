@@ -264,7 +264,7 @@ if my_question:
             st.stop()
 
         # Query limiting is now handled inside the run_sql method via LIMIT clause
-        df = get_vn().run_sql(sql=sql)
+        df, sql_elapsed_time = get_vn().run_sql(sql=sql)
 
         # if sql doesn't return a dataframe, offer retry with LLM guidance
         if not isinstance(df, pd.DataFrame):
@@ -302,7 +302,7 @@ if my_question:
 
         if st.session_state.get("show_table", True):
             df = st.session_state.get("df")
-            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question))
+            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question, None, sql_elapsed_time))
 
         if st.session_state.get("show_chart", True):
             get_chart(my_question, sql, df)

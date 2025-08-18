@@ -1,5 +1,6 @@
 import ast
 import json
+import logging
 import uuid
 from io import StringIO
 
@@ -9,6 +10,8 @@ import streamlit as st
 from orm.functions import save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
 from utils.communicate import speak
+
+logger = logging.getLogger(__name__)
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
@@ -215,6 +218,8 @@ def _render_error(message: Message, index: int):
 
 
 def _render_dataframe(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Query Execution Time: {message.elapsed_time:.3f}s")
     df = pd.read_json(StringIO(message.content), convert_dates=True)
     st.dataframe(df, key=f"message_{index}")
 
