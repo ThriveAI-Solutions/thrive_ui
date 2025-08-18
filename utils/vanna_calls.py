@@ -456,6 +456,10 @@ class VannaService:
                 sql_response = _self.vn.generate_sql(question=question)
 
             response = _self.check_references(sql_response)
+            
+            # Ensure query has appropriate LIMIT clause after generation
+            from utils.config_helper import ensure_query_has_limit
+            response = ensure_query_has_limit(response)
 
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
@@ -512,6 +516,7 @@ class VannaService:
             except Exception:
                 # Session state may not be initialized in some contexts; ignore
                 pass
+            
             df = _self.vn.run_sql(sql=sql)
         except Exception as e:
             # Persist error context for downstream UI/logic (e.g., retry flow)
@@ -728,11 +733,8 @@ def is_sql_valid_cached(sql: str):
 
 @st.cache_data(show_spinner="Running SQL query ...")
 def run_sql_cached(sql: str) -> DataFrame:
+    # Query limiting is now handled inside run_sql method
     df = VannaService.from_streamlit_session().run_sql(sql)
-    # Apply row limit to all SQL query results
-    if df is not None:
-        from utils.config_helper import apply_dataframe_limit
-        df = apply_dataframe_limit(df)
     return df
 
 
@@ -996,11 +998,6 @@ def training_plan():
         # Execute enhanced schema query
         st.toast("📊 Retrieving enhanced schema information...")
         df_information_schema = vanna_service.run_sql(enhanced_query)
-        
-        # Apply row limit to schema information
-        if df_information_schema is not None:
-            from utils.config_helper import apply_dataframe_limit
-            df_information_schema = apply_dataframe_limit(df_information_schema)
 
         if df_information_schema is None or df_information_schema.empty:
             st.warning("No schema information retrieved")
