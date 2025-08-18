@@ -558,7 +558,11 @@ class VannaService:
     def generate_questions(_self):
         """Generate sample questions using Vanna."""
         try:
+            start_time = time.perf_counter()
             questions = _self.vn.generate_questions()
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+            logger.info("Generate questions elapsed time is %s", elapsed_time)
         except Exception as e:
             st.error(f"Error generating questions: {e}")
             logger.exception("%s", e)
@@ -581,6 +585,10 @@ class VannaService:
                 sql_response = _self.vn.generate_sql(question=question)
 
             response = _self.check_references(sql_response)
+            
+            # Ensure query has appropriate LIMIT clause after generation
+            from utils.config_helper import ensure_query_has_limit
+            response = ensure_query_has_limit(response)
 
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
@@ -618,7 +626,11 @@ class VannaService:
     def is_sql_valid(_self, sql: str) -> bool:
         """Check if SQL is valid."""
         try:
+            start_time = time.perf_counter()
             is_valid = _self.vn.is_sql_valid(sql=sql)
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+            logger.info("SQL validation elapsed time is %s", elapsed_time)
         except Exception as e:
             st.error(f"Error checking SQL validity: {e}")
             logger.exception("%s", e)
@@ -627,8 +639,8 @@ class VannaService:
             return is_valid
 
     @st.cache_data(show_spinner="Running SQL query ...")
-    def run_sql(_self, sql: str) -> DataFrame | None:
-        """Run SQL query and return results as DataFrame."""
+    def run_sql(_self, sql: str) -> tuple[DataFrame | None, float]:
+        """Run SQL query and return results as DataFrame with elapsed time."""
         try:
             # Clear any previous error context before executing a new query
             try:
@@ -637,7 +649,12 @@ class VannaService:
             except Exception:
                 # Session state may not be initialized in some contexts; ignore
                 pass
+            
+            start_time = time.perf_counter()
             df = _self.vn.run_sql(sql=sql)
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+            logger.info("SQL execution elapsed time is %s", elapsed_time)
         except Exception as e:
             # Persist error context for downstream UI/logic (e.g., retry flow)
             try:
@@ -647,15 +664,19 @@ class VannaService:
                 pass
             st.error(f"Error running SQL: {e}")
             logger.exception("%s", e)
-            return None
+            return None, 0
         else:
-            return df
+            return df, elapsed_time
 
     @st.cache_data(show_spinner="Checking if we should generate a chart ...")
     def should_generate_chart(_self, question, sql, df):
         """Check if a chart should be generated for the result."""
         try:
+            start_time = time.perf_counter()
             generate_chart = _self.vn.should_generate_chart(df=df)
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+            logger.info("Chart generation check elapsed time is %s", elapsed_time)
         except Exception as e:
             st.error(f"Error checking if we should generate a chart: {e}")
             logger.exception("%s", e)
@@ -701,7 +722,11 @@ class VannaService:
     def generate_followup_questions(_self, question, sql, df):
         """Generate follow-up questions based on results."""
         try:
+            start_time = time.perf_counter()
             followup_questions = _self.vn.generate_followup_questions(question=question, sql=sql, df=df)
+            end_time = time.perf_counter()
+            elapsed_time = end_time - start_time
+            logger.info("Followup questions generation elapsed time is %s", elapsed_time)
         except Exception as e:
             st.error(f"Error generating followup questions: {e}")
             logger.exception("%s", e)
@@ -862,13 +887,9 @@ def is_sql_valid_cached(sql: str):
 
 
 @st.cache_data(show_spinner="Running SQL query ...")
-def run_sql_cached(sql: str) -> DataFrame:
-    df = VannaService.from_streamlit_session().run_sql(sql)
-    # Apply row limit to all SQL query results
-    if df is not None:
-        from utils.config_helper import apply_dataframe_limit
-        df = apply_dataframe_limit(df)
-    return df
+def run_sql_cached(sql: str) -> tuple[DataFrame | None, float]:
+    # Query limiting is now handled inside run_sql method
+    return VannaService.from_streamlit_session().run_sql(sql)
 
 
 @st.cache_data(show_spinner="Checking if we should generate a chart ...")
@@ -1130,12 +1151,7 @@ def training_plan():
 
         # Execute enhanced schema query
         st.toast("📊 Retrieving enhanced schema information...")
-        df_information_schema = vanna_service.run_sql(enhanced_query)
-        
-        # Apply row limit to schema information
-        if df_information_schema is not None:
-            from utils.config_helper import apply_dataframe_limit
-            df_information_schema = apply_dataframe_limit(df_information_schema)
+        df_information_schema, elapsed_time = vanna_service.run_sql(enhanced_query)
 
         if df_information_schema is None or df_information_schema.empty:
             st.warning("No schema information retrieved")

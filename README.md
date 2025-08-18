@@ -126,6 +126,12 @@ Configure custom training examples for your database schema. The application aut
 ### Forbidden References (`utils/config/forbidden_references.json`)
 Specify tables or columns to exclude from queries and training data for security compliance.
 
+### Environment Variables
+Configure application behavior using environment variables or `.streamlit/secrets.toml`:
+
+- **`MAX_DISPLAY_ROWS`** - Maximum rows to display in DataFrames (default: 1000)
+- **`MAX_SESSION_MESSAGES`** - Maximum messages to keep in session state for performance (default: 20)
+
 ## 🎯 Magic Commands
 
 Thrive AI includes powerful magic commands for advanced analysis:
