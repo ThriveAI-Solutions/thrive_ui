@@ -45,6 +45,14 @@ if "messages" not in st.session_state or st.session_state.messages == []:
 if st.session_state.messages is None:
     st.session_state.messages = []
 
+# Manage session state memory by limiting messages for performance
+from utils.config_helper import get_max_session_messages
+max_messages = get_max_session_messages()
+if len(st.session_state.messages) > max_messages:
+    messages_to_remove = len(st.session_state.messages) - max_messages
+    st.session_state.messages = st.session_state.messages[messages_to_remove:]
+    logger.info(f"Session startup: Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages.")
+
 
 ######### Sidebar settings #########
 def save_settings_on_click():
@@ -263,15 +271,8 @@ if my_question:
                 call_llm(my_question)
             st.stop()
 
-        df = get_vn().run_sql(sql=sql)
-
-        # Truncate DataFrame if it exceeds max display rows
-        if isinstance(df, pd.DataFrame):
-            from utils.config_helper import truncate_dataframe
-            df, was_truncated, original_count = truncate_dataframe(df)
-            
-            if was_truncated:
-                st.warning(f"⚠️ Results truncated: Showing first {len(df):,} rows of {original_count:,} total rows")
+        # Query limiting is now handled inside the run_sql method via LIMIT clause
+        df, sql_elapsed_time = get_vn().run_sql(sql=sql)
 
         # if sql doesn't return a dataframe, offer retry with LLM guidance
         if not isinstance(df, pd.DataFrame):
@@ -309,7 +310,7 @@ if my_question:
 
         if st.session_state.get("show_table", True):
             df = st.session_state.get("df")
-            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question))
+            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question, None, sql_elapsed_time))
 
         if st.session_state.get("show_chart", True):
             get_chart(my_question, sql, df)
