@@ -97,7 +97,7 @@ def get_all_column_names(table):
         table_name = schema_qualified_name.split(".")[-1]
 
         sql = f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_name}' AND table_name = '{table_name}' order by column_name;"
-        df = run_sql_cached(sql)
+        df, elapsed_time = run_sql_cached(sql)
         if df.empty:
             raise Exception(f"No columns found for {object_name} '{schema_qualified_name}' in schema '{schema_name}'.")
 
@@ -127,7 +127,7 @@ def get_all_object_names():
         else:
             sql = f"SELECT table_name FROM information_schema.{object_type} WHERE table_schema = '{schema_name}' AND table_name NOT IN ({forbidden_tables_str}) order by table_name;"
 
-        df = run_sql_cached(sql)
+        df, elapsed_time = run_sql_cached(sql)
         if df.empty:
             object_name = "table" if object_type == "tables" else "view"
             raise Exception(f"No {object_name}s found in the database.")
@@ -213,7 +213,7 @@ def find_closest_column_name(table_name, column_name):
                 AND table_name = '{unqualified_table_name}';
             """
 
-        df = run_sql_cached(sql)
+        df, elapsed_time = run_sql_cached(sql)
         column_names = df["column_name"].tolist() if not df.empty else []
         matches = difflib.get_close_matches(column_name, column_names, n=1, cutoff=0.6)
 
@@ -667,7 +667,7 @@ def _head(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
 
             sql = f"SELECT *  FROM {table_name} LIMIT {count};"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df.head(count)
 
@@ -701,7 +701,7 @@ def _tail(question, tuple, previous_df):
             # Calculate offset to get the last 'count' rows
             offset = max(0, total_rows - count)
             sql = f"SELECT * FROM {table_name} OFFSET {offset};"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df.tail(count)
 
@@ -887,7 +887,7 @@ def _generate_heatmap(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -1030,7 +1030,7 @@ def get_wordcloud(sql, table_name, column_name=None, previous_df=None):
         if previous_df is not None:
             df = previous_df
         else:
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
 
         if df is None or df.empty:
             add_message(
@@ -1179,7 +1179,7 @@ def _generate_pairplot(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"  # Limit for performance
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -1285,7 +1285,7 @@ def generate_plotly(chart_type, question, tuple, previous_df):
             column_y = find_closest_column_name(table_name, tuple["y"])
             column_color = find_closest_column_name(table_name, tuple["color"])
             sql = f"SELECT {column_x}, {column_y}, {column_color} FROM {table_name};"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -1392,7 +1392,7 @@ def _describe_table(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -1454,7 +1454,7 @@ def _distribution_analysis(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if column_name not in df.columns:
@@ -1647,7 +1647,7 @@ def _outlier_detection(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if column_name not in df.columns:
@@ -1738,7 +1738,7 @@ def _profile_table(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -1809,7 +1809,7 @@ def _missing_analysis(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -1901,7 +1901,7 @@ def _duplicate_analysis(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -1964,7 +1964,7 @@ def _boxplot_visualization(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if column_name not in df.columns:
@@ -2093,7 +2093,7 @@ def _cluster_analysis(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -2214,7 +2214,7 @@ def _pca_analysis(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -2329,7 +2329,7 @@ def _confusion_matrix(question, tuple, previous_df):
             true_column = find_closest_column_name(table_name, true_column)
             pred_column = find_closest_column_name(table_name, pred_column)
             sql = f"SELECT {true_column}, {pred_column} FROM {table_name} WHERE {true_column} IS NOT NULL AND {pred_column} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if true_column not in df.columns:
@@ -2444,7 +2444,7 @@ def _generate_report(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -2746,7 +2746,7 @@ def _generate_summary(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -3087,7 +3087,7 @@ def _correlation_analysis(question, tuple, previous_df):
             column1_name = find_closest_column_name(table_name, column1_name)
             column2_name = find_closest_column_name(table_name, column2_name)
             sql = f"SELECT {column1_name}, {column2_name} FROM {table_name} WHERE {column1_name} IS NOT NULL AND {column2_name} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if column1_name not in df.columns:
@@ -3296,7 +3296,7 @@ def _correlation_analysis(question, tuple, previous_df):
 
 
 # def check_length(sql):
-#     df = run_sql_cached(sql)
+#     df, elapsed_time = run_sql_cached(sql)
 #     if df is not None and not df.empty:
 #         number = float(df.iloc[0, 0])
 #         if number > 1:
@@ -3324,7 +3324,7 @@ def _analyze_datatypes(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name} LIMIT 10000;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -3594,7 +3594,7 @@ def _violin_plot(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if column_name not in df.columns:
@@ -3802,7 +3802,7 @@ def _anomaly_detection(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if column_name not in df.columns:
@@ -4093,7 +4093,7 @@ def _smart_sample(question, tuple, previous_df):
         if previous_df is None:
             table_name = find_closest_object_name(tuple["table"])
             sql = f"SELECT * FROM {table_name};"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
 
@@ -4396,7 +4396,7 @@ def _transform_data(question, tuple, previous_df):
             table_name = find_closest_object_name(tuple["table"])
             column_name = find_closest_column_name(table_name, column_name)
             sql = f"SELECT {column_name} FROM {table_name} WHERE {column_name} IS NOT NULL;"
-            df = run_sql_cached(sql)
+            df, elapsed_time = run_sql_cached(sql)
         else:
             df = previous_df
             if column_name not in df.columns:
