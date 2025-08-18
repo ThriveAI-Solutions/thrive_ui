@@ -210,7 +210,7 @@ def _render_plotly_chart(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     message.content = message.content.replace("#000001", "#0b5258")  # Replace color code for consistency
     chart = json.loads(message.content)
-    st.plotly_chart(chart, key=f"message_{index}")
+    st.plotly_chart(chart, key=f"message_{message.id}")
 
 
 def _render_error(message: Message, index: int):
@@ -221,19 +221,19 @@ def _render_dataframe(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Query Execution Time: {message.elapsed_time:.3f}s")
     df = pd.read_json(StringIO(message.content), convert_dates=True)
-    st.dataframe(df, key=f"message_{index}")
+    st.dataframe(df, key=f"message_{message.id}")
 
 
 def _render_summary_actions_popover(message: Message, index: int, my_df: pd.DataFrame):
     # Helper for the popover content within summary messages
     with st.popover("Actions", use_container_width=True):
-        st.button("Speak Summary", key=f"speak_summary_{index}", on_click=lambda: speak(message.content))
+        st.button("Speak Summary", key=f"speak_summary_{message.id}", on_click=lambda: speak(message.content))
         st.button(
             "Follow-up Questions",
-            key=f"follow_up_questions_{index}",
+            key=f"follow_up_questions_{message.id}",
             on_click=lambda: get_followup_questions(message.question, message.query, my_df),
         )
-        if st.button("Generate Table", key=f"table_{index}"):
+        if st.button("Generate Table", key=f"table_{message.id}"):
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
             df_json_content = my_df.to_json(date_format='iso')
             add_message(
@@ -247,11 +247,11 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             with cols[0]:
                 st.button(
                     "Generate Plotly",
-                    key=f"graph_{index}",
+                    key=f"graph_{message.id}",
                     on_click=lambda: get_chart(message.question, message.query, my_df),
                 )
             with cols[1]:
-                if st.button("Line Chart", key=f"line_chart_{index}"):
+                if st.button("Line Chart", key=f"line_chart_{message.id}"):
                     add_message(
                         Message(
                             RoleType.ASSISTANT,
@@ -265,7 +265,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
                         False,
                     )
             with cols[2]:
-                if st.button("Bar Chart", key=f"bar_chart_{index}"):
+                if st.button("Bar Chart", key=f"bar_chart_{message.id}"):
                     add_message(
                         Message(
                             RoleType.ASSISTANT,
@@ -279,7 +279,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
                         False,
                     )
             with cols[3]:
-                if st.button("Area Chart", key=f"area_chart_{index}"):
+                if st.button("Area Chart", key=f"area_chart_{message.id}"):
                     add_message(
                         Message(
                             RoleType.ASSISTANT,
@@ -293,7 +293,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
                         False,
                     )
             with cols[4]:
-                if st.button("Scatter Chart", key=f"scatter_chart_{index}"):
+                if st.button("Scatter Chart", key=f"scatter_chart_{message.id}"):
                     add_message(
                         Message(
                             RoleType.ASSISTANT,
@@ -322,7 +322,7 @@ def _render_summary(message: Message, index: int):
     with cols[0]:
         st.button(
             "👍",
-            key=f"thumbs_up_{index}",
+            key=f"thumbs_up_{message.id}",
             type="primary" if message.feedback == "up" else "secondary",
             on_click=set_feedback,
             args=(index, "up"),
@@ -330,7 +330,7 @@ def _render_summary(message: Message, index: int):
     with cols[1]:
         st.button(
             "👎",
-            key=f"thumbs_down_{index}",
+            key=f"thumbs_down_{message.id}",
             type="primary" if message.feedback == "down" else "secondary",
             on_click=set_feedback,
             args=(index, "down"),
@@ -400,5 +400,16 @@ def render_message(message: Message, index: int):
 def add_message(message: Message, render=True):
     message = message.save()
     st.session_state.messages.append(message)
+    
+    # Manage session state memory by keeping only the most recent messages
+    from utils.config_helper import get_max_session_messages
+    max_messages = get_max_session_messages()
+    
+    if len(st.session_state.messages) > max_messages:
+        # Remove oldest messages to stay within limit
+        messages_to_remove = len(st.session_state.messages) - max_messages
+        st.session_state.messages = st.session_state.messages[messages_to_remove:]
+        logger.info(f"Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages.")
+    
     if len(st.session_state.messages) > 0 and render:
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)

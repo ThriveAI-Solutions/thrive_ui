@@ -45,6 +45,14 @@ if "messages" not in st.session_state or st.session_state.messages == []:
 if st.session_state.messages is None:
     st.session_state.messages = []
 
+# Manage session state memory by limiting messages for performance
+from utils.config_helper import get_max_session_messages
+max_messages = get_max_session_messages()
+if len(st.session_state.messages) > max_messages:
+    messages_to_remove = len(st.session_state.messages) - max_messages
+    st.session_state.messages = st.session_state.messages[messages_to_remove:]
+    logger.info(f"Session startup: Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages.")
+
 
 ######### Sidebar settings #########
 def save_settings_on_click():

@@ -38,6 +38,37 @@ def get_max_display_rows() -> int:
     return 1000
 
 
+def get_max_session_messages() -> int:
+    """
+    Get the maximum number of messages to keep in session state for performance.
+    
+    Checks in order:
+    1. Environment variable MAX_SESSION_MESSAGES
+    2. Streamlit secrets session.max_session_messages
+    3. Default value of 20
+    
+    Returns:
+        int: Maximum number of messages to keep in session state
+    """
+    # Check environment variable first
+    env_value = os.getenv('MAX_SESSION_MESSAGES')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            pass
+    
+    # Check Streamlit secrets
+    try:
+        if hasattr(st, 'secrets') and 'session' in st.secrets and 'max_session_messages' in st.secrets['session']:
+            return int(st.secrets['session']['max_session_messages'])
+    except:
+        pass
+    
+    # Default value
+    return 20
+
+
 def ensure_query_has_limit(sql: str, max_rows: Union[int, None] = None) -> str:
     """
     Ensure a SQL query has a LIMIT clause. If it doesn't, add one.
