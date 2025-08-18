@@ -59,7 +59,7 @@ def speak(message):
     voices = engine.getProperty("voices")
 
     # Set the voice (0 for male, 1 for female, etc.)
-    engine.setProperty("voice", voices[1].id)
+    engine.setProperty("voice", voices[0].id)
 
     # Add the text to the queue
     engine.say(message)
