@@ -574,6 +574,14 @@ class VannaService:
     def generate_sql(_self, question: str):
         """Generate SQL from a natural language question."""
         try:
+            # Manual per-session cache short-circuit (avoids an extra LLM call when already streamed)
+            try:
+                manual_cache = st.session_state.get("manual_sql_cache") or {}
+                if question in manual_cache:
+                    return manual_cache[question]
+            except Exception:
+                pass
+
             start_time = time.perf_counter()
             allow_see_data = _self.config["security"].get("allow_llm_to_see_data", False)
 
@@ -639,8 +647,8 @@ class VannaService:
             return is_valid
 
     @st.cache_data(show_spinner="Running SQL query ...")
-    def run_sql(_self, sql: str) -> tuple[DataFrame | None, float]:
-        """Run SQL query and return results as DataFrame with elapsed time."""
+    def run_sql(_self, sql: str):
+        """Run SQL query and return DataFrame. Elapsed time stored in session state."""
         try:
             # Clear any previous error context before executing a new query
             try:
@@ -655,6 +663,10 @@ class VannaService:
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
             logger.info("SQL execution elapsed time is %s", elapsed_time)
+            try:
+                st.session_state["last_sql_elapsed_time"] = elapsed_time
+            except Exception:
+                pass
         except Exception as e:
             # Persist error context for downstream UI/logic (e.g., retry flow)
             try:
@@ -664,9 +676,9 @@ class VannaService:
                 pass
             st.error(f"Error running SQL: {e}")
             logger.exception("%s", e)
-            return None, 0
+            return None
         else:
-            return df, elapsed_time
+            return df
 
     @st.cache_data(show_spinner="Checking if we should generate a chart ...")
     def should_generate_chart(_self, question, sql, df):
@@ -749,6 +761,176 @@ class VannaService:
             return None, 0
         else:
             return response, elapsed_time
+
+    def stream_generate_sql(_self, question: str):
+        """Return a generator that streams SQL generation tokens and stores final SQL in session_state.
+
+        This performs a single backend call using the underlying vn stream API and accumulates content
+        to extract the final SQL once streaming completes.
+        """
+        # Collect semantic context similar to non-streaming path
+        try:
+            qsl = _self.vn.get_similar_question_sql(question=question)
+        except Exception:
+            qsl = []
+        try:
+            ddl_list = _self.vn.get_related_ddl(question=question)
+        except Exception:
+            ddl_list = []
+        try:
+            doc_list = _self.vn.get_related_documentation(question=question)
+        except Exception:
+            doc_list = []
+
+        try:
+            prompt = _self.vn.get_sql_prompt(
+                initial_prompt=None,
+                question=question,
+                question_sql_list=qsl,
+                ddl_list=ddl_list,
+                doc_list=doc_list,
+            )
+        except Exception as e:
+            # Fallback: minimal prompt
+            prompt = [_self.vn.system_message("You are a SQL expert. Return only SQL."), _self.vn.user_message(question)]
+
+        start_time = time.perf_counter()
+        acc_content: list[str] = []
+        acc_thinking: list[str] = []
+
+        def _gen():
+            try:
+                underlying = getattr(_self, "vn", None)
+                client = getattr(underlying, "ollama_client", None)
+                if client is not None:
+                    # Use Ollama native stream with thinking enabled
+                    stream = client.chat(
+                        model=underlying.model,
+                        messages=prompt,
+                        stream=True,
+                        options=getattr(underlying, "ollama_options", {}),
+                        keep_alive=getattr(underlying, "keep_alive", None),
+                        think=True,
+                    )
+                    for event in stream:
+                        try:
+                            message = event.get("message", {})
+                            thinking = message.get("thinking")
+                            if thinking:
+                                acc_thinking.append(thinking)
+                                yield thinking
+                            content = message.get("content")
+                            if content:
+                                acc_content.append(content)
+                        except Exception:
+                            continue
+                else:
+                    # Fallback: stream generic chunks (no separate thinking); show chunks to indicate activity
+                    for chunk in getattr(_self.vn, "stream_submit_prompt")(prompt):
+                        if chunk:
+                            acc_content.append(chunk)
+                            yield chunk
+            finally:
+                full_text = "".join(acc_content)
+                full_thinking = "".join(acc_thinking)
+                try:
+                    sql_text = _self.vn.extract_sql(full_text)
+                except Exception:
+                    sql_text = full_text
+                elapsed = time.perf_counter() - start_time
+                try:
+                    st.session_state["streamed_sql"] = sql_text
+                    st.session_state["streamed_for_question"] = question
+                    st.session_state["streamed_sql_elapsed_time"] = elapsed
+                    st.session_state["streamed_thinking"] = full_thinking
+                    # Update manual per-session cache and warm Streamlit cache
+                    manual_cache = st.session_state.get("manual_sql_cache") or {}
+                    manual_cache[question] = (sql_text, elapsed)
+                    st.session_state["manual_sql_cache"] = manual_cache
+                    try:
+                        generate_sql_cached(question)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
+        return _gen()
+
+    def stream_generate_summary(_self, question: str, df: DataFrame):
+        """Return a generator that streams summary tokens and stores final summary in session_state.
+
+        Uses a single streaming backend call. Includes a compact CSV head of the DataFrame for context.
+        """
+        # Prepare compact data context
+        try:
+            import pandas as _pd  # local import to avoid test patches
+            # Keep preview minimal for speed
+            df_head = df.iloc[: min(len(df), 10), : min(len(df.columns), 6)].copy() if df is not None else None
+            csv_preview = df_head.to_csv(index=False) if df_head is not None else ""
+        except Exception:
+            csv_preview = ""
+
+        # Build simple prompt
+        underlying = getattr(_self, "vn", None)
+        if underlying is None:
+            def _fallback():
+                yield ""
+            return _fallback()
+
+        system_msg = (
+            "You are a helpful data analyst. Use low reasoning effort and respond quickly. "
+            "Summarize the dataset to answer the user's question. Be concise, factual, and avoid speculation."
+        )
+        user_msg = (
+            f"Question: {question}\n\n"
+            f"Data (CSV preview):\n{csv_preview}\n\n"
+            "Provide a clear, short summary focused on the question."
+        )
+
+        prompt = [underlying.system_message(system_msg), underlying.user_message(user_msg)]
+
+        start_time = time.perf_counter()
+        acc_content: list[str] = []
+
+        def _gen():
+            try:
+                client = getattr(underlying, "ollama_client", None)
+                if client is not None:
+                    # Stream final content only; disable thinking for faster response
+                    stream = client.chat(
+                        model=underlying.model,
+                        messages=prompt,
+                        stream=True,
+                        options=getattr(underlying, "ollama_options", {}),
+                        keep_alive=getattr(underlying, "keep_alive", None),
+                        think=False,
+                    )
+                    for event in stream:
+                        try:
+                            message = event.get("message", {})
+                            content = message.get("content")
+                            if content:
+                                acc_content.append(content)
+                                yield content
+                        except Exception:
+                            continue
+                else:
+                    # Fallback: stream generic chunks
+                    for chunk in getattr(underlying, "stream_submit_prompt")(prompt):
+                        if chunk:
+                            acc_content.append(chunk)
+                            yield chunk
+            finally:
+                full_text = "".join(acc_content)
+                elapsed = time.perf_counter() - start_time
+                try:
+                    st.session_state["streamed_summary"] = full_text
+                    st.session_state["streamed_summary_for_question"] = question
+                    st.session_state["streamed_summary_elapsed_time"] = elapsed
+                except Exception:
+                    pass
+
+        return _gen()
 
     def submit_prompt(self, system_message, user_message):
         """Submit generic prompt to Vanna."""
@@ -889,7 +1071,11 @@ def is_sql_valid_cached(sql: str):
 @st.cache_data(show_spinner="Running SQL query ...")
 def run_sql_cached(sql: str) -> tuple[DataFrame | None, float]:
     # Query limiting is now handled inside run_sql method
-    return VannaService.from_streamlit_session().run_sql(sql)
+    rs = VannaService.from_streamlit_session().run_sql(sql)
+    if isinstance(rs, tuple) and len(rs) == 2:
+        return rs
+    else:
+        return rs, 0
 
 
 @st.cache_data(show_spinner="Checking if we should generate a chart ...")
@@ -1151,7 +1337,12 @@ def training_plan():
 
         # Execute enhanced schema query
         st.toast("📊 Retrieving enhanced schema information...")
-        df_information_schema, elapsed_time = vanna_service.run_sql(enhanced_query)
+        rs = vanna_service.run_sql(enhanced_query)
+        if isinstance(rs, tuple) and len(rs) == 2:
+            df_information_schema, elapsed_time = rs
+        else:
+            df_information_schema = rs
+            elapsed_time = 0
 
         if df_information_schema is None or df_information_schema.empty:
             st.warning("No schema information retrieved")
