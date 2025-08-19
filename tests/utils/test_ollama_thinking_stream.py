@@ -67,4 +67,3 @@ def test_streams_include_thinking_tokens_if_present():
     # Soft assertion: ensure test doesn't fail on non-thinking templates
     if not _has_think_markup:
         sys.stdout.write("Note: No explicit CoT markers (<think> or 'Thinking') detected in stream.\n")
-

@@ -39,6 +39,7 @@ class _CoercingCollection:
     def __getattr__(self, item):
         return getattr(self._underlying, item)
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -161,10 +162,12 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
     def generate_embedding(self, data: str, **kwargs: Any) -> list[float]:
         try:
             import streamlit as st  # optional in tests
+
             ai_keys = st.secrets.get("ai_keys", {})
             embed_model = ai_keys.get("ollama_embed_model")
             if embed_model:
                 import ollama
+
                 host = ai_keys.get("ollama_host", "http://localhost:11434")
                 client = ollama.Client(host)
                 res = client.embeddings(model=embed_model, prompt=data)

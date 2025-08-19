@@ -389,7 +389,7 @@ class TestRenderMessage:
         sql_query = "SELECT * FROM summary_table;"
         question_text = "What is the summary?"
         df_for_actions = pd.DataFrame({"column1": [1], "column2": [2]})  # Need at least 2 columns for chart buttons
-        df_json_for_actions = df_for_actions.to_json(date_format='iso')
+        df_json_for_actions = df_for_actions.to_json(date_format="iso")
 
         msg = Message(
             role=RoleType.ASSISTANT,
@@ -448,12 +448,14 @@ class TestRenderMessage:
 
         # Check feedback buttons
         # Feedback button keys depend on persisted message id; ensure buttons were rendered
-        assert any(call_kwargs.get("key", "").startswith("thumbs_up_") for _, call_kwargs in [
-            (c[0], c[1]) for c in mock_st.button.call_args_list
-        ])
-        assert any(call_kwargs.get("key", "").startswith("thumbs_down_") for _, call_kwargs in [
-            (c[0], c[1]) for c in mock_st.button.call_args_list
-        ])
+        assert any(
+            call_kwargs.get("key", "").startswith("thumbs_up_")
+            for _, call_kwargs in [(c[0], c[1]) for c in mock_st.button.call_args_list]
+        )
+        assert any(
+            call_kwargs.get("key", "").startswith("thumbs_down_")
+            for _, call_kwargs in [(c[0], c[1]) for c in mock_st.button.call_args_list]
+        )
 
         # Check popover and its contents
         mock_st.popover.assert_called_once_with("Actions", use_container_width=True)

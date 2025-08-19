@@ -168,6 +168,6 @@ def test_milvus_vs_chroma_mrr_at_k(tmp_path, chroma_in_memory):
     milvus_mrr /= len(queries)
     chroma_mrr /= len(queries)
 
-    assert milvus_mrr >= chroma_mrr, f"Expected Milvus MRR>=Chroma MRR, got Milvus={milvus_mrr:.3f}, Chroma={chroma_mrr:.3f}"
-
-
+    assert milvus_mrr >= chroma_mrr, (
+        f"Expected Milvus MRR>=Chroma MRR, got Milvus={milvus_mrr:.3f}, Chroma={chroma_mrr:.3f}"
+    )

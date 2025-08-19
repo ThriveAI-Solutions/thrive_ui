@@ -138,7 +138,7 @@ class ThriveAI_Milvus:
                     index_name="text_sparse_index",
                     index_type="SPARSE_INVERTED_INDEX",
                     metric_type="BM25",
-                    params={"inverted_index_algo": "DAAT_MAXSCORE"}, # or "DAAT_WAND" or "TAAT_NAIVE"
+                    params={"inverted_index_algo": "DAAT_MAXSCORE"},  # or "DAAT_WAND" or "TAAT_NAIVE"
                 )
             except Exception:
                 pass
@@ -182,11 +182,13 @@ class ThriveAI_Milvus:
         """Generate embedding using Ollama if configured; fallback to hashing."""
         try:
             import streamlit as st  # lazy import to avoid coupling in tests
+
             ai_keys = st.secrets.get("ai_keys", {})
             embed_model = ai_keys.get("ollama_embed_model")
             if embed_model:
                 try:
                     import ollama
+
                     host = ai_keys.get("ollama_host", "http://localhost:11434")
                     client = ollama.Client(host)
                     res = client.embeddings(model=embed_model, prompt=text)
@@ -339,7 +341,9 @@ class ThriveAI_Milvus:
             return []
 
     # ---- Additional retrieval helpers using hybrid search ----
-    def _hybrid_docs(self, collection_name: str, question: str, limit: int = 5, metadata: dict[str, Any] | None = None) -> list[str]:
+    def _hybrid_docs(
+        self, collection_name: str, question: str, limit: int = 5, metadata: dict[str, Any] | None = None
+    ) -> list[str]:
         """Hybrid retrieval by combining separate dense and sparse searches with simple RRF."""
         filter_expr = self._prepare_retrieval_metadata(metadata)
         dense_vec = self.generate_embedding(question)
@@ -358,6 +362,7 @@ class ThriveAI_Milvus:
         try:
             try:
                 from pymilvus import AnnSearchRequest, RRFRanker
+
                 req_sparse = AnnSearchRequest(
                     data=[question], anns_field="text_sparse", param={"drop_ratio_search": 0.2}, limit=limit
                 )
@@ -433,19 +438,19 @@ class ThriveAI_Milvus:
 
     def get_related_documentation(self, question: str, metadata: dict[str, Any] | None = None, **kwargs) -> list:
         try:
-            return self._hybrid_docs(self.documentation_collection, question, limit=self.n_results_documentation, metadata=metadata)
+            return self._hybrid_docs(
+                self.documentation_collection, question, limit=self.n_results_documentation, metadata=metadata
+            )
         except Exception as e:
             logger.exception("Error in get_related_documentation: %s", e)
             return []
 
-    def hybrid_query_text(self, collection_name: str, question: str, top_k: int = 10, metadata: dict[str, Any] | None = None) -> list[str]:
+    def hybrid_query_text(
+        self, collection_name: str, question: str, top_k: int = 10, metadata: dict[str, Any] | None = None
+    ) -> list[str]:
         """Generic hybrid query over a named collection, returns raw text documents."""
         try:
             return self._hybrid_docs(collection_name, question, limit=top_k, metadata=metadata)
         except Exception as e:
             logger.exception("Error in hybrid_query_text: %s", e)
             return []
-
-
-
-

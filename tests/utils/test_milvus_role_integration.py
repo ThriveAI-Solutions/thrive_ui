@@ -50,5 +50,3 @@ def test_vannaservice_with_milvus_rbac(tmp_path):
     df_patient = patient_svc.get_training_data()
     assert len(df_patient) == 1
     assert set(df_patient["training_data_type"]) == {"documentation"}
-
-

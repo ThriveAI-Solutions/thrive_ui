@@ -346,7 +346,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
         )
         if st.button("Generate Table", key=f"table_{message.id}"):
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
-            df_json_content = my_df.to_json(date_format='iso')
+            df_json_content = my_df.to_json(date_format="iso")
             add_message(
                 Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question),
                 False,
@@ -511,16 +511,19 @@ def render_message(message: Message, index: int):
 def add_message(message: Message, render=True):
     message = message.save()
     st.session_state.messages.append(message)
-    
+
     # Manage session state memory by keeping only the most recent messages
     from utils.config_helper import get_max_session_messages
+
     max_messages = get_max_session_messages()
-    
+
     if len(st.session_state.messages) > max_messages:
         # Remove oldest messages to stay within limit
         messages_to_remove = len(st.session_state.messages) - max_messages
         st.session_state.messages = st.session_state.messages[messages_to_remove:]
-        logger.info(f"Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages.")
-    
+        logger.info(
+            f"Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages."
+        )
+
     if len(st.session_state.messages) > 0 and render:
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)

@@ -34,7 +34,7 @@ Base = declarative_base()
 def content_to_json(type, content):
     if type == MessageType.DATAFRAME.value and not isinstance(content, str):
         panda_frame = pd.DataFrame(content)
-        return panda_frame.to_json(date_format='iso')
+        return panda_frame.to_json(date_format="iso")
     if type == MessageType.PLOTLY_CHART.value and not isinstance(content, str):
         json_content = content.to_json()
         return json_content
@@ -163,7 +163,7 @@ class Message(Base):
         if dataframe is not None:
             # Handle both DataFrame objects and serialized JSON strings
             if isinstance(dataframe, pd.DataFrame):
-                self.dataframe = dataframe.to_json(date_format='iso')  # Convert DataFrame to JSON
+                self.dataframe = dataframe.to_json(date_format="iso")  # Convert DataFrame to JSON
             elif isinstance(dataframe, str):
                 # Assume it's already a JSON string
                 self.dataframe = dataframe

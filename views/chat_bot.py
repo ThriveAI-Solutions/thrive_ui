@@ -55,7 +55,9 @@ max_messages = get_max_session_messages()
 if len(st.session_state.messages) > max_messages:
     messages_to_remove = len(st.session_state.messages) - max_messages
     st.session_state.messages = st.session_state.messages[messages_to_remove:]
-    logger.info(f"Session startup: Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages.")
+    logger.info(
+        f"Session startup: Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages."
+    )
 
 
 ######### Sidebar settings #########
@@ -162,11 +164,16 @@ if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):
         st.markdown("Ask me a question about your data")
 
-# Populate messages in the chat message component everytime the streamlit is run
-index = 0
-for message in st.session_state.messages:
-    render_message(message, index)
-    index = index + 1
+# Populate messages in a dedicated container so we can keep a footer below
+messages_container = st.container()
+with messages_container:
+    index = 0
+    for message in st.session_state.messages:
+        render_message(message, index)
+        index = index + 1
+
+# Footer placeholder that always stays at the end
+tail_placeholder = st.empty()
 
 # Always show chat input
 chat_input = st.chat_input("Ask me a question about your data")
@@ -248,31 +255,33 @@ if my_question:
     cached_sql_entry = (st.session_state.get("manual_sql_cache") or {}).get(my_question)
     if cached_sql_entry:
         final_sql, _cached_elapsed = cached_sql_entry
-        with st.chat_message(RoleType.ASSISTANT.value):
-            with st.expander("Thinking…", expanded=False):
-                if isinstance(final_sql, str) and len(final_sql.strip()) > 0:
-                    st.code(final_sql, language="sql")
+        with messages_container:
+            with st.chat_message(RoleType.ASSISTANT.value):
+                with st.expander("Thinking…", expanded=False):
+                    if isinstance(final_sql, str) and len(final_sql.strip()) > 0:
+                        st.code(final_sql, language="sql")
     else:
-        # Persistent, collapsible streaming narration while preparing SQL (single block)
-        with st.chat_message(RoleType.ASSISTANT.value):
-            try:
-                expander_placeholder = st.empty()
-                # Phase 1: expanded while streaming
-                with expander_placeholder.container():
-                    with st.expander("Thinking…", expanded=True):
-                        st.write_stream(get_llm_sql_thought_stream(my_question))
-                # Phase 2: replace with collapsed, final content
-                final_sql = st.session_state.get("streamed_sql")
-                final_thinking = st.session_state.get("streamed_thinking")
-                expander_placeholder.empty()
-                with expander_placeholder.container():
-                    with st.expander("Thinking…", expanded=False):
-                        # Show the reasoning scratchpad if available; avoid repeating final SQL here
-                        if isinstance(final_thinking, str) and len(final_thinking.strip()) > 0:
-                            st.markdown(final_thinking)
-            except Exception:
-                # Fallback to simple acknowledgment if streaming fails
-                st.write(random.choice(acknowledgements))
+        # Persistent, collapsible streaming narration at the footer (to avoid mid-stack injection)
+        with tail_placeholder.container():
+            with st.chat_message(RoleType.ASSISTANT.value):
+                try:
+                    expander_placeholder = st.empty()
+                    # Phase 1: expanded while streaming
+                    with expander_placeholder.container():
+                        with st.expander("Thinking…", expanded=True):
+                            st.write_stream(get_llm_sql_thought_stream(my_question))
+                    # Capture final texts
+                    final_sql = st.session_state.get("streamed_sql")
+                    final_thinking = st.session_state.get("streamed_thinking")
+                except Exception:
+                    final_thinking = None
+                # Clear footer and re-render collapsed thinking inside the message stack
+                tail_placeholder.empty()
+                if isinstance(final_thinking, str) and len(final_thinking.strip()) > 0:
+                    with messages_container:
+                        with st.chat_message(RoleType.ASSISTANT.value):
+                            with st.expander("Thinking…", expanded=False):
+                                st.markdown(final_thinking)
 
     if st.session_state.get("use_retry_context"):
         sql, elapsed_time = get_vn().generate_sql_retry(
@@ -287,9 +296,11 @@ if my_question:
     else:
         # If we streamed SQL, prefer it and elapsed time collected from streaming
         streamed_sql = st.session_state.get("streamed_sql")
-        if isinstance(streamed_sql, str) and len(streamed_sql.strip()) > 0 and st.session_state.get(
-            "streamed_for_question"
-        ) == my_question:
+        if (
+            isinstance(streamed_sql, str)
+            and len(streamed_sql.strip()) > 0
+            and st.session_state.get("streamed_for_question") == my_question
+        ):
             sql = streamed_sql
             elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
         else:
@@ -304,10 +315,16 @@ if my_question:
     if sql:
         if get_vn().is_sql_valid(sql=sql):
             if st.session_state.get("show_sql", True):
-                add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
+                with messages_container:
+                    add_message(
+                        Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time)
+                    )
         else:
             logger.debug("sql is not valid")
-            add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
+            with messages_container:
+                add_message(
+                    Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time)
+                )
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):
                 logger.debug("fallback to LLM")
@@ -357,83 +374,94 @@ if my_question:
             st.session_state["df"] = df
 
         if st.session_state.get("show_table", True):
-            df = st.session_state.get("df")
-            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question, None, sql_elapsed_time))
+            with messages_container:
+                df = st.session_state.get("df")
+                add_message(
+                    Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question, None, sql_elapsed_time)
+                )
 
         if st.session_state.get("show_chart", True):
-            get_chart(my_question, sql, df)
+            with messages_container:
+                get_chart(my_question, sql, df)
 
         if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
-            # Stream the summary into a collapsible block; persist final summary as a normal message
-            with st.chat_message(RoleType.ASSISTANT.value):
-                expander_placeholder = st.empty()
-                try:
-                    with expander_placeholder.container():
-                        with st.expander("Summarizing…", expanded=True):
-                            st.write_stream(get_summary_stream_generator(my_question, df))
-                except Exception:
-                    pass
-                # Replace with collapsed final summary
-                final_summary = st.session_state.get("streamed_summary")
-                expander_placeholder.empty()
-                with expander_placeholder.container():
-                    with st.expander("Summary", expanded=False):
-                        if isinstance(final_summary, str) and len(final_summary.strip()) > 0:
+            # Stream the summary at the footer; then move final collapsed block into the message stack
+            with tail_placeholder.container():
+                with st.chat_message(RoleType.ASSISTANT.value):
+                    expander_placeholder = st.empty()
+                    try:
+                        with expander_placeholder.container():
+                            with st.expander("Summarizing…", expanded=True):
+                                st.write_stream(get_summary_stream_generator(my_question, df))
+                    except Exception:
+                        pass
+                    final_summary = st.session_state.get("streamed_summary")
+            # Re-render final collapsed summary after SQL/table/chart blocks to preserve order
+            tail_placeholder.empty()
+            if isinstance(final_summary, str) and len(final_summary.strip()) > 0:
+                with messages_container:
+                    with st.chat_message(RoleType.ASSISTANT.value):
+                        with st.expander("Summary", expanded=False):
                             st.markdown(final_summary)
                 # Persist as a saved message as before
                 if isinstance(final_summary, str) and len(final_summary.strip()) > 0:
                     summary_elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
                     if st.session_state.get("show_summary", True):
+                        with messages_container:
+                            add_message(
+                                Message(
+                                    RoleType.ASSISTANT,
+                                    final_summary,
+                                    MessageType.SUMMARY,
+                                    sql,
+                                    my_question,
+                                    df,
+                                    summary_elapsed,
+                                )
+                            )
+                    if st.session_state.get("speak_summary", True):
+                        speak(final_summary)
+                else:
+                    with messages_container:
                         add_message(
                             Message(
                                 RoleType.ASSISTANT,
-                                final_summary,
+                                "Could not generate a summary",
                                 MessageType.SUMMARY,
                                 sql,
                                 my_question,
                                 df,
-                                summary_elapsed,
+                                0,
                             )
                         )
-                    if st.session_state.get("speak_summary", True):
-                        speak(final_summary)
-                else:
-                    add_message(
-                        Message(
-                            RoleType.ASSISTANT,
-                            "Could not generate a summary",
-                            MessageType.SUMMARY,
-                            sql,
-                            my_question,
-                            df,
-                            0,
-                        )
-                    )
                     if st.session_state.get("speak_summary", True):
                         speak("Could not generate a summary")
 
         if st.session_state.get("show_followup", True):
-            get_followup_questions(my_question, sql, df)
+            with messages_container:
+                get_followup_questions(my_question, sql, df)
     else:
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                "I wasn't able to generate SQL for that question",
-                MessageType.ERROR,
-                sql,
-                my_question,
+        with messages_container:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "I wasn't able to generate SQL for that question",
+                    MessageType.ERROR,
+                    sql,
+                    my_question,
+                )
             )
-        )
         if st.session_state.get("llm_fallback", True):
             # Ephemeral streaming response (not persisted)
-            with st.chat_message(RoleType.ASSISTANT.value):
-                placeholder = st.empty()
-                try:
-                    stream_gen = get_llm_stream_generator(my_question)
-                    with placeholder.container():
-                        st.write_stream(stream_gen)
-                except Exception:
-                    placeholder.error("Unable to stream response.")
-                finally:
-                    placeholder.empty()
+            with tail_placeholder.container():
+                with st.chat_message(RoleType.ASSISTANT.value):
+                    placeholder = st.empty()
+                    try:
+                        stream_gen = get_llm_stream_generator(my_question)
+                        with placeholder.container():
+                            st.write_stream(stream_gen)
+                    except Exception:
+                        placeholder.error("Unable to stream response.")
+                    finally:
+                        placeholder.empty()
 ######### Handle new chat input #########

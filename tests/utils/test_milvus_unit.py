@@ -63,5 +63,3 @@ def test_deterministic_ids_stable(tmp_path):
     s1 = store.add_question_sql(q, sql)
     s2 = store.add_question_sql(q, sql)
     assert s1 == s2
-
-
