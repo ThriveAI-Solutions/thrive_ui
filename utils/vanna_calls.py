@@ -61,11 +61,10 @@ def extract_user_context_from_streamlit() -> UserContext:
     if user_role is None:
         try:
             from orm.models import RoleTypeEnum
+
             # Default to PATIENT role when not set
             user_role = RoleTypeEnum.PATIENT.value
-            logger.warning(
-                f"user_role not found in session state for user {user_id} - defaulting to PATIENT role"
-            )
+            logger.warning(f"user_role not found in session state for user {user_id} - defaulting to PATIENT role")
         except Exception:
             # Fallback to 3 if RoleTypeEnum is unavailable during tests
             user_role = 3
@@ -254,6 +253,7 @@ class MyVannaGeminiChromaDB(ThriveAI_ChromaDB, GoogleGeminiChat):
     def log(self, message: str, title: str = "Info"):
         logger.debug("%s: %s", title, message)
 
+
 class MyVannaGeminiMilvus(ThriveAI_Milvus, GoogleGeminiChat):
     def __init__(self, user_role: int, config=None):
         try:
@@ -265,9 +265,7 @@ class MyVannaGeminiMilvus(ThriveAI_Milvus, GoogleGeminiChat):
             # Initialize Gemini
             self.configured_model = st.secrets["ai_keys"]["gemini_model"]
             self.configured_api_key = st.secrets["ai_keys"]["gemini_api"]
-            GoogleGeminiChat.__init__(
-                self, config={"model": self.configured_model, "api_key": self.configured_api_key}
-            )
+            GoogleGeminiChat.__init__(self, config={"model": self.configured_model, "api_key": self.configured_api_key})
 
             # Fix model configuration per Vanna 0.7.5 note
             import google.generativeai as genai
@@ -359,7 +357,9 @@ class MyVannaOllamaMilvus(ThriveAI_Milvus, ThriveAI_Ollama):
         if getattr(self, "static_documentation", ""):
             doc_list.append(self.static_documentation)
 
-        initial_prompt = self.add_documentation_to_prompt(initial_prompt, doc_list, max_tokens=getattr(self, "max_tokens", 2048))
+        initial_prompt = self.add_documentation_to_prompt(
+            initial_prompt, doc_list, max_tokens=getattr(self, "max_tokens", 2048)
+        )
 
         initial_prompt += (
             "===Response Guidelines \n"
@@ -449,12 +449,8 @@ class VannaService:
 
             valid_values = [role.value for role in RoleTypeEnum]
             if _user_context.user_role not in valid_values:
-                logger.error(
-                    f"Invalid user_role value: {_user_context.user_role}. Defaulting to PATIENT role."
-                )
-                st.error(
-                    f"Invalid user role detected: {_user_context.user_role}. Using restricted access."
-                )
+                logger.error(f"Invalid user_role value: {_user_context.user_role}. Defaulting to PATIENT role.")
+                st.error(f"Invalid user role detected: {_user_context.user_role}. Using restricted access.")
                 _user_context.user_role = RoleTypeEnum.PATIENT.value
         except Exception:
             # If RoleTypeEnum import fails in some test contexts, leave provided role as-is
@@ -593,9 +589,10 @@ class VannaService:
                 sql_response = _self.vn.generate_sql(question=question)
 
             response = _self.check_references(sql_response)
-            
+
             # Ensure query has appropriate LIMIT clause after generation
             from utils.config_helper import ensure_query_has_limit
+
             response = ensure_query_has_limit(response)
 
             end_time = time.perf_counter()
@@ -646,7 +643,7 @@ class VannaService:
         else:
             return is_valid
 
-    @st.cache_data(show_spinner="Running SQL query ...")
+    @st.cache_data(show_spinner=False)
     def run_sql(_self, sql: str):
         """Run SQL query and return DataFrame. Elapsed time stored in session state."""
         try:
@@ -657,7 +654,7 @@ class VannaService:
             except Exception:
                 # Session state may not be initialized in some contexts; ignore
                 pass
-            
+
             start_time = time.perf_counter()
             df = _self.vn.run_sql(sql=sql)
             end_time = time.perf_counter()
@@ -792,7 +789,10 @@ class VannaService:
             )
         except Exception as e:
             # Fallback: minimal prompt
-            prompt = [_self.vn.system_message("You are a SQL expert. Return only SQL."), _self.vn.user_message(question)]
+            prompt = [
+                _self.vn.system_message("You are a SQL expert. Return only SQL."),
+                _self.vn.user_message(question),
+            ]
 
         start_time = time.perf_counter()
         acc_content: list[str] = []
@@ -864,6 +864,7 @@ class VannaService:
         # Prepare compact data context
         try:
             import pandas as _pd  # local import to avoid test patches
+
             # Keep preview minimal for speed
             df_head = df.iloc[: min(len(df), 10), : min(len(df.columns), 6)].copy() if df is not None else None
             csv_preview = df_head.to_csv(index=False) if df_head is not None else ""
@@ -873,8 +874,10 @@ class VannaService:
         # Build simple prompt
         underlying = getattr(_self, "vn", None)
         if underlying is None:
+
             def _fallback():
                 yield ""
+
             return _fallback()
 
         system_msg = (
@@ -1068,7 +1071,7 @@ def is_sql_valid_cached(sql: str):
     return VannaService.from_streamlit_session().is_sql_valid(sql)
 
 
-@st.cache_data(show_spinner="Running SQL query ...")
+@st.cache_data(show_spinner=False)
 def run_sql_cached(sql: str) -> tuple[DataFrame | None, float]:
     # Query limiting is now handled inside run_sql method
     rs = VannaService.from_streamlit_session().run_sql(sql)
@@ -1361,7 +1364,9 @@ def training_plan():
 
         # Train relationship documentation (only for tables, not views) if columns exist
         relationships_trained = 0
-        if object_type == "tables" and {"referenced_table", "referenced_column", "column_name", "table_name"}.issubset(df_information_schema.columns):
+        if object_type == "tables" and {"referenced_table", "referenced_column", "column_name", "table_name"}.issubset(
+            df_information_schema.columns
+        ):
             st.toast("🔗 Training table relationships...")
             for table in df_information_schema["table_name"].unique():
                 table_data = df_information_schema[df_information_schema["table_name"] == table]

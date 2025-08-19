@@ -31,6 +31,7 @@ class _DummyVannaService:
 def clear_session(monkeypatch):
     # Avoid relying on Streamlit session in unit tests
     import utils.chat_bot_helper as cbh
+
     monkeypatch.setattr(cbh, "st", types.SimpleNamespace(session_state=types.SimpleNamespace()))
     yield
 
@@ -56,4 +57,3 @@ def test_get_llm_stream_generator_fallback(monkeypatch):
     gen = cbh.get_llm_stream_generator("Another question")
     chunks = list(gen)
     assert chunks == ["One-shot response"]
-

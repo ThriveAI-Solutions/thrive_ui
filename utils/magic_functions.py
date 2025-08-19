@@ -696,8 +696,8 @@ def _tail(question, tuple, previous_df):
             # For tail, we need to get the total count first, then offset appropriately
             count_sql = f"SELECT COUNT(*) as total FROM {table_name};"
             count_df = run_sql_cached(count_sql)
-            total_rows = count_df.iloc[0]['total']
-            
+            total_rows = count_df.iloc[0]["total"]
+
             # Calculate offset to get the last 'count' rows
             offset = max(0, total_rows - count)
             sql = f"SELECT * FROM {table_name} OFFSET {offset};"
