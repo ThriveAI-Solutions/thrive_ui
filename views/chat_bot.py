@@ -337,7 +337,10 @@ if my_question:
             df, sql_elapsed_time = rs
         else:
             df = rs
-            sql_elapsed_time = 0
+            try:
+                sql_elapsed_time = st.session_state.get("last_sql_elapsed_time", 0)
+            except Exception:
+                sql_elapsed_time = 0
 
         # if sql doesn't return a dataframe, offer retry with LLM guidance
         if not isinstance(df, pd.DataFrame):
