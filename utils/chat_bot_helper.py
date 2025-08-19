@@ -121,6 +121,7 @@ def get_summary_stream_generator(question: str, df: pd.DataFrame):
     """Return a generator that streams the summary as it is produced by the backend.
 
     Prefer a single-call streaming path; fallback to non-streaming summary if unavailable.
+    This yields only content tokens; use get_summary_event_stream for CoT + content.
     """
     vn_instance = get_vn()
     try:
@@ -140,6 +141,23 @@ def get_summary_stream_generator(question: str, df: pd.DataFrame):
         yield summary or ""
 
     return _fallback_gen()
+
+
+def get_summary_event_stream(question: str, df: pd.DataFrame, think: bool = False):
+    """Yield (kind, text) where kind in {"thinking","content"} while streaming.
+
+    When think=True, upstream may emit thinking tokens; otherwise only content.
+    """
+    vn_instance = get_vn()
+    if hasattr(vn_instance, "summary_event_stream"):
+        return vn_instance.summary_event_stream(question, df, think=think)
+
+    # Fallback: proxy to content-only stream
+    def _proxy():
+        for chunk in get_summary_stream_generator(question, df):
+            yield ("content", chunk)
+
+    return _proxy()
 
 
 def get_chart(my_question, sql, df):

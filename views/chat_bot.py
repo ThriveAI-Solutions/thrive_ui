@@ -15,6 +15,7 @@ from utils.chat_bot_helper import (
     get_followup_questions,
     get_llm_sql_thought_stream,
     get_llm_stream_generator,
+    get_summary_event_stream,
     get_summary_stream_generator,
     get_unique_messages,
     get_vn,
@@ -388,57 +389,66 @@ if my_question:
                 get_chart(my_question, sql, df)
 
         if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
-            # Stream the summary at the footer; then move final collapsed block into the message stack
-            with tail_placeholder.container():
-                with st.chat_message(RoleType.ASSISTANT.value):
-                    expander_placeholder = st.empty()
-                    try:
-                        with expander_placeholder.container():
-                            with st.expander("Summarizing…", expanded=True):
-                                st.write_stream(get_summary_stream_generator(my_question, df))
-                    except Exception:
-                        pass
-                    final_summary = st.session_state.get("streamed_summary")
-            # Re-render final collapsed summary after SQL/table/chart blocks to preserve order
-            tail_placeholder.empty()
-            if isinstance(final_summary, str) and len(final_summary.strip()) > 0:
-                with messages_container:
+            # Determine whether to show CoT
+            show_thinking = False  # default
+            # If upstream thinking is enabled for summaries, set this True from settings if desired
+            # For now, use False by default for speed; can be toggled via secrets or session later
+
+            # Stream summary in a placeholder inside the messages stack
+            with messages_container:
+                summary_placeholder = st.empty()
+                with summary_placeholder.container():
                     with st.chat_message(RoleType.ASSISTANT.value):
-                        with st.expander("Summary", expanded=False):
-                            st.markdown(final_summary)
-                # Persist as a saved message as before
-                if isinstance(final_summary, str) and len(final_summary.strip()) > 0:
-                    summary_elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
-                    if st.session_state.get("show_summary", True):
-                        with messages_container:
-                            add_message(
-                                Message(
-                                    RoleType.ASSISTANT,
-                                    final_summary,
-                                    MessageType.SUMMARY,
-                                    sql,
-                                    my_question,
-                                    df,
-                                    summary_elapsed,
-                                )
-                            )
-                    if st.session_state.get("speak_summary", True):
-                        speak(final_summary)
-                else:
-                    with messages_container:
-                        add_message(
-                            Message(
-                                RoleType.ASSISTANT,
-                                "Could not generate a summary",
-                                MessageType.SUMMARY,
-                                sql,
-                                my_question,
-                                df,
-                                0,
-                            )
+                        if show_thinking:
+                            with st.expander("Summarizing (thinking)…", expanded=True):
+                                def _thinking_only():
+                                    for kind, text in get_summary_event_stream(my_question, df, think=True):
+                                        if kind == "thinking":
+                                            yield text
+                                st.write_stream(_thinking_only())
+                            def _content_only():
+                                for kind, text in get_summary_event_stream(my_question, df, think=True):
+                                    if kind == "content":
+                                        yield text
+                            st.write_stream(_content_only())
+                        else:
+                            st.write_stream(get_summary_stream_generator(my_question, df))
+
+            # Read final summary and replace streamed block with persisted message
+            final_summary = st.session_state.get("streamed_summary")
+            if isinstance(final_summary, str) and len(final_summary.strip()) > 0:
+                summary_elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
+                summary_placeholder.empty()
+                with messages_container:
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            final_summary,
+                            MessageType.SUMMARY,
+                            sql,
+                            my_question,
+                            df,
+                            summary_elapsed,
                         )
-                    if st.session_state.get("speak_summary", True):
-                        speak("Could not generate a summary")
+                    )
+                if st.session_state.get("speak_summary", True):
+                    speak(final_summary)
+            else:
+                summary_placeholder.empty()
+                with messages_container:
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            "Could not generate a summary",
+                            MessageType.SUMMARY,
+                            sql,
+                            my_question,
+                            df,
+                            0,
+                        )
+                    )
+                if st.session_state.get("speak_summary", True):
+                    speak("Could not generate a summary")
 
         if st.session_state.get("show_followup", True):
             with messages_container:
