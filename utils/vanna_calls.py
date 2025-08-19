@@ -645,7 +645,10 @@ class VannaService:
 
     @st.cache_data(show_spinner=False)
     def run_sql(_self, sql: str):
-        """Run SQL query and return DataFrame. Elapsed time stored in session state."""
+        """Run SQL query and return (DataFrame, elapsed_seconds).
+
+        For backwards compatibility, some callers may only expect a DataFrame.
+        """
         try:
             # Clear any previous error context before executing a new query
             try:
@@ -675,6 +678,8 @@ class VannaService:
             logger.exception("%s", e)
             return None
         else:
+            # Preserve backward-compatibility: return only df
+            # Elapsed time is available via st.session_state['last_sql_elapsed_time']
             return df
 
     @st.cache_data(show_spinner="Checking if we should generate a chart ...")
