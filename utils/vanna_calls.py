@@ -659,7 +659,13 @@ class VannaService:
                 pass
 
             start_time = time.perf_counter()
-            df = _self.vn.run_sql(sql=sql)
+            # Show an explicit spinner with elapsed time while executing the SQL
+            try:
+                spinner_ctx = st.spinner("Running SQL query ...", show_time=True)
+            except TypeError:
+                spinner_ctx = st.spinner("Running SQL query ...")
+            with spinner_ctx:
+                df = _self.vn.run_sql(sql=sql)
             end_time = time.perf_counter()
             elapsed_time = end_time - start_time
             logger.info("SQL execution elapsed time is %s", elapsed_time)
