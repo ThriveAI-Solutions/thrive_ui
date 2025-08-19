@@ -946,6 +946,83 @@ class VannaService:
 
         return _gen()
 
+    def summary_event_stream(_self, question: str, df: DataFrame, think: bool = False):
+        """Yield (kind, text) tuples while streaming summary.
+
+        kind is one of "thinking" or "content". Final full content and elapsed time are
+        saved into st.session_state: streamed_summary, streamed_summary_elapsed_time.
+        """
+        # Prepare compact data context
+        try:
+            import pandas as _pd
+            df_head = df.iloc[: min(len(df), 10), : min(len(df.columns), 6)].copy() if df is not None else None
+            csv_preview = df_head.to_csv(index=False) if df_head is not None else ""
+        except Exception:
+            csv_preview = ""
+
+        underlying = getattr(_self, "vn", None)
+        if underlying is None:
+            def _noop():
+                if False:
+                    yield ("content", "")
+            return _noop()
+
+        system_msg = (
+            "You are a helpful data analyst. Use low reasoning effort and respond quickly. "
+            "Summarize the dataset to answer the user's question. Be concise, factual, and avoid speculation."
+        )
+        user_msg = (
+            f"Question: {question}\n\n"
+            f"Data (CSV preview):\n{csv_preview}\n\n"
+            "Provide a clear, short summary focused on the question."
+        )
+        prompt = [underlying.system_message(system_msg), underlying.user_message(user_msg)]
+
+        client = getattr(underlying, "ollama_client", None)
+        if client is None:
+            def _noop():
+                if False:
+                    yield ("content", "")
+            return _noop()
+
+        start = time.perf_counter()
+        acc_content: list[str] = []
+        acc_thinking: list[str] = []
+
+        def _gen():
+            try:
+                stream = client.chat(
+                    model=underlying.model,
+                    messages=prompt,
+                    stream=True,
+                    options=getattr(underlying, "ollama_options", {}),
+                    keep_alive=getattr(underlying, "keep_alive", None),
+                    think=think,
+                )
+                for event in stream:
+                    try:
+                        message = event.get("message", {})
+                        if think:
+                            t = message.get("thinking")
+                            if t:
+                                acc_thinking.append(t)
+                                yield ("thinking", t)
+                        c = message.get("content")
+                        if c:
+                            acc_content.append(c)
+                            yield ("content", c)
+                    except Exception:
+                        continue
+            finally:
+                elapsed = time.perf_counter() - start
+                try:
+                    st.session_state["streamed_summary"] = "".join(acc_content)
+                    st.session_state["streamed_summary_elapsed_time"] = elapsed
+                except Exception:
+                    pass
+
+        return _gen()
+
     def submit_prompt(self, system_message, user_message):
         """Submit generic prompt to Vanna."""
         try:
