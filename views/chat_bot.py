@@ -399,23 +399,43 @@ if my_question:
                 summary_placeholder = st.empty()
                 with summary_placeholder.container():
                     with st.chat_message(RoleType.ASSISTANT.value):
+                        # Live status with elapsed seconds while streaming
+                        status_placeholder = st.empty()
+                        start_summary_time = time.perf_counter()
+                        def _tick():
+                            try:
+                                elapsed = time.perf_counter() - start_summary_time
+                                status_placeholder.caption(f"Generating summary… {elapsed:.1f}s")
+                            except Exception:
+                                pass
                         if show_thinking:
                             with st.expander("Summarizing (thinking)…", expanded=True):
                                 def _thinking_only():
                                     for kind, text in get_summary_event_stream(my_question, df, think=True):
                                         if kind == "thinking":
+                                            _tick()
                                             yield text
                                 st.write_stream(_thinking_only())
                             def _content_only():
                                 for kind, text in get_summary_event_stream(my_question, df, think=True):
                                     if kind == "content":
+                                        _tick()
                                         yield text
                             st.write_stream(_content_only())
                         else:
-                            st.write_stream(get_summary_stream_generator(my_question, df))
+                            def _content_timed():
+                                for chunk in get_summary_stream_generator(my_question, df):
+                                    _tick()
+                                    yield chunk
+                            st.write_stream(_content_timed())
 
             # Read final summary and replace streamed block with persisted message
             final_summary = st.session_state.get("streamed_summary")
+            # Clear status once finished
+            try:
+                status_placeholder.empty()
+            except Exception:
+                pass
             if isinstance(final_summary, str) and len(final_summary.strip()) > 0:
                 summary_elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
                 summary_placeholder.empty()
