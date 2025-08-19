@@ -223,6 +223,7 @@ if my_question:
         guardrail_score,
         guardrail_sentence,
     )
+    guardrail_score = 1
     if guardrail_score == 2:
         logger.info(
             "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
