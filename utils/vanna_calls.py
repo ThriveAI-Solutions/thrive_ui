@@ -856,7 +856,7 @@ class VannaService:
                     st.session_state["streamed_thinking"] = full_thinking
                     # Update manual per-session cache and warm Streamlit cache
                     manual_cache = st.session_state.get("manual_sql_cache") or {}
-                    manual_cache[question] = (sql_text, elapsed)
+                    manual_cache[question] = (sql_text, elapsed, full_thinking)
                     st.session_state["manual_sql_cache"] = manual_cache
                     try:
                         generate_sql_cached(question)
