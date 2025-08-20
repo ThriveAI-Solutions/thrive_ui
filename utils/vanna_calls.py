@@ -872,13 +872,9 @@ class VannaService:
 
         Uses a single streaming backend call. Includes a compact CSV head of the DataFrame for context.
         """
-        # Prepare compact data context
+        # Prepare full data context (no truncation per request)
         try:
-            import pandas as _pd  # local import to avoid test patches
-
-            # Keep preview minimal for speed
-            df_head = df.iloc[: min(len(df), 10), : min(len(df.columns), 6)].copy() if df is not None else None
-            csv_preview = df_head.to_csv(index=False) if df_head is not None else ""
+            csv_preview = df.to_csv(index=False) if df is not None else ""
         except Exception:
             csv_preview = ""
 
@@ -952,11 +948,9 @@ class VannaService:
         kind is one of "thinking" or "content". Final full content and elapsed time are
         saved into st.session_state: streamed_summary, streamed_summary_elapsed_time.
         """
-        # Prepare compact data context
+        # Prepare full data context (no truncation per request)
         try:
-            import pandas as _pd
-            df_head = df.iloc[: min(len(df), 10), : min(len(df.columns), 6)].copy() if df is not None else None
-            csv_preview = df_head.to_csv(index=False) if df_head is not None else ""
+            csv_preview = df.to_csv(index=False) if df is not None else ""
         except Exception:
             csv_preview = ""
 
