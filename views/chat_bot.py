@@ -327,6 +327,13 @@ if my_question:
             # First consult manual per-session cache to skip compute and streaming
             cached = (st.session_state.get("manual_sql_cache") or {}).get(my_question)
             if cached:
+                # Support both 2-tuple (sql, elapsed) and 3-tuple (sql, elapsed, thinking)
+                # if isinstance(cached, tuple) and len(cached) >= 2:
+                #     sql = cached[0]
+                #     elapsed_time = cached[1]
+                # else:
+                #     sql = cached
+                #     elapsed_time = 0
                 sql, elapsed_time = cached
             else:
                 sql, elapsed_time = get_vn().generate_sql(question=my_question)
