@@ -348,7 +348,7 @@ def get_chart(my_question, sql, df):
         add_message(
             Message(
                 RoleType.ASSISTANT,
-                "I was unable to generate a chart for this question. Please ask another question.",
+                "I was unable to generate a chart for this question.",
                 MessageType.ERROR,
                 sql,
                 my_question,
