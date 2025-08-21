@@ -327,14 +327,17 @@ if my_question:
             # First consult manual per-session cache to skip compute and streaming
             cached = (st.session_state.get("manual_sql_cache") or {}).get(my_question)
             if cached:
-                # Support both 2-tuple (sql, elapsed) and 3-tuple (sql, elapsed, thinking)
-                # if isinstance(cached, tuple) and len(cached) >= 2:
-                #     sql = cached[0]
-                #     elapsed_time = cached[1]
-                # else:
-                #     sql = cached
-                #     elapsed_time = 0
-                sql, elapsed_time = cached
+                # Support 3-tuple (sql, elapsed, thinking), 2-tuple (sql, elapsed), or bare string
+                if isinstance(cached, tuple):
+                    sql = cached[0]
+                    elapsed_time = cached[1] if len(cached) >= 2 else 0
+                else:
+                    sql = cached
+                    elapsed_time = 0
+                # If cached SQL is empty for any reason, ignore and fall back to generation
+                if not isinstance(sql, str) or len(sql.strip()) == 0:
+                    sql = None
+                    elapsed_time = 0
             else:
                 sql, elapsed_time = get_vn().generate_sql(question=my_question)
     st.session_state.my_question = None
@@ -343,15 +346,11 @@ if my_question:
         if get_vn().is_sql_valid(sql=sql):
             if st.session_state.get("show_sql", True):
                 with messages_container:
-                    add_message(
-                        Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time)
-                    )
+                    add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
         else:
             logger.debug("sql is not valid")
             with messages_container:
-                add_message(
-                    Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time)
-                )
+                add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):
                 logger.debug("fallback to LLM")
@@ -428,35 +427,54 @@ if my_question:
                         # Live status with elapsed seconds while streaming
                         status_placeholder = st.empty()
                         start_summary_time = time.perf_counter()
+
                         def _tick():
                             try:
                                 elapsed = time.perf_counter() - start_summary_time
                                 status_placeholder.caption(f"Generating summary… {elapsed:.1f}s")
                             except Exception:
                                 pass
+
+                        # Provide SQL signature early so summary cache keys are stable
+                        try:
+                            st.session_state["current_sql_for_summary"] = sql
+                        except Exception:
+                            pass
+
                         if show_thinking:
                             with st.expander("Summarizing (thinking)…", expanded=True):
+
                                 def _thinking_only():
                                     for kind, text in get_summary_event_stream(my_question, df, think=True):
                                         if kind == "thinking":
                                             _tick()
                                             yield text
+
                                 st.write_stream(_thinking_only())
+
                             def _content_only():
                                 for kind, text in get_summary_event_stream(my_question, df, think=True):
                                     if kind == "content":
                                         _tick()
                                         yield text
+
                             st.write_stream(_content_only())
                         else:
+
                             def _content_timed():
                                 for chunk in get_summary_stream_generator(my_question, df):
                                     _tick()
                                     yield chunk
+
                             st.write_stream(_content_timed())
 
             # Read final summary and replace streamed block with persisted message
             final_summary = st.session_state.get("streamed_summary")
+            # Store current SQL for cache-key stability
+            try:
+                st.session_state["current_sql_for_summary"] = sql
+            except Exception:
+                pass
             # Clear status once finished
             try:
                 status_placeholder.empty()

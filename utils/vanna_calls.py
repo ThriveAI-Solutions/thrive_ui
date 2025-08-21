@@ -554,9 +554,9 @@ class VannaService:
         """Get a human-readable name for the currently configured LLM."""
         if self.vn is None:
             return "Not configured"
-        
+
         vn_class_name = self.vn.__class__.__name__
-        
+
         # Map class names to friendly LLM names
         if "Anthropic" in vn_class_name:
             model = self.config.get("ai_keys", {}).get("anthropic_model", "Claude")
@@ -597,7 +597,14 @@ class VannaService:
             try:
                 manual_cache = st.session_state.get("manual_sql_cache") or {}
                 if question in manual_cache:
-                    return manual_cache[question]
+                    cached_value = manual_cache[question]
+                    # Normalize cached forms to always return a 2-tuple (sql, elapsed)
+                    if isinstance(cached_value, tuple):
+                        sql_text = cached_value[0]
+                        elapsed_cached = cached_value[1] if len(cached_value) >= 2 else 0
+                        return sql_text, elapsed_cached
+                    else:
+                        return cached_value, 0
             except Exception:
                 pass
 
@@ -837,15 +844,25 @@ class VannaService:
                 underlying = getattr(_self, "vn", None)
                 client = getattr(underlying, "ollama_client", None)
                 if client is not None:
-                    # Use Ollama native stream with thinking enabled
-                    stream = client.chat(
-                        model=underlying.model,
-                        messages=prompt,
-                        stream=True,
-                        options=getattr(underlying, "ollama_options", {}),
-                        keep_alive=getattr(underlying, "keep_alive", None),
-                        think=True,
-                    )
+                    # Prefer Ollama native stream with thinking when supported; gracefully fall back otherwise
+                    try:
+                        stream = client.chat(
+                            model=underlying.model,
+                            messages=prompt,
+                            stream=True,
+                            options=getattr(underlying, "ollama_options", {}),
+                            keep_alive=getattr(underlying, "keep_alive", None),
+                            think=True,
+                        )
+                    except Exception:
+                        # Fallback: retry without think flag for non-thinking models
+                        stream = client.chat(
+                            model=underlying.model,
+                            messages=prompt,
+                            stream=True,
+                            options=getattr(underlying, "ollama_options", {}),
+                            keep_alive=getattr(underlying, "keep_alive", None),
+                        )
                     for event in stream:
                         try:
                             message = event.get("message", {})
@@ -877,14 +894,15 @@ class VannaService:
                     st.session_state["streamed_for_question"] = question
                     st.session_state["streamed_sql_elapsed_time"] = elapsed
                     st.session_state["streamed_thinking"] = full_thinking
-                    # Update manual per-session cache and warm Streamlit cache
-                    manual_cache = st.session_state.get("manual_sql_cache") or {}
-                    manual_cache[question] = (sql_text, elapsed, full_thinking)
-                    st.session_state["manual_sql_cache"] = manual_cache
-                    try:
-                        generate_sql_cached(question)
-                    except Exception:
-                        pass
+                    # Update manual per-session cache only when we have non-empty SQL
+                    if isinstance(sql_text, str) and len(sql_text.strip()) > 0:
+                        manual_cache = st.session_state.get("manual_sql_cache") or {}
+                        manual_cache[question] = (sql_text, elapsed, full_thinking)
+                        st.session_state["manual_sql_cache"] = manual_cache
+                        try:
+                            generate_sql_cached(question)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -979,9 +997,11 @@ class VannaService:
 
         underlying = getattr(_self, "vn", None)
         if underlying is None:
+
             def _noop():
                 if False:
                     yield ("content", "")
+
             return _noop()
 
         system_msg = (
@@ -997,9 +1017,11 @@ class VannaService:
 
         client = getattr(underlying, "ollama_client", None)
         if client is None:
+
             def _noop():
                 if False:
                     yield ("content", "")
+
             return _noop()
 
         start = time.perf_counter()

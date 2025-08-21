@@ -1,4 +1,5 @@
 import ast
+import hashlib
 import json
 import logging
 import uuid
@@ -124,18 +125,78 @@ def get_summary_stream_generator(question: str, df: pd.DataFrame):
     This yields only content tokens; use get_summary_event_stream for CoT + content.
     """
     vn_instance = get_vn()
+    # Check manual cache first to avoid regenerating summaries
+    try:
+        cache_key = create_summary_cache_key(question, df)
+        manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+        cached = manual_cache.get(cache_key)
+        if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[0], str):
+            cached_summary, cached_elapsed = cached
+            def _cached_gen():
+                try:
+                    try:
+                        st.session_state["streamed_summary"] = cached_summary
+                        st.session_state["streamed_summary_for_question"] = question
+                        st.session_state["streamed_summary_elapsed_time"] = cached_elapsed
+                    except Exception:
+                        setattr(st.session_state, "streamed_summary", cached_summary)
+                        setattr(st.session_state, "streamed_summary_for_question", question)
+                        setattr(st.session_state, "streamed_summary_elapsed_time", cached_elapsed)
+                except Exception:
+                    pass
+                yield cached_summary
+            return _cached_gen()
+    except Exception:
+        pass
     try:
         if hasattr(vn_instance, "stream_generate_summary"):
-            return vn_instance.stream_generate_summary(question, df)
+            # Wrap the streaming generator to persist manual cache after completion
+            def _wrapped():
+                try:
+                    for chunk in vn_instance.stream_generate_summary(question, df):
+                        yield chunk
+                finally:
+                    try:
+                        try:
+                            summary_text = st.session_state.get("streamed_summary", "")
+                        except Exception:
+                            summary_text = getattr(st.session_state, "streamed_summary", "")
+                        try:
+                            elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
+                        except Exception:
+                            elapsed = getattr(st.session_state, "streamed_summary_elapsed_time", 0)
+                        key = create_summary_cache_key(question, df)
+                        manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+                        manual_cache[key] = (summary_text or "", elapsed or 0)
+                        try:
+                            st.session_state["manual_summary_cache"] = manual_cache
+                        except Exception:
+                            setattr(st.session_state, "manual_summary_cache", manual_cache)
+                    except Exception:
+                        pass
+            return _wrapped()
     except Exception:
         pass
 
     def _fallback_gen():
         summary, _elapsed = vn_instance.generate_summary(question=question, df=df)
         try:
-            st.session_state["streamed_summary"] = summary or ""
-            st.session_state["streamed_summary_for_question"] = question
-            st.session_state["streamed_summary_elapsed_time"] = _elapsed or 0
+            try:
+                st.session_state["streamed_summary"] = summary or ""
+                st.session_state["streamed_summary_for_question"] = question
+                st.session_state["streamed_summary_elapsed_time"] = _elapsed or 0
+            except Exception:
+                setattr(st.session_state, "streamed_summary", summary or "")
+                setattr(st.session_state, "streamed_summary_for_question", question)
+                setattr(st.session_state, "streamed_summary_elapsed_time", _elapsed or 0)
+            # Store in manual cache for reuse
+            cache_key_inner = create_summary_cache_key(question, df)
+            manual_cache_inner = getattr(st.session_state, "manual_summary_cache", None) or {}
+            manual_cache_inner[cache_key_inner] = (summary or "", _elapsed or 0)
+            try:
+                st.session_state["manual_summary_cache"] = manual_cache_inner
+            except Exception:
+                setattr(st.session_state, "manual_summary_cache", manual_cache_inner)
         except Exception:
             pass
         yield summary or ""
@@ -149,8 +210,56 @@ def get_summary_event_stream(question: str, df: pd.DataFrame, think: bool = Fals
     When think=True, upstream may emit thinking tokens; otherwise only content.
     """
     vn_instance = get_vn()
+    # Cache short-circuit: if we already have a summary for this question+df, avoid streaming
+    try:
+        cache_key = create_summary_cache_key(question, df)
+        manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+        cached = manual_cache.get(cache_key)
+        if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[0], str):
+            cached_summary, cached_elapsed = cached
+            def _noop_cached():
+                try:
+                    try:
+                        st.session_state["streamed_summary"] = cached_summary
+                        st.session_state["streamed_summary_for_question"] = question
+                        st.session_state["streamed_summary_elapsed_time"] = cached_elapsed
+                    except Exception:
+                        setattr(st.session_state, "streamed_summary", cached_summary)
+                        setattr(st.session_state, "streamed_summary_for_question", question)
+                        setattr(st.session_state, "streamed_summary_elapsed_time", cached_elapsed)
+                except Exception:
+                    pass
+                if False:
+                    yield ("content", "")
+            return _noop_cached()
+    except Exception:
+        pass
     if hasattr(vn_instance, "summary_event_stream"):
-        return vn_instance.summary_event_stream(question, df, think=think)
+        # Wrap to store final content into manual cache once streaming finishes
+        def _wrapped_events():
+            try:
+                for kind_text in vn_instance.summary_event_stream(question, df, think=think):
+                    yield kind_text
+            finally:
+                try:
+                    try:
+                        summary_text = st.session_state.get("streamed_summary", "")
+                    except Exception:
+                        summary_text = getattr(st.session_state, "streamed_summary", "")
+                    try:
+                        elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
+                    except Exception:
+                        elapsed = getattr(st.session_state, "streamed_summary_elapsed_time", 0)
+                    key = create_summary_cache_key(question, df)
+                    manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+                    manual_cache[key] = (summary_text or "", elapsed or 0)
+                    try:
+                        st.session_state["manual_summary_cache"] = manual_cache
+                    except Exception:
+                        setattr(st.session_state, "manual_summary_cache", manual_cache)
+                except Exception:
+                    pass
+        return _wrapped_events()
 
     # Fallback: proxy to content-only stream
     def _proxy():
@@ -158,6 +267,30 @@ def get_summary_event_stream(question: str, df: pd.DataFrame, think: bool = Fals
             yield ("content", chunk)
 
     return _proxy()
+
+
+def create_summary_cache_key(question: str, df: pd.DataFrame) -> str:
+    """Create a stable cache key for summary caching based on question and DataFrame signature.
+
+    Uses a SHA-1 hash of columns, length, and a preview of up to 20 rows to avoid huge keys.
+    """
+    try:
+        # Prefer SQL signature if available in session (most stable across identical queries)
+        try:
+            sql_sig = st.session_state.get("current_sql_for_summary")
+        except Exception:
+            sql_sig = getattr(st.session_state, "current_sql_for_summary", None)
+        if isinstance(sql_sig, str) and len(sql_sig.strip()) > 0:
+            payload = json.dumps({"q": question, "sql": sql_sig.strip()}, ensure_ascii=False)
+            return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        cols = list(df.columns) if df is not None else []
+        nrows = int(df.shape[0]) if df is not None else 0
+        preview = df.head(20).to_json(orient="records", date_format="iso") if df is not None else ""
+        payload = json.dumps({"q": question, "cols": cols, "n": nrows, "p": preview}, ensure_ascii=False)
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    except Exception:
+        # Fallback to question-only key if df processing fails
+        return hashlib.sha1((question or "").encode("utf-8")).hexdigest()
 
 
 def get_chart(my_question, sql, df):
@@ -375,7 +508,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             cols = st.columns((1, 1, 1, 1, 1))
             with cols[0]:
                 st.button(
-                    "AI Generate Plotly",
+                    "Generate Plotly",
                     key=f"graph_{message.id}",
                     on_click=lambda: get_chart(message.question, message.query, my_df),
                 )
