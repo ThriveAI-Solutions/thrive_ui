@@ -550,6 +550,29 @@ class VannaService:
         """Get the user role."""
         return self.user_context.user_role
 
+    def get_llm_name(self) -> str:
+        """Get a human-readable name for the currently configured LLM."""
+        if self.vn is None:
+            return "Not configured"
+        
+        vn_class_name = self.vn.__class__.__name__
+        
+        # Map class names to friendly LLM names
+        if "Anthropic" in vn_class_name:
+            model = self.config.get("ai_keys", {}).get("anthropic_model", "Claude")
+            return f"Anthropic {model}"
+        elif "Ollama" in vn_class_name:
+            model = self.config.get("ai_keys", {}).get("ollama_model", "Ollama")
+            return f"Ollama ({model})"
+        elif "Gemini" in vn_class_name:
+            model = self.config.get("ai_keys", {}).get("gemini_model", "Gemini")
+            return f"Google {model}"
+        elif vn_class_name == "VannaDefault":
+            model = self.config.get("ai_keys", {}).get("vanna_model", "Vanna Cloud")
+            return f"Vanna Cloud (GPT)"
+        else:
+            return vn_class_name
+
     @st.cache_data(show_spinner="Generating sample questions ...")
     def generate_questions(_self):
         """Generate sample questions using Vanna."""

@@ -375,7 +375,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             cols = st.columns((1, 1, 1, 1, 1))
             with cols[0]:
                 st.button(
-                    "Generate Plotly",
+                    "AI Generate Plotly",
                     key=f"graph_{message.id}",
                     on_click=lambda: get_chart(message.question, message.query, my_df),
                 )

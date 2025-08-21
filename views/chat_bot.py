@@ -89,11 +89,21 @@ def save_settings_on_click():
 
 
 st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
+
+# Display current LLM
+try:
+    vn_instance = get_vn()
+    if vn_instance:
+        llm_name = vn_instance.get_llm_name()
+        st.sidebar.info(f"🤖 **Current LLM:** {llm_name}")
+except Exception:
+    pass
+
 with st.sidebar.expander("Settings"):
     st.checkbox("Show SQL", value=st.session_state.get("show_sql", True), key="temp_show_sql")
     st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
+    st.checkbox("Show AI Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
     st.checkbox(
         "Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time"
     )
