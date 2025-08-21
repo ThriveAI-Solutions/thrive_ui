@@ -265,11 +265,20 @@ if my_question:
     # If we already have cached SQL for this question, skip streaming and show cached thinking block collapsed
     cached_sql_entry = (st.session_state.get("manual_sql_cache") or {}).get(my_question)
     if cached_sql_entry:
-        final_sql, _cached_elapsed = cached_sql_entry
+        # Support both 2-tuple (sql, elapsed) and 3-tuple (sql, elapsed, thinking)
+        if isinstance(cached_sql_entry, tuple) and len(cached_sql_entry) >= 2:
+            final_sql = cached_sql_entry[0]
+            cached_thinking = cached_sql_entry[2] if len(cached_sql_entry) >= 3 else None
+        else:
+            final_sql = cached_sql_entry
+            cached_thinking = None
         with messages_container:
             with st.chat_message(RoleType.ASSISTANT.value):
                 with st.expander("Thinking…", expanded=False):
-                    if isinstance(final_sql, str) and len(final_sql.strip()) > 0:
+                    # Prefer persisted thinking; fall back to showing SQL if no thinking captured
+                    if isinstance(cached_thinking, str) and len(cached_thinking.strip()) > 0:
+                        st.markdown(cached_thinking)
+                    elif isinstance(final_sql, str) and len(final_sql.strip()) > 0:
                         st.code(final_sql, language="sql")
     else:
         # Persistent, collapsible streaming narration at the footer (to avoid mid-stack injection)
