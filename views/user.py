@@ -31,11 +31,54 @@ def import_users():
     Expected columns in Excel: username, password, first_name, last_name, role_name
     """
     try:
+        import os
+        
+        # Use multiple path resolution strategies
+        import pathlib
+        
+        # Try different path strategies
+        possible_paths = [
+            "./utils/config/user_list.xlsx",  # Relative to current directory
+            "utils/config/user_list.xlsx",    # Without leading ./
+            os.path.join(os.path.dirname(__file__), "..", "utils", "config", "user_list.xlsx"),  # Relative to this file
+        ]
+        
+        file_path = None
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                file_path = abs_path
+                break
+        
+        current_dir = os.getcwd()
+        
+        st.write(f"🔍 **Debug Info:**")
+        st.write(f"- Current working directory: `{current_dir}`")
+        st.write(f"- Script file location: `{os.path.dirname(__file__)}`")
+        
+        if file_path:
+            st.write(f"- Found file at: `{file_path}`")
+        else:
+            st.write("- **File not found in any expected location!**")
+            st.write("- Tried paths:")
+            for path in possible_paths:
+                abs_path = os.path.abspath(path)
+                exists = os.path.exists(abs_path)
+                st.write(f"  - `{abs_path}` (exists: {exists})")
+        
+        if os.path.exists("./utils/config/"):
+            files_in_dir = os.listdir("./utils/config/")
+            st.write(f"- Files in utils/config/: `{files_in_dir}`")
+        
         # Read the Excel file
-        df = get_user_list_excel("./utils/config/user_list.xlsx")
+        if file_path:
+            df = get_user_list_excel(file_path)
+        else:
+            st.error("Excel file not found in any expected location!")
+            return False
         
         if df is False or df is None:
-            st.error("Failed to read user list Excel file. Please ensure './utils/config/user_list.xlsx' exists")
+            st.error(f"Failed to read user list Excel file at: `{file_path}`")
             return False
         
         if df.empty:
