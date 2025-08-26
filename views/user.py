@@ -33,14 +33,11 @@ def import_users():
     try:
         import os
         
-        # Use multiple path resolution strategies
-        import pathlib
-        
-        # Try different path strategies
+        # Use robust path resolution
         possible_paths = [
-            "./utils/config/user_list.xlsx",  # Relative to current directory
-            "utils/config/user_list.xlsx",    # Without leading ./
-            os.path.join(os.path.dirname(__file__), "..", "utils", "config", "user_list.xlsx"),  # Relative to this file
+            "./utils/config/user_list.xlsx",
+            "utils/config/user_list.xlsx",
+            os.path.join(os.path.dirname(__file__), "..", "utils", "config", "user_list.xlsx"),
         ]
         
         file_path = None
@@ -50,62 +47,29 @@ def import_users():
                 file_path = abs_path
                 break
         
-        current_dir = os.getcwd()
-        
-        st.write(f"🔍 **Debug Info:**")
-        st.write(f"- Current working directory: `{current_dir}`")
-        st.write(f"- Script file location: `{os.path.dirname(__file__)}`")
-        
-        if file_path:
-            st.write(f"- Found file at: `{file_path}`")
-            # Check file permissions
-            import stat
-            file_stat = os.stat(file_path)
-            permissions = oct(file_stat.st_mode)[-3:]
-            st.write(f"- File permissions: `{permissions}`")
-            st.write(f"- File size: `{file_stat.st_size} bytes`")
-            st.write(f"- File readable: `{os.access(file_path, os.R_OK)}`")
-        else:
-            st.write("- **File not found in any expected location!**")
-            st.write("- Tried paths:")
-            for path in possible_paths:
-                abs_path = os.path.abspath(path)
-                exists = os.path.exists(abs_path)
-                st.write(f"  - `{abs_path}` (exists: {exists})")
-        
-        if os.path.exists("./utils/config/"):
-            files_in_dir = os.listdir("./utils/config/")
-            st.write(f"- Files in utils/config/: `{files_in_dir}`")
-        
-        # Read the Excel file
-        if file_path:
-            try:
-                # Try to read the Excel file directly to get better error messages
-                import pandas as pd
-                df = pd.read_excel(file_path)
-                st.success(f"✅ Successfully read Excel file with {len(df)} rows")
-            except Exception as excel_error:
-                st.error(f"❌ Error reading Excel file: {str(excel_error)}")
-                st.write(f"- File path: `{file_path}`")
-                st.write(f"- Error type: `{type(excel_error).__name__}`")
-                
-                # Try to diagnose the issue
-                if "openpyxl" in str(excel_error).lower():
-                    st.error("💡 **Solution**: Missing openpyxl library for Excel files")
-                    st.code("pip install openpyxl")
-                elif "permission" in str(excel_error).lower():
-                    st.error("💡 **Solution**: File permission issue")
-                    st.code("chmod 644 /path/to/user_list.xlsx")
-                elif "no such file" in str(excel_error).lower():
-                    st.error("💡 **Solution**: File not found")
-                
-                return False
-        else:
-            st.error("Excel file not found in any expected location!")
+        if not file_path:
+            st.error("Excel file not found. Please ensure 'utils/config/user_list.xlsx' exists.")
             return False
         
-        if df is None or df.empty:
-            st.warning("Excel file is empty or contains no data")
+        # Read the Excel file (with CSV fallback)
+        try:
+            df = get_user_list_excel(file_path)
+        except:
+            # Try CSV fallback
+            csv_path = file_path.replace('.xlsx', '.csv')
+            if os.path.exists(csv_path):
+                st.info("Using CSV fallback file")
+                df = pd.read_csv(csv_path)
+            else:
+                st.error("Excel file requires openpyxl library. Please install openpyxl or provide a CSV file.")
+                return False
+        
+        if df is False or df is None:
+            st.error(f"Failed to read user list Excel file. Please check the file format and dependencies.")
+            return False
+        
+        if df.empty:
+            st.warning("Excel file contains no data")
             return False
         
         # Track import results
