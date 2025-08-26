@@ -1,3 +1,4 @@
+import json
 import logging
 import io
 
@@ -5,7 +6,15 @@ import pandas as pd
 import streamlit as st
 from pandas import DataFrame
 
-from orm.functions import change_password, delete_all_messages
+from orm.functions import (
+    change_password,
+    create_user,
+    delete_all_messages,
+    delete_user,
+    get_all_user_roles,
+    get_all_users,
+    update_user,
+)
 from orm.models import RoleTypeEnum
 from utils.chat_bot_helper import get_vn
 from utils.vanna_calls import VannaService, train_ddl, train_file, training_plan
@@ -137,6 +146,96 @@ def import_training_data_from_csv(uploaded_file):
         logger.error(f"CSV import error: {e}")
 
 
+@st.dialog("Edit User")
+def pop_edit_user(user_data):
+    """Dialog for editing an existing user."""
+    try:
+        with st.form("edit_user"):
+            st.write(f"Editing user: **{user_data['username']}**")
+            
+            username = st.text_input("Username", value=user_data['username'], help="Unique username for login")
+            first_name = st.text_input("First Name", value=user_data['first_name'])
+            last_name = st.text_input("Last Name", value=user_data['last_name'])
+            
+            # Get available roles and create a selectbox
+            roles = get_all_user_roles()
+            if not roles:
+                st.error("No user roles available.")
+                return
+            
+            # Create role options and find current selection
+            role_options = {f"{role[1]} - {role[2]}": role[0] for role in roles}
+            current_role_key = next(
+                (k for k, v in role_options.items() if v == user_data['role_id']), 
+                list(role_options.keys())[0]
+            )
+            selected_role = st.selectbox("User Role", options=list(role_options.keys()), index=list(role_options.keys()).index(current_role_key))
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.form_submit_button("Update User", type="primary", use_container_width=True):
+                    # Validation
+                    if not all([username, first_name, last_name]):
+                        st.error("Please fill all required fields.")
+                    else:
+                        # Update the user
+                        role_id = role_options[selected_role]
+                        if update_user(user_data['id'], username, first_name, last_name, role_id):
+                            st.success(f"User '{username}' updated successfully!")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to update user. Username '{username}' may already be taken.")
+            
+            with col2:
+                if st.form_submit_button("Cancel", use_container_width=True):
+                    st.rerun()
+                    
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+        logger.error(f"Error in edit user dialog: {e}")
+
+
+@st.dialog("Add New User")
+def pop_add_user():
+    """Dialog for adding a new user to the system."""
+    try:
+        with st.form("add_new_user"):
+            username = st.text_input("Username", help="Unique username for login")
+            password = st.text_input("Password", type="password", help="Password for the new user")
+            confirm_password = st.text_input("Confirm Password", type="password")
+            first_name = st.text_input("First Name")
+            last_name = st.text_input("Last Name")
+            
+            # Get available roles and create a selectbox
+            roles = get_all_user_roles()
+            if not roles:
+                st.error("No user roles available. Please ensure roles are initialized.")
+                return
+            
+            role_options = {f"{role[1]} - {role[2]}": role[0] for role in roles}
+            selected_role = st.selectbox("User Role", options=list(role_options.keys()))
+            
+            if st.form_submit_button("Create User", type="primary"):
+                # Validation
+                if not all([username, password, first_name, last_name]):
+                    st.error("Please fill all required fields.")
+                elif password != confirm_password:
+                    st.error("Passwords do not match.")
+                elif len(password) < 6:
+                    st.error("Password must be at least 6 characters long.")
+                else:
+                    # Create the user
+                    role_id = role_options[selected_role]
+                    if create_user(username, password, first_name, last_name, role_id):
+                        st.success(f"User '{username}' created successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to create user. Username '{username}' may already exist.")
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+        logger.error(f"Error in add user dialog: {e}")
+
+
 @st.dialog("Cast your vote")
 def pop_train(type):
     try:
@@ -168,7 +267,12 @@ def pop_train(type):
 
 st.title("User Settings")
 
-tab1, tab2 = st.tabs(["Training Data", "Change Password"])
+# Add tabs for different sections - add User Management tab for admins
+if st.session_state.cookies.get("role_name") == "Admin":
+    tab1, tab2, tab3 = st.tabs(["Training Data", "Change Password", "User Management"])
+else:
+    tab1, tab2 = st.tabs(["Training Data", "Change Password"])
+    tab3 = None
 
 with tab1:
     if st.session_state.cookies.get("role_name") == "Admin":
@@ -253,6 +357,83 @@ with tab2:
                     st.success("Password changed successfully.")
                 else:
                     st.error("Current password is incorrect.")
+
+# User Management tab (only for admins)
+if tab3 is not None:
+    with tab3:
+        st.subheader("User Management")
+        st.write("Manage users in the system. Add new users or modify existing ones.")
+        
+        # Add new user button
+        if st.button("➕ Add New User", type="primary"):
+            pop_add_user()
+        
+        st.divider()
+        
+        # Get current user ID to prevent self-deletion
+        current_user_id = json.loads(st.session_state.cookies.get("user_id")) if st.session_state.cookies.get("user_id") else None
+        
+        # Display existing users
+        st.subheader("Existing Users")
+        users = get_all_users()
+        
+        if users:
+            # Create columns for the header
+            col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2, 2, 2, 1.5, 1, 1])
+            with col1:
+                st.write("**Username**")
+            with col2:
+                st.write("**First Name**")
+            with col3:
+                st.write("**Last Name**")
+            with col4:
+                st.write("**Role**")
+            with col5:
+                st.write("**Created**")
+            with col6:
+                st.write("**Edit**")
+            with col7:
+                st.write("**Delete**")
+            
+            # Display each user
+            for user in users:
+                col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2, 2, 2, 1.5, 1, 1])
+                with col1:
+                    st.write(user['username'])
+                with col2:
+                    st.write(user['first_name'])
+                with col3:
+                    st.write(user['last_name'])
+                with col4:
+                    st.write(user['role_name'])
+                with col5:
+                    # Format the created date
+                    if user['created_at']:
+                        st.write(user['created_at'].strftime("%Y-%m-%d") if hasattr(user['created_at'], 'strftime') else str(user['created_at'])[:10])
+                    else:
+                        st.write("-")
+                with col6:
+                    if st.button("✏️", key=f"edit_{user['id']}", help=f"Edit {user['username']}"):
+                        pop_edit_user(user)
+                with col7:
+                    # Prevent self-deletion
+                    if user['id'] == current_user_id:
+                        st.button("🗑️", key=f"delete_{user['id']}", disabled=True, help="Cannot delete your own account")
+                    else:
+                        if st.button("🗑️", key=f"delete_{user['id']}", help=f"Delete {user['username']}"):
+                            # Confirm deletion
+                            if delete_user(user['id']):
+                                st.success(f"User '{user['username']}' deleted successfully!")
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to delete user '{user['username']}'")
+            
+            st.info(f"Total users: {len(users)}")
+        else:
+            st.warning("No users found in the system.")
+        
+        st.divider()
+        st.info("💡 Tip: You cannot delete your own account. New users will have default preferences which they can customize after logging in.")
 
 if st.session_state.cookies.get("role_name") == "Admin":
     st.sidebar.button("Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary")
