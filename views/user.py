@@ -58,6 +58,13 @@ def import_users():
         
         if file_path:
             st.write(f"- Found file at: `{file_path}`")
+            # Check file permissions
+            import stat
+            file_stat = os.stat(file_path)
+            permissions = oct(file_stat.st_mode)[-3:]
+            st.write(f"- File permissions: `{permissions}`")
+            st.write(f"- File size: `{file_stat.st_size} bytes`")
+            st.write(f"- File readable: `{os.access(file_path, os.R_OK)}`")
         else:
             st.write("- **File not found in any expected location!**")
             st.write("- Tried paths:")
@@ -72,17 +79,33 @@ def import_users():
         
         # Read the Excel file
         if file_path:
-            df = get_user_list_excel(file_path)
+            try:
+                # Try to read the Excel file directly to get better error messages
+                import pandas as pd
+                df = pd.read_excel(file_path)
+                st.success(f"✅ Successfully read Excel file with {len(df)} rows")
+            except Exception as excel_error:
+                st.error(f"❌ Error reading Excel file: {str(excel_error)}")
+                st.write(f"- File path: `{file_path}`")
+                st.write(f"- Error type: `{type(excel_error).__name__}`")
+                
+                # Try to diagnose the issue
+                if "openpyxl" in str(excel_error).lower():
+                    st.error("💡 **Solution**: Missing openpyxl library for Excel files")
+                    st.code("pip install openpyxl")
+                elif "permission" in str(excel_error).lower():
+                    st.error("💡 **Solution**: File permission issue")
+                    st.code("chmod 644 /path/to/user_list.xlsx")
+                elif "no such file" in str(excel_error).lower():
+                    st.error("💡 **Solution**: File not found")
+                
+                return False
         else:
             st.error("Excel file not found in any expected location!")
             return False
         
-        if df is False or df is None:
-            st.error(f"Failed to read user list Excel file at: `{file_path}`")
-            return False
-        
-        if df.empty:
-            st.warning("No users found in the Excel file.")
+        if df is None or df.empty:
+            st.warning("Excel file is empty or contains no data")
             return False
         
         # Track import results
