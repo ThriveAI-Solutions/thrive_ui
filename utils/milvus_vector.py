@@ -162,18 +162,32 @@ class ThriveAI_Milvus:
             raise
 
     # ---- Metadata helpers ----
+    def _is_role_restriction_enabled(self) -> bool:
+        """Check secrets for role restriction toggle. Defaults to True when unavailable."""
+        try:
+            import streamlit as st  # optional in tests
+
+            # Support both top-level and nested under security
+            if "restrict_rag_by_role" in st.secrets:
+                return bool(st.secrets.get("restrict_rag_by_role"))
+            security = st.secrets.get("security", {})
+            return bool(security.get("restrict_rag_by_role", True))
+        except Exception:
+            return True
+
+    def _get_effective_role(self) -> int:
+        """Return 0 when restriction disabled to allow all training; else the user role."""
+        return 0 if not self._is_role_restriction_enabled() else int(self.user_role)
+
     def _prepare_metadata(self, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         if metadata is None:
             metadata = {}
-        metadata["user_role"] = self.user_role
+        metadata["user_role"] = self._get_effective_role()
         return metadata
 
     def _prepare_retrieval_metadata(self, metadata: dict[str, Any] | None = None) -> str:
-        """Return a Milvus filter expression enforcing role-based visibility.
-
-        Example: user_role >= 2
-        """
-        role = self.user_role
+        """Return a Milvus filter expression enforcing role-based visibility (overridable)."""
+        role = self._get_effective_role()
         # Additional AND conditions can be appended if metadata includes more filters
         return f"user_role >= {int(role)}"
 
