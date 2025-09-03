@@ -152,6 +152,12 @@ class MyVannaOllama(VannaDB_VectorStore, ThriveAI_Ollama):
                 vanna_api_key=st.secrets["ai_keys"]["vanna_api"],
                 config=config,
             )
+            # Build Ollama options (e.g., temperature)
+            _ollama_options = {}
+            _temp = st.secrets.get("ai_keys", {}).get("ollama_temperature")
+            if _temp is not None:
+                _ollama_options["temperature"] = _temp
+
             ThriveAI_Ollama.__init__(
                 self,
                 config={
@@ -159,6 +165,7 @@ class MyVannaOllama(VannaDB_VectorStore, ThriveAI_Ollama):
                     # Provide a sensible default host if not specified in tests/secrets
                     "ollama_host": st.secrets.get("ai_keys", {}).get("ollama_host", "http://localhost:11434"),
                     "schema": st.secrets["postgres"].get("schema_name", "public"),
+                    "options": _ollama_options,
                 },
             )
             # Base Vanna Ollama initializer for tests that patch utils.vanna_calls.Ollama.__init__
@@ -181,6 +188,11 @@ class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, ThriveAI_Ollama):
             logger.info("Using Ollama and ChromaDB")
             ThriveAI_ChromaDB.__init__(self, user_role=user_role, config=config)
             # Initialize ThriveAI_Ollama (app-specific wrapper)
+            _ollama_options = {}
+            _temp = st.secrets.get("ai_keys", {}).get("ollama_temperature")
+            if _temp is not None:
+                _ollama_options["temperature"] = _temp
+
             ThriveAI_Ollama.__init__(
                 self,
                 config={
@@ -189,6 +201,7 @@ class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, ThriveAI_Ollama):
                     "ollama_host": st.secrets.get("ai_keys", {}).get("ollama_host", "http://localhost:11434"),
                     "schema": st.secrets["postgres"].get("schema_name", "public"),
                     "dialect": st.secrets["postgres"].get("dialect", "postgresql"),
+                    "options": _ollama_options,
                 },
             )
             # Also call base Vanna Ollama initializer to satisfy tests that patch utils.vanna_calls.Ollama.__init__
@@ -289,6 +302,11 @@ class MyVannaOllamaMilvus(ThriveAI_Milvus, ThriveAI_Ollama):
             ThriveAI_Milvus.__init__(self, user_role=user_role, config=config)
 
             # Initialize Ollama wrapper and set default model config
+            _ollama_options = {}
+            _temp = st.secrets.get("ai_keys", {}).get("ollama_temperature")
+            if _temp is not None:
+                _ollama_options["temperature"] = _temp
+
             ThriveAI_Ollama.__init__(
                 self,
                 config={
@@ -296,6 +314,7 @@ class MyVannaOllamaMilvus(ThriveAI_Milvus, ThriveAI_Ollama):
                     "ollama_host": st.secrets.get("ai_keys", {}).get("ollama_host", "http://localhost:11434"),
                     "schema": st.secrets["postgres"].get("schema_name", "public"),
                     "dialect": st.secrets["postgres"].get("dialect", "postgresql"),
+                    "options": _ollama_options,
                 },
             )
             # Provide sane defaults used by prompt helpers if base class didn't set them
