@@ -71,7 +71,7 @@ class ThriveAI_Base(VannaBase):
             "4. Please use the most relevant table(s). \n"
             "5. If the question has been asked and answered before, please repeat the answer exactly as it was given before. \n"
             f"6. Ensure that the output SQL is {self.dialect}-compliant and executable, and free of syntax errors. \n"
-            f"7. Make sure to fully qualify table names with the schema name {self.schema}, even if not specified in the ddl. \n"
+            f"7. Make sure to fully qualify table names with the schema name {self.schema}, even if not specified in the ddl. Eg. SELECT * FROM dw.customers;\n"
         )
 
         initial_prompt += "=== Example Question/SQL Pairs \n"
