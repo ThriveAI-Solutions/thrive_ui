@@ -3,10 +3,11 @@ import json
 import logging
 
 import streamlit as st
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
 
 from orm.models import Message, SessionLocal, User, UserRole
+from utils.enums import MessageType, RoleType
 
 logger = logging.getLogger(__name__)
 
@@ -332,3 +333,299 @@ def delete_all_messages():
     except Exception as e:
         st.error(f"Error deleting all messages: {e}")
         logger.error(f"Error deleting all messages: {e}")
+
+
+def update_user_preferences(user_id: int, **preferences) -> bool:
+    """Update boolean user preference flags for a specific user (admin capable)."""
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if not user:
+                return False
+
+            allowed_fields = {
+                "show_sql",
+                "show_table",
+                "show_plotly_code",
+                "show_chart",
+                "show_question_history",
+                "show_summary",
+                "voice_input",
+                "speak_summary",
+                "show_suggested",
+                "show_followup",
+                "show_elapsed_time",
+                "llm_fallback",
+                "min_message_id",
+            }
+            for key, value in preferences.items():
+                if key in allowed_fields:
+                    setattr(user, key, value)
+
+            session.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error updating user preferences: {e}")
+        return False
+
+
+def admin_change_password(user_id: int, new_password: str) -> bool:
+    """Admin-only password set without requiring current password."""
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if not user:
+                return False
+            user.password = hashlib.sha256(new_password.encode()).hexdigest()
+            session.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Error setting user password: {e}")
+        return False
+
+
+def get_user_stats_for_all_users():
+    """Return a dict of user_id -> stats for questions, charts, errors, dataframes, summaries."""
+    try:
+        chart_types = [
+            MessageType.PLOTLY_CHART.value,
+            MessageType.ST_LINE_CHART.value,
+            MessageType.ST_BAR_CHART.value,
+            MessageType.ST_AREA_CHART.value,
+            MessageType.ST_SCATTER_CHART.value,
+        ]
+
+        with SessionLocal() as session:
+            rows = (
+                session.query(
+                    Message.user_id,
+                    func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
+                    func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                    func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
+                    func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
+                    func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                )
+                .group_by(Message.user_id)
+                .all()
+            )
+
+            stats_map = {}
+            for row in rows:
+                stats_map[row.user_id] = {
+                    "questions": int(row.questions or 0),
+                    "charts": int(row.charts or 0),
+                    "errors": int(row.errors or 0),
+                    "dataframes": int(row.dataframes or 0),
+                    "summaries": int(row.summaries or 0),
+                }
+            return stats_map
+    except Exception as e:
+        logger.error(f"Error fetching user stats: {e}")
+        return {}
+
+
+def get_user_stats(user_id: int):
+    """Return stats dict for a single user."""
+    try:
+        stats_map = get_user_stats_for_all_users()
+        return stats_map.get(
+            user_id,
+            {"questions": 0, "charts": 0, "errors": 0, "dataframes": 0, "summaries": 0},
+        )
+    except Exception:
+        return {"questions": 0, "charts": 0, "errors": 0, "dataframes": 0, "summaries": 0}
+
+
+def get_user_daily_stats(user_id: int, days: int = 7):
+    """Return a list of dicts with daily counts for the past N days for one user.
+    Keys: date, questions, charts, errors, dataframes, summaries
+    """
+    try:
+        chart_types = [
+            MessageType.PLOTLY_CHART.value,
+            MessageType.ST_LINE_CHART.value,
+            MessageType.ST_BAR_CHART.value,
+            MessageType.ST_AREA_CHART.value,
+            MessageType.ST_SCATTER_CHART.value,
+        ]
+
+        with SessionLocal() as session:
+            # SQLite strftime('%Y-%m-%d', created_at) groups by date; works also in Postgres with date_trunc but we use generic
+            date_expr = func.strftime('%Y-%m-%d', Message.created_at)
+            rows = (
+                session.query(
+                    date_expr.label('d'),
+                    func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
+                    func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                    func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
+                    func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
+                    func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                )
+                .filter(Message.user_id == user_id)
+                .group_by('d')
+                .order_by('d')
+                .all()
+            )
+
+        # Build a dense sequence of dates over the requested window, default missing to zeros
+        import datetime as _dt
+        today = _dt.date.today()
+        start = today - _dt.timedelta(days=days - 1)
+        by_date = {r.d: r for r in rows}
+        output = []
+        for i in range(days):
+            d = start + _dt.timedelta(days=i)
+            key = d.strftime('%Y-%m-%d')
+            r = by_date.get(key)
+            output.append({
+                'date': key,
+                'questions': int((r.questions if r else 0) or 0),
+                'charts': int((r.charts if r else 0) or 0),
+                'errors': int((r.errors if r else 0) or 0),
+                'dataframes': int((r.dataframes if r else 0) or 0),
+                'summaries': int((r.summaries if r else 0) or 0),
+            })
+        return output
+    except Exception as e:
+        logger.error(f"Error fetching user daily stats: {e}")
+        return []
+
+
+def get_user_recent_questions(user_id: int, limit: int = 200):
+    """Return a list of recent question strings asked by the user, newest first.
+    Combines user messages' content and assistant messages' question field, de-duplicated by text.
+    """
+    try:
+        with SessionLocal() as session:
+            user_q = (
+                session.query(Message.content.label("q"), Message.created_at.label("ts"))
+                .filter(
+                    Message.user_id == user_id,
+                    Message.role == RoleType.USER.value,
+                    Message.content.isnot(None),
+                    func.length(Message.content) > 0,
+                )
+            )
+            asst_q = (
+                session.query(Message.question.label("q"), Message.created_at.label("ts"))
+                .filter(
+                    Message.user_id == user_id,
+                    Message.role == RoleType.ASSISTANT.value,
+                    Message.question.isnot(None),
+                    func.length(Message.question) > 0,
+                )
+            )
+
+            union_q = user_q.union_all(asst_q).subquery()
+            grouped = (
+                session.query(union_q.c.q, func.max(union_q.c.ts).label("ts"))
+                .group_by(union_q.c.q)
+                .order_by(func.max(union_q.c.ts).desc())
+                .limit(limit)
+                .all()
+            )
+            return [r.q for r in grouped]
+    except Exception as e:
+        logger.error(f"Error fetching user recent questions: {e}")
+        return []
+
+
+def get_user_questions_page(user_id: int, page: int = 1, page_size: int = 50):
+    """Paginated questions: returns dict with items [{question, created_at, status, elapsed_seconds}], total count.
+    Combines user message content and assistant question field, deduped by question text; shows the most recent timestamp.
+    Success is true if any assistant message for that question produced a non-error result (dataframe/summary/chart).
+    """
+    try:
+        with SessionLocal() as session:
+            # Combine user content and assistant question, then dedupe by text keeping most recent timestamp
+            user_q = (
+                session.query(Message.content.label("q"), Message.created_at.label("ts"))
+                .filter(
+                    Message.user_id == user_id,
+                    Message.role == RoleType.USER.value,
+                    Message.content.isnot(None),
+                    func.length(Message.content) > 0,
+                )
+            )
+            asst_q = (
+                session.query(Message.question.label("q"), Message.created_at.label("ts"))
+                .filter(
+                    Message.user_id == user_id,
+                    Message.role == RoleType.ASSISTANT.value,
+                    Message.question.isnot(None),
+                    func.length(Message.question) > 0,
+                )
+            )
+            union_q = user_q.union_all(asst_q).subquery()
+            grouped_sub = (
+                session.query(union_q.c.q.label("q"), func.max(union_q.c.ts).label("created_at"))
+                .group_by(union_q.c.q)
+                .subquery()
+            )
+
+            total = session.query(func.count()).select_from(grouped_sub).scalar() or 0
+
+            rows = (
+                session.query(grouped_sub.c.q, grouped_sub.c.created_at)
+                .order_by(grouped_sub.c.created_at.desc())
+                .offset(max(0, (page - 1) * page_size))
+                .limit(page_size)
+                .all()
+            )
+
+            questions = [r[0] for r in rows]
+
+            # If no rows, return early
+            if not rows:
+                return {"items": [], "total": int(total)}
+
+            # Aggregate assistant results by question across the fetched set
+            chart_types = [
+                MessageType.PLOTLY_CHART.value,
+                MessageType.ST_LINE_CHART.value,
+                MessageType.ST_BAR_CHART.value,
+                MessageType.ST_AREA_CHART.value,
+                MessageType.ST_SCATTER_CHART.value,
+            ]
+
+            # Use assistant-side Message.question to match; include user content too for robustness
+            agg = (
+                session.query(
+                    Message.question.label("q"),
+                    func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                    func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
+                    func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                    func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
+                    func.sum(func.coalesce(Message.elapsed_time, 0)).label("elapsed")
+                )
+                .filter(
+                    Message.user_id == user_id,
+                    Message.role == RoleType.ASSISTANT.value,
+                    Message.question.isnot(None),
+                    Message.question.in_(questions),
+                )
+                .group_by(Message.question)
+                .all()
+            )
+            metrics = {row.q: row for row in agg}
+
+            items = []
+            for q, created_at in rows:
+                m = metrics.get(q)
+                charts = int(getattr(m, "charts", 0) or 0) if m else 0
+                dataframes = int(getattr(m, "dataframes", 0) or 0) if m else 0
+                summaries = int(getattr(m, "summaries", 0) or 0) if m else 0
+                errors = int(getattr(m, "errors", 0) or 0) if m else 0
+                elapsed = float(getattr(m, "elapsed", 0) or 0.0) if m else 0.0
+                success = (charts + dataframes + summaries) > 0 and errors == 0
+                items.append({
+                    "question": q,
+                    "created_at": created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at),
+                    "status": "Success" if success else ("Error" if errors > 0 else "Unknown"),
+                    "elapsed_seconds": round(elapsed, 6),
+                })
+
+            return {"items": items, "total": int(total)}
+    except Exception as e:
+        logger.error(f"Error fetching user questions page: {e}")
+        return {"items": [], "total": 0}
