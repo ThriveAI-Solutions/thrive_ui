@@ -5,9 +5,10 @@ import logging
 import random
 import uuid
 from io import StringIO
-from ethical_guardrails_lib import get_ethical_guideline
+
 import pandas as pd
 import streamlit as st
+from ethical_guardrails_lib import get_ethical_guideline
 
 from orm.functions import save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
@@ -782,7 +783,15 @@ def normal_message_flow(my_question:str):
             st.stop()
 
         # Query limiting is now handled inside the run_sql method via LIMIT clause
-        df, sql_elapsed_time = get_vn().run_sql(sql=sql)
+        rs = get_vn().run_sql(sql=sql)
+        if isinstance(rs, tuple) and len(rs) == 2:
+            df, sql_elapsed_time = rs
+        else:
+            df = rs
+            try:
+                sql_elapsed_time = st.session_state.get("last_sql_elapsed_time", 0)
+            except Exception:
+                sql_elapsed_time = 0
 
         # if sql doesn't return a dataframe, offer retry with LLM guidance
         if not isinstance(df, pd.DataFrame):
