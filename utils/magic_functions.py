@@ -1,5 +1,6 @@
 import difflib
 from io import StringIO
+import random
 import re
 import streamlit as st
 from PIL import Image
@@ -633,19 +634,19 @@ def _history_search(question, match_dict, previous_df):
         search_text = match_dict.get("search_text", "").strip().lower()
         
         if not search_text:
-            add_message(Message(RoleType.ASSISTANT, "Please provide a search term after /h", MessageType.ERROR))
+            # add_message(Message(RoleType.ASSISTANT, "Please provide a search term after /h", MessageType.ERROR))
             return
         
         # Get current user ID from session
         user_id_str = st.session_state.cookies.get("user_id")
         if not user_id_str:
-            add_message(Message(RoleType.ASSISTANT, "User not authenticated", MessageType.ERROR))
+            # add_message(Message(RoleType.ASSISTANT, "User not authenticated", MessageType.ERROR))
             return
         
         try:
             user_id = int(user_id_str)
         except (ValueError, TypeError):
-            add_message(Message(RoleType.ASSISTANT, "Invalid user ID", MessageType.ERROR))
+            # add_message(Message(RoleType.ASSISTANT, "Invalid user ID", MessageType.ERROR))
             return
         
         # Query the database for all thumbs up queries from this user
@@ -655,16 +656,17 @@ def _history_search(question, match_dict, previous_df):
             # Get all messages from this user with thumbs up feedback
             all_thumbs_up = session.query(DBMessage).filter(
                 DBMessage.user_id == user_id,
-                DBMessage.feedback == "up"
+                DBMessage.role == 'assistant'
+                # DBMessage.feedback == "up"
             ).order_by(DBMessage.created_at.desc()).all()
             
             if not all_thumbs_up:
-                add_message(Message(
-                    RoleType.ASSISTANT, 
-                    "No thumbs-up queries found in your history", 
-                    MessageType.TEXT
-                ))
-                return
+                # add_message(Message(
+                #     RoleType.ASSISTANT, 
+                #     "No thumbs-up queries found in your history", 
+                #     MessageType.TEXT
+                # ))
+                return # TODO: make this call the original functionality
             
             # Use fuzzy matching to find similar queries (90% match threshold)
             matched_messages = []
@@ -688,79 +690,95 @@ def _history_search(question, match_dict, previous_df):
             matched_messages.sort(key=lambda x: x[1], reverse=True)
             
             if not matched_messages:
-                add_message(Message(
-                    RoleType.ASSISTANT, 
-                    f"No queries found with 90% similarity to '{search_text}'", 
-                    MessageType.TEXT
-                ))
-                return
+                # add_message(Message(
+                #     RoleType.ASSISTANT, 
+                #     f"No queries found with 90% similarity to '{search_text}'", 
+                #     MessageType.TEXT
+                # ))
+                return # TODO: make this call the original functionality
             
-            # Prepare results
-            results = []
-            for msg, similarity in matched_messages:
-                if msg.question and msg.query:
-                    results.append({
-                        "Match %": f"{similarity*100:.1f}%",
-                        "Question": msg.question[:100] + "..." if len(msg.question) > 100 else msg.question,
-                        "SQL": msg.query[:150] + "..." if len(msg.query) > 150 else msg.query,
-                        "Date": msg.created_at.strftime("%Y-%m-%d %H:%M") if msg.created_at else "N/A",
-                    })
-            
-            if results:
-                # Convert to DataFrame for display
-                df = pd.DataFrame(results)
-                
-                end_time = time.perf_counter()
-                elapsed_time = end_time - start_time
-                
+            # Re-add matching queries as new messages with random delays
+            if matched_messages:
                 add_message(Message(
                     RoleType.ASSISTANT,
-                    f"Found {len(results)} similar queries (≥90% match) for '{search_text}':",
+                    f"Found {len(matched_messages)} similar queries (≥90% match) for '{search_text}'. Re-running them for you...",
                     MessageType.TEXT
                 ))
                 
-                add_message(Message(
-                    RoleType.ASSISTANT,
-                    df,
-                    MessageType.DATAFRAME,
-                    None,
-                    question,
-                    df,
-                    elapsed_time
-                ))
-                
-                # Execute the best matching query
-                if matched_messages and matched_messages[0][0].query:
-                    best_match = matched_messages[0][0]
-                    add_message(Message(
-                        RoleType.ASSISTANT,
-                        f"Executing best match ({matched_messages[0][1]*100:.1f}% similarity)...",
-                        MessageType.TEXT
-                    ))
-                    
-                    try:
-                        result_df, query_elapsed = run_sql_cached(best_match.query)
+                for msg, similarity in matched_messages:
+                    if msg.question and msg.query:
+                        # Random delay between 1-3 seconds to simulate processing
+                        delay_time = random.uniform(1.0, 3.0)
+                        time.sleep(delay_time)
+                        
+                        # Re-add the question as a user message
                         add_message(Message(
-                            RoleType.ASSISTANT,
-                            result_df,
-                            MessageType.DATAFRAME,
-                            best_match.query,
-                            best_match.question,
-                            result_df,
-                            query_elapsed
+                            RoleType.USER,
+                            msg.question,
+                            MessageType.TEXT
                         ))
-                    except Exception as e:
-                        add_message(Message(
-                            RoleType.ASSISTANT,
-                            f"Error executing the query: {str(e)}",
-                            MessageType.ERROR
-                        ))
-            else:
-                add_message(Message(
-                    RoleType.ASSISTANT,
-                    f"No results found matching '{search_text}'",
-                    MessageType.TEXT
-                ))
+                        
+                        # Show SQL if configured
+                        if st.session_state.get("show_sql", True):
+                            add_message(Message(
+                                RoleType.ASSISTANT,
+                                msg.query,
+                                MessageType.SQL,
+                                msg.query,
+                                msg.question,
+                                None,
+                                delay_time
+                            ))
+                        
+                        # Execute the SQL and show results
+                        try:
+                            result_df, query_elapsed = run_sql_cached(msg.query)
+                            
+                            # Add the results as a new message
+                            add_message(Message(
+                                RoleType.ASSISTANT,
+                                result_df,
+                                MessageType.DATAFRAME,
+                                msg.query,
+                                msg.question,
+                                result_df,
+                                query_elapsed + delay_time
+                            ))
+                            
+                            # Generate summary if configured
+                            if st.session_state.get("show_summary", True):
+                                vn_instance = get_vn()
+                                summary, summary_elapsed = vn_instance.generate_summary(
+                                    question=msg.question,
+                                    df=result_df
+                                )
+                                if summary:
+                                    add_message(Message(
+                                        RoleType.ASSISTANT,
+                                        summary,
+                                        MessageType.SUMMARY,
+                                        msg.query,
+                                        msg.question,
+                                        result_df,
+                                        summary_elapsed
+                                    ))
+                            
+                            # Show charts if configured
+                            if st.session_state.get("show_chart", True):
+                                from utils.chat_bot_helper import get_chart
+                                get_chart(msg.question, msg.query, result_df)
+                                
+                            # Show follow-up questions if configured
+                            if st.session_state.get("show_followup", True):
+                                from utils.chat_bot_helper import get_followup_questions
+                                get_followup_questions(msg.question, msg.query, result_df)
+                                
+                        except Exception as e:
+                            add_message(Message(
+                                RoleType.ASSISTANT,
+                                f"Error executing historical query: {str(e)}",
+                                MessageType.ERROR
+                            ))
                 
     except Exception as e:
         add_message(Message(
