@@ -452,7 +452,7 @@ def is_magic_do_magic(question, previous_df=None):
             for key, meta in MAGIC_RENDERERS.items():
                 match = re.match(key, question.strip())
                 if match:
-                    if meta["func"] != _followup:
+                    if meta["func"] != _followup and meta["func"] != _history_search:
                         add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
                     meta["func"](question, match.groupdict(), None)
                     return True
