@@ -37,7 +37,7 @@ def call_llm(my_question: str):
         "You are a helpful AI assistant trained to provide detailed and accurate responses. Be concise yet informative, and maintain a friendly and professional tone. If asked about controversial topics, provide balanced and well-researched information without expressing personal opinions.",
         my_question,
     )
-    add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR))
+    add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR, group_id=get_current_group_id()))
 
 
 def get_chart(my_question, sql, df):
@@ -106,9 +106,12 @@ def set_question(question: str, render=True):
             st.session_state.messages = None
 
     else:
+        # Start a new group for this question/answer flow
+        group_id = start_new_group()
+        
         # Set question
         st.session_state.my_question = question
-        add_message(Message(RoleType.USER, question, MessageType.TEXT), render)
+        add_message(Message(RoleType.USER, question, MessageType.TEXT, group_id=group_id), render)
 
 
 def get_unique_messages():
@@ -145,6 +148,24 @@ def set_feedback(index: int, value: str):
 
 def generate_guid():
     return str(uuid.uuid4())
+
+
+def generate_group_id():
+    """Generate a new group ID for message flows."""
+    return str(uuid.uuid4())
+
+
+def get_current_group_id():
+    """Get the current group ID from session state, or create a new one if none exists."""
+    if not hasattr(st.session_state, 'current_group_id') or st.session_state.current_group_id is None:
+        st.session_state.current_group_id = generate_group_id()
+    return st.session_state.current_group_id
+
+
+def start_new_group():
+    """Start a new message group by generating a new group ID."""
+    st.session_state.current_group_id = generate_group_id()
+    return st.session_state.current_group_id
 
 
 def get_followup_questions(my_question, sql, df):

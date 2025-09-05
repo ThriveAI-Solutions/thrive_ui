@@ -17,7 +17,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from orm.models import Message, SessionLocal
-from utils.chat_bot_helper import add_message, set_question, get_vn
+from utils.chat_bot_helper import add_message, set_question, get_vn, get_current_group_id
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import (
     read_forbidden_from_json,
@@ -707,6 +707,10 @@ def _history_search(question, match_dict, previous_df):
                 
                 for msg, similarity in matched_messages:
                     if msg.question and msg.query:
+                        # Create a new group for this historical query replay
+                        from utils.chat_bot_helper import start_new_group
+                        group_id = start_new_group()
+                        
                         # Random delay between 1-3 seconds to simulate processing
                         delay_time = random.uniform(1.0, 3.0)
                         time.sleep(delay_time)
@@ -715,7 +719,8 @@ def _history_search(question, match_dict, previous_df):
                         add_message(Message(
                             RoleType.USER,
                             msg.question,
-                            MessageType.TEXT
+                            MessageType.TEXT,
+                            group_id=group_id
                         ))
                         
                         # Show SQL if configured
@@ -727,7 +732,8 @@ def _history_search(question, match_dict, previous_df):
                                 msg.query,
                                 msg.question,
                                 None,
-                                delay_time
+                                delay_time,
+                                group_id=group_id
                             ))
                         
                         # Execute the SQL and show results
@@ -742,7 +748,8 @@ def _history_search(question, match_dict, previous_df):
                                 msg.query,
                                 msg.question,
                                 result_df,
-                                query_elapsed + delay_time
+                                query_elapsed + delay_time,
+                                group_id=group_id
                             ))
                             
                             # Generate summary if configured
@@ -760,7 +767,8 @@ def _history_search(question, match_dict, previous_df):
                                         msg.query,
                                         msg.question,
                                         result_df,
-                                        summary_elapsed
+                                        summary_elapsed,
+                                        group_id=group_id
                                     ))
                             
                             # Show charts if configured
@@ -777,7 +785,8 @@ def _history_search(question, match_dict, previous_df):
                             add_message(Message(
                                 RoleType.ASSISTANT,
                                 f"Error executing historical query: {str(e)}",
-                                MessageType.ERROR
+                                MessageType.ERROR,
+                                group_id=group_id
                             ))
                 
     except Exception as e:

@@ -12,6 +12,7 @@ from utils.chat_bot_helper import (
     add_message,
     call_llm,
     get_chart,
+    get_current_group_id,
     get_followup_questions,
     get_unique_messages,
     get_vn,
@@ -226,7 +227,7 @@ if my_question:
             guardrail_score,
             guardrail_sentence,
         )
-        add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
+        add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question, group_id=get_current_group_id()))
         call_llm(my_question)
         st.stop()
     if guardrail_score >= 3:
@@ -236,7 +237,7 @@ if my_question:
             guardrail_score,
             guardrail_sentence,
         )
-        add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question))
+        add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question, group_id=get_current_group_id()))
         st.stop()
 
     # write an acknowledgment message to
@@ -261,10 +262,10 @@ if my_question:
     if sql:
         if get_vn().is_sql_valid(sql=sql):
             if st.session_state.get("show_sql", True):
-                add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time))
+                add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time, group_id=get_current_group_id()))
         else:
             logger.debug("sql is not valid")
-            add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time))
+            add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time, group_id=get_current_group_id()))
             # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
             if st.session_state.get("llm_fallback", True):
                 logger.debug("fallback to LLM")
@@ -310,7 +311,7 @@ if my_question:
 
         if st.session_state.get("show_table", True):
             df = st.session_state.get("df")
-            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question, None, sql_elapsed_time))
+            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question, None, sql_elapsed_time, group_id=get_current_group_id()))
 
         if st.session_state.get("show_chart", True):
             get_chart(my_question, sql, df)
@@ -320,7 +321,7 @@ if my_question:
             if summary is not None:
                 if st.session_state.get("show_summary", True):
                     add_message(
-                        Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time)
+                        Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time, group_id=get_current_group_id())
                     )
 
                 if st.session_state.get("speak_summary", True):
@@ -335,6 +336,7 @@ if my_question:
                         my_question,
                         df,
                         elapsed_time,
+                        group_id=get_current_group_id(),
                     )
                 )
                 if st.session_state.get("speak_summary", True):
@@ -350,6 +352,7 @@ if my_question:
                 MessageType.ERROR,
                 sql,
                 my_question,
+                group_id=get_current_group_id(),
             )
         )
         if st.session_state.get("llm_fallback", True):
