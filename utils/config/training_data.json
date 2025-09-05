@@ -131,6 +131,10 @@
         {
             "question": "how many people were on the titanic",
             "query": "SELECT COUNT(*) AS total_passengers FROM titanic LIMIT 1000"
+        },
+        {
+            "question": "how many people were on the titanic break it out by class and gender",
+            "query": "SELECT pclass, sex, COUNT(*) AS Number_of_Passengers FROM titanic GROUP BY pclass, sex LIMIT 1000"
         }
     ],
     "sample_documents": [
