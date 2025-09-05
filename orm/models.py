@@ -119,6 +119,7 @@ class Message(Base):
     )
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("thrive_user.id"))
+    group_id = Column(String(50))  # UUID to group messages in the same flow
     role = Column(String(50), nullable=False)
     content = Column(String, nullable=False)
     type = Column(String(50), nullable=False)
@@ -143,6 +144,7 @@ class Message(Base):
         dataframe: pd.DataFrame | str = None,
         elapsed_time: Decimal = None,
         user_id: int = None,
+        group_id: str = None,
     ):
         # Try to get user_id from session_state if not provided directly
         if user_id is None:
@@ -161,6 +163,7 @@ class Message(Base):
                 user_id = 1
 
         self.user_id = user_id
+        self.group_id = group_id
         self.role = role.value
         self.content = content_to_json(type.value, content)
         self.type = type.value

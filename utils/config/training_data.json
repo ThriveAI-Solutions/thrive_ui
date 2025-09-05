@@ -127,6 +127,38 @@
         {
             "question": "How many rows are in the wny_health table?",
             "query": "SELECT COUNT(*) AS total_rows FROM public.wny_health"
+        },
+        {
+            "question": "how many people were on the titanic",
+            "query": "SELECT COUNT(*) AS total_passengers FROM titanic LIMIT 1000"
+        },
+        {
+            "question": "how many people were on the titanic break it out by class and gender",
+            "query": "SELECT pclass, sex, COUNT(*) AS Number_of_Passengers FROM titanic GROUP BY pclass, sex LIMIT 1000"
+        },
+        {
+            "question": "what were the average ticket costs on the titanic split out by gender ",
+            "query": "SELECT sex, AVG(fare) AS average_ticket_cost FROM titanic GROUP BY sex LIMIT 1000"
+        },
+        {
+            "question": "what were the average ticket costs on the titanic split out by gender",
+            "query": "SELECT sex, AVG(fare) AS average_ticket_cost FROM titanic GROUP BY sex LIMIT 1000"
+        },
+        {
+            "question": "how many people were on the titanic and survived",
+            "query": "SELECT COUNT(*) AS total_survivors FROM titanic WHERE survived = 1 LIMIT 1000"
+        },
+        {
+            "question": "how many people were on the titanic based on age",
+            "query": "SELECT COUNT(*) AS total_passengers_by_age FROM titanic WHERE age IS NOT NULL LIMIT 1000"
+        },
+        {
+            "question": "how many people were on the titanic bucketed by age and gender",
+            "query": "SELECT \n    CASE \n        WHEN age < 12 THEN 'Child' \n        WHEN age >= 12 AND age < 20 THEN 'Teenager' \n        WHEN age >= 20 AND age < 60 THEN 'Adult' \n        ELSE 'Senior' \n    END AS age_bucket, \n    sex, \n    COUNT(*) AS number_of_passengers \nFROM titanic \nGROUP BY age_bucket, sex LIMIT 1000"
+        },
+        {
+            "question": "how many passengers were there based on age and gender",
+            "query": "SELECT age, sex, COUNT(*) AS number_of_passengers FROM titanic GROUP BY age, sex LIMIT 1000"
         }
     ],
     "sample_documents": [
