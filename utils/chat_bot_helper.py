@@ -439,7 +439,7 @@ def add_message(message: Message, render=True):
     if len(st.session_state.messages) > 0 and render:
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
 
-def normal_message_flow(my_question:str):
+def add_acknowledgement():
     acknowledgements = [
         "That's an excellent question. Let me think about that for a moment.",
         "Interesting point! Let me analyze this for you.",
@@ -452,7 +452,13 @@ def normal_message_flow(my_question:str):
         "You've raised an important point. Let me think this through.",
         "I like the way you're thinking. Let me explore this further for you.",
     ]
-    
+
+    # write an acknowledgment message to
+    random_acknowledgment = random.choice(acknowledgements)
+    with st.chat_message(RoleType.ASSISTANT.value):
+        st.write(random_acknowledgment)
+
+def normal_message_flow(my_question:str):    
     # check guardrails here
     guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
     logger.debug(
@@ -481,10 +487,7 @@ def normal_message_flow(my_question:str):
         add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question, group_id=get_current_group_id()))
         st.stop()
 
-    # write an acknowledgment message to
-    random_acknowledgment = random.choice(acknowledgements)
-    with st.chat_message(RoleType.ASSISTANT.value):
-        st.write(random_acknowledgment)
+    add_acknowledgement()
 
     if st.session_state.get("use_retry_context"):
         sql, elapsed_time = get_vn().generate_sql_retry(

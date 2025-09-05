@@ -17,7 +17,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from orm.models import Message, SessionLocal
-from utils.chat_bot_helper import add_message, set_question, get_vn, normal_message_flow
+from utils.chat_bot_helper import add_message, set_question, get_vn, normal_message_flow, add_acknowledgement
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import (
     read_forbidden_from_json,
@@ -732,12 +732,14 @@ def _history_search(question, match_dict, previous_df):
                 RoleType.ASSISTANT,
                 f"Recreating thumbs-up conversation ({similarity_score*100:.1f}% match){': ' + original_question if original_question else ''}...",
                 MessageType.TEXT
-            ))
+            )) #TODO: comment this out when we are happy with the result
             
             # Create a new group for the recreated messages
             from utils.chat_bot_helper import start_new_group
             new_group_id = start_new_group()
             
+            add_acknowledgement()
+
             # Recreate each message in chronological order with random delays
             for original_msg in group_messages:
                 # Random delay between 1-3 seconds
