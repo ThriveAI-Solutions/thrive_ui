@@ -5177,7 +5177,7 @@ MAGIC_RENDERERS = {
         "category": "Help & System Commands",
         "show_example": True,
     },
-    r"^/h\s+(?P<search_text>.+)$": {
+    r"^\*(?P<search_text>.+)$": {
         "func": _history_search,
         "description": "Find and recreate a thumbs-up conversation matching your search (≥90% similarity)",
         "sample_values": {"search_text": "diabetes by county"},
