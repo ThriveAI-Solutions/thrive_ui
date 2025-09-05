@@ -135,6 +135,14 @@
         {
             "question": "how many people were on the titanic break it out by class and gender",
             "query": "SELECT pclass, sex, COUNT(*) AS Number_of_Passengers FROM titanic GROUP BY pclass, sex LIMIT 1000"
+        },
+        {
+            "question": "what were the average ticket costs on the titanic split out by gender ",
+            "query": "SELECT sex, AVG(fare) AS average_ticket_cost FROM titanic GROUP BY sex LIMIT 1000"
+        },
+        {
+            "question": "what were the average ticket costs on the titanic split out by gender",
+            "query": "SELECT sex, AVG(fare) AS average_ticket_cost FROM titanic GROUP BY sex LIMIT 1000"
         }
     ],
     "sample_documents": [
