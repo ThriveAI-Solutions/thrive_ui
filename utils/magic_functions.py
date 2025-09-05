@@ -801,7 +801,14 @@ def _history_search(question, match_dict, previous_df):
                         f"Error recreating message (type: {original_msg.type}): {str(e)}",
                         MessageType.ERROR,
                         group_id=new_group_id
-                    ))            
+                    ))
+            
+            # Clear the question to prevent re-execution of the magic command on rerun
+            if hasattr(st.session_state, 'my_question'):
+                st.session_state.my_question = None
+                
+            # Force Streamlit to rerun to properly register new widget event handlers
+            st.rerun()
                 
     except Exception as e:
         add_message(Message(
