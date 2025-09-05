@@ -49,14 +49,14 @@ def get_chart(my_question, sql, df):
         elapsed_sum += elapsed_time if elapsed_time is not None else 0
 
         if st.session_state.get("show_plotly_code", False):
-            add_message(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time))
+            add_message(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time, group_id=get_current_group_id()))
 
         if code is not None and code != "":
             fig, elapsed_time = vn_instance.generate_plot(code=code, df=df)
             elapsed_sum += elapsed_time if elapsed_time is not None else 0
             if fig is not None:
                 add_message(
-                    Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question, None, elapsed_sum)
+                    Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question, None, elapsed_sum, group_id=get_current_group_id())
                 )
             else:
                 add_message(
@@ -68,6 +68,7 @@ def get_chart(my_question, sql, df):
                         my_question,
                         None,
                         elapsed_sum,
+                        group_id=get_current_group_id()
                     )
                 )
         else:
@@ -80,6 +81,7 @@ def get_chart(my_question, sql, df):
                     my_question,
                     None,
                     elapsed_sum,
+                    group_id=get_current_group_id()
                 )
             )
     else:
@@ -92,6 +94,7 @@ def get_chart(my_question, sql, df):
                 my_question,
                 None,
                 0,
+                group_id=get_current_group_id()
             )
         )
 

@@ -626,168 +626,177 @@ def _followup_help(question, tuple, previous_df):
 
 
 def _history_search(question, match_dict, previous_df):
-    """Search for similar queries with thumbs up feedback from the current user using fuzzy matching."""
-    try:
-        start_time = time.perf_counter()
-        
+    """Find the most recent thumbs-up summary and recreate all messages from that group in chronological order."""
+    try:    
         # Get the search sentence from the question
         search_text = match_dict.get("search_text", "").strip().lower()
         
         if not search_text:
-            # add_message(Message(RoleType.ASSISTANT, "Please provide a search term after /h", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "Please provide a search term after /h", MessageType.ERROR))
             return
         
         # Get current user ID from session
         user_id_str = st.session_state.cookies.get("user_id")
         if not user_id_str:
-            # add_message(Message(RoleType.ASSISTANT, "User not authenticated", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "User not authenticated", MessageType.ERROR))
             return
         
         try:
             user_id = int(user_id_str)
         except (ValueError, TypeError):
-            # add_message(Message(RoleType.ASSISTANT, "Invalid user ID", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "Invalid user ID", MessageType.ERROR))
             return
         
-        # Query the database for all thumbs up queries from this user
+        # Query the database for thumbs-up summaries and find best match using fuzzy matching
         with SessionLocal() as session:
             from orm.models import Message as DBMessage
             
-            # Get all messages from this user with thumbs up feedback
-            all_thumbs_up = session.query(DBMessage).filter(
+            # Get all thumbs-up summaries from this user
+            all_thumbs_up_summaries = session.query(DBMessage).filter(
                 DBMessage.user_id == user_id,
-                DBMessage.role == 'assistant'
-                # DBMessage.feedback == "up"
+                DBMessage.role == 'assistant',
+                DBMessage.type == 'summary',
+                DBMessage.feedback == 'up',
+                DBMessage.group_id.isnot(None)  # Must have a group_id
             ).order_by(DBMessage.created_at.desc()).all()
             
-            if not all_thumbs_up:
+            if not all_thumbs_up_summaries:
                 # add_message(Message(
                 #     RoleType.ASSISTANT, 
-                #     "No thumbs-up queries found in your history", 
+                #     "No thumbs-up summaries found in your history", 
                 #     MessageType.TEXT
                 # ))
-                return # TODO: make this call the original functionality
+                return #TODO: call fallback to normal flow
             
-            # Use fuzzy matching to find similar queries (90% match threshold)
-            matched_messages = []
-            for msg in all_thumbs_up:
-                if msg.question:
-                    # Calculate similarity ratio for the question
-                    question_lower = msg.question.lower()
-                    similarity = difflib.SequenceMatcher(None, search_text, question_lower).ratio()
-                    
-                    # Check if similarity meets the 90% threshold
-                    if similarity >= 0.9:
-                        matched_messages.append((msg, similarity))
-                    # If not matched on question, try the SQL query
-                    elif msg.query:
-                        query_lower = msg.query.lower()
-                        query_similarity = difflib.SequenceMatcher(None, search_text, query_lower).ratio()
-                        if query_similarity >= 0.9:
-                            matched_messages.append((msg, query_similarity))
-            
-            # Sort by similarity score (highest first)
-            matched_messages.sort(key=lambda x: x[1], reverse=True)
-            
-            if not matched_messages:
-                # add_message(Message(
-                #     RoleType.ASSISTANT, 
-                #     f"No queries found with 90% similarity to '{search_text}'", 
-                #     MessageType.TEXT
-                # ))
-                return # TODO: make this call the original functionality
-            
-            # Re-add matching queries as new messages with random delays
-            if matched_messages:
-                add_message(Message(
-                    RoleType.ASSISTANT,
-                    f"Found {len(matched_messages)} similar queries (≥90% match) for '{search_text}'. Re-running them for you...",
-                    MessageType.TEXT
-                ))
+            # Use fuzzy matching to find the best matching summary (90% threshold)
+            matched_summaries = []
+            for summary in all_thumbs_up_summaries:
+                # Check similarity against the question (if available)
+                if summary.question:
+                    question_lower = summary.question.lower()
+                    question_similarity = difflib.SequenceMatcher(None, search_text, question_lower).ratio()
+                    if question_similarity >= 0.9:
+                        matched_summaries.append((summary, question_similarity))
+                        
+                # Check similarity against the summary content
+                if summary.content:
+                    content_lower = summary.content.lower()
+                    content_similarity = difflib.SequenceMatcher(None, search_text, content_lower).ratio()
+                    if content_similarity >= 0.9:
+                        matched_summaries.append((summary, content_similarity))
                 
-                for msg, similarity in matched_messages:
-                    if msg.question and msg.query:
-                        # Create a new group for this historical query replay
-                        from utils.chat_bot_helper import start_new_group
-                        group_id = start_new_group()
-                        
-                        # Random delay between 1-3 seconds to simulate processing
-                        delay_time = random.uniform(1.0, 3.0)
-                        time.sleep(delay_time)
-                        
-                        # Re-add the question as a user message
-                        add_message(Message(
-                            RoleType.USER,
-                            msg.question,
-                            MessageType.TEXT,
-                            group_id=group_id
-                        ))
-                        
-                        # Show SQL if configured
-                        if st.session_state.get("show_sql", True):
-                            add_message(Message(
-                                RoleType.ASSISTANT,
-                                msg.query,
-                                MessageType.SQL,
-                                msg.query,
-                                msg.question,
-                                None,
-                                delay_time,
-                                group_id=group_id
-                            ))
-                        
-                        # Execute the SQL and show results
-                        try:
-                            result_df, query_elapsed = run_sql_cached(msg.query)
-                            
-                            # Add the results as a new message
-                            add_message(Message(
-                                RoleType.ASSISTANT,
-                                result_df,
-                                MessageType.DATAFRAME,
-                                msg.query,
-                                msg.question,
-                                result_df,
-                                query_elapsed + delay_time,
-                                group_id=group_id
-                            ))
-                            
-                            # Generate summary if configured
-                            if st.session_state.get("show_summary", True):
-                                vn_instance = get_vn()
-                                summary, summary_elapsed = vn_instance.generate_summary(
-                                    question=msg.question,
-                                    df=result_df
-                                )
-                                if summary:
-                                    add_message(Message(
-                                        RoleType.ASSISTANT,
-                                        summary,
-                                        MessageType.SUMMARY,
-                                        msg.query,
-                                        msg.question,
-                                        result_df,
-                                        summary_elapsed,
-                                        group_id=group_id
-                                    ))
-                            
-                            # Show charts if configured
-                            if st.session_state.get("show_chart", True):
-                                from utils.chat_bot_helper import get_chart
-                                get_chart(msg.question, msg.query, result_df)
-                                
-                            # Show follow-up questions if configured
-                            if st.session_state.get("show_followup", True):
-                                from utils.chat_bot_helper import get_followup_questions
-                                get_followup_questions(msg.question, msg.query, result_df)
-                                
-                        except Exception as e:
-                            add_message(Message(
-                                RoleType.ASSISTANT,
-                                f"Error executing historical query: {str(e)}",
-                                MessageType.ERROR,
-                                group_id=group_id
-                            ))
+                # Check similarity against the SQL query (if available)
+                if summary.query:
+                    query_lower = summary.query.lower()
+                    query_similarity = difflib.SequenceMatcher(None, search_text, query_lower).ratio()
+                    if query_similarity >= 0.9:
+                        matched_summaries.append((summary, query_similarity))
+            
+            if not matched_summaries:
+                # add_message(Message(
+                #     RoleType.ASSISTANT, 
+                #     f"No thumbs-up summaries found matching '{search_text}' with ≥90% similarity", 
+                #     MessageType.TEXT
+                # ))
+                return #TODO: call fallback to normal flow
+            
+            # Sort by similarity score (highest first) and get the best match
+            matched_summaries.sort(key=lambda x: x[1], reverse=True)
+            latest_summary, similarity_score = matched_summaries[0]
+            
+            # Get all messages from the same group_id, ordered by creation date ascending
+            group_messages = session.query(DBMessage).filter(
+                DBMessage.group_id == latest_summary.group_id,
+                DBMessage.role == 'assistant'
+            ).order_by(DBMessage.created_at.asc()).all()
+            
+            if not group_messages:
+                # add_message(Message(
+                #     RoleType.ASSISTANT, 
+                #     "No messages found for the latest thumbs-up group", 
+                #     MessageType.TEXT
+                # ))
+                return #TODO: call fallback to normal flow
+            
+            # Notify user what we're recreating
+            original_question = None
+            for msg in group_messages:
+                if msg.role == 'user':
+                    original_question = msg.content
+                    break
+            
+            add_message(Message(
+                RoleType.ASSISTANT,
+                f"Recreating thumbs-up conversation ({similarity_score*100:.1f}% match){': ' + original_question if original_question else ''}...",
+                MessageType.TEXT
+            ))
+            
+            # Create a new group for the recreated messages
+            from utils.chat_bot_helper import start_new_group
+            new_group_id = start_new_group()
+            
+            # Recreate each message in chronological order with random delays
+            for original_msg in group_messages:
+                # Random delay between 1-3 seconds
+                delay_time = random.uniform(1.0, 3.0)
+                time.sleep(delay_time)
+                
+                # Create new message with same content but new group_id and randomized timing
+                try:
+                    # Convert string role back to enum
+                    role_enum = RoleType.USER if original_msg.role.lower() == 'user' else RoleType.ASSISTANT
+                    
+                    # Convert string type back to enum
+                    type_mapping = {
+                        'text': MessageType.TEXT,
+                        'sql': MessageType.SQL,
+                        'dataframe': MessageType.DATAFRAME,
+                        'summary': MessageType.SUMMARY,
+                        'error': MessageType.ERROR,
+                        'python': MessageType.PYTHON,
+                        'plotly_chart': MessageType.PLOTLY_CHART,
+                        'followup': MessageType.FOLLOWUP,
+                        'st_line_chart': MessageType.ST_LINE_CHART,
+                        'st_bar_chart': MessageType.ST_BAR_CHART,
+                        'st_area_chart': MessageType.ST_AREA_CHART,
+                        'st_scatter_chart': MessageType.ST_SCATTER_CHART,
+                    }
+                    
+                    message_type = type_mapping.get(original_msg.type.lower(), MessageType.TEXT)
+                    
+                    # Parse content based on message type
+                    if message_type == MessageType.DATAFRAME and original_msg.dataframe:
+                        # Use the stored dataframe JSON
+                        content = original_msg.dataframe
+                    elif message_type in [MessageType.PLOTLY_CHART] and original_msg.content:
+                        # For charts, use the original content
+                        content = original_msg.content
+                    else:
+                        # For text, SQL, summary, etc., use content
+                        content = original_msg.content
+                    
+                    # Create and add the new message
+                    new_message = Message(
+                        role=role_enum,
+                        content=content,
+                        type=message_type,
+                        query=original_msg.query,
+                        question=original_msg.question,
+                        dataframe=original_msg.dataframe,
+                        elapsed_time=delay_time,  # Use randomized delay as elapsed time
+                        group_id=new_group_id
+                    )
+                    
+                    add_message(new_message)
+                    
+                except Exception as e:
+                    # If there's an error recreating a specific message, log it but continue
+                    add_message(Message(
+                        RoleType.ASSISTANT,
+                        f"Error recreating message (type: {original_msg.type}): {str(e)}",
+                        MessageType.ERROR,
+                        group_id=new_group_id
+                    ))            
                 
     except Exception as e:
         add_message(Message(
@@ -5158,7 +5167,7 @@ MAGIC_RENDERERS = {
     },
     r"^/h\s+(?P<search_text>.+)$": {
         "func": _history_search,
-        "description": "Search for similar queries with thumbs up from your history",
+        "description": "Find and recreate a thumbs-up conversation matching your search (≥90% similarity)",
         "sample_values": {"search_text": "diabetes by county"},
         "category": "Help & System Commands",
         "show_example": True,
