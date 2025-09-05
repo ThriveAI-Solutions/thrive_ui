@@ -209,5 +209,5 @@ if my_question:
     if magic_response == True:
         st.stop()
 
-    normal_message_flow()
+    normal_message_flow(my_question)
 ######### Handle new chat input #########
