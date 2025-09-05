@@ -143,6 +143,10 @@
         {
             "question": "what were the average ticket costs on the titanic split out by gender",
             "query": "SELECT sex, AVG(fare) AS average_ticket_cost FROM titanic GROUP BY sex LIMIT 1000"
+        },
+        {
+            "question": "how many people were on the titanic and survived",
+            "query": "SELECT COUNT(*) AS total_survivors FROM titanic WHERE survived = 1 LIMIT 1000"
         }
     ],
     "sample_documents": [

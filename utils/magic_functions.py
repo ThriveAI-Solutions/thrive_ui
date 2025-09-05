@@ -17,7 +17,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from orm.models import Message, SessionLocal
-from utils.chat_bot_helper import add_message, set_question, get_vn, get_current_group_id
+from utils.chat_bot_helper import add_message, set_question, get_vn, normal_message_flow
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import (
     read_forbidden_from_json,
@@ -666,7 +666,8 @@ def _history_search(question, match_dict, previous_df):
                 #     "No thumbs-up summaries found in your history", 
                 #     MessageType.TEXT
                 # ))
-                return #TODO: call fallback to normal flow
+                normal_message_flow(search_text)
+                return
             
             # Use fuzzy matching to find the best matching summary (90% threshold)
             matched_summaries = []
@@ -698,7 +699,8 @@ def _history_search(question, match_dict, previous_df):
                 #     f"No thumbs-up summaries found matching '{search_text}' with ≥90% similarity", 
                 #     MessageType.TEXT
                 # ))
-                return #TODO: call fallback to normal flow
+                normal_message_flow(search_text)
+                return
             
             # Sort by similarity score (highest first) and get the best match
             matched_summaries.sort(key=lambda x: x[1], reverse=True)
@@ -716,7 +718,8 @@ def _history_search(question, match_dict, previous_df):
                 #     "No messages found for the latest thumbs-up group", 
                 #     MessageType.TEXT
                 # ))
-                return #TODO: call fallback to normal flow
+                normal_message_flow(search_text)
+                return
             
             # Notify user what we're recreating
             original_question = None
