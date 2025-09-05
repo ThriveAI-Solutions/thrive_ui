@@ -2,9 +2,10 @@ import ast
 import hashlib
 import json
 import logging
+import random
 import uuid
 from io import StringIO
-
+from ethical_guardrails_lib import get_ethical_guideline
 import pandas as pd
 import streamlit as st
 
@@ -61,7 +62,7 @@ def call_llm(my_question: str):
         "You are a helpful AI assistant trained to provide detailed and accurate responses. Be concise yet informative, and maintain a friendly and professional tone. If asked about controversial topics, provide balanced and well-researched information without expressing personal opinions.",
         my_question,
     )
-    add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR))
+    add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR, group_id=get_current_group_id()))
 
 
 def get_llm_stream_generator(my_question: str):
@@ -307,7 +308,7 @@ def get_chart(my_question, sql, df):
         elapsed_sum += elapsed_time if elapsed_time is not None else 0
 
         if st.session_state.get("show_plotly_code", False):
-            add_message(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time))
+            add_message(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time, group_id=get_current_group_id()))
 
         if code is not None and code != "":
             plot_result = vn_instance.generate_plot(code=code, df=df)
@@ -318,7 +319,7 @@ def get_chart(my_question, sql, df):
             elapsed_sum += elapsed_time if elapsed_time is not None else 0
             if fig is not None:
                 add_message(
-                    Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question, None, elapsed_sum)
+                    Message(RoleType.ASSISTANT, fig, MessageType.PLOTLY_CHART, sql, my_question, None, elapsed_sum, group_id=get_current_group_id())
                 )
             else:
                 add_message(
@@ -330,6 +331,7 @@ def get_chart(my_question, sql, df):
                         my_question,
                         None,
                         elapsed_sum,
+                        group_id=get_current_group_id()
                     )
                 )
         else:
@@ -342,6 +344,7 @@ def get_chart(my_question, sql, df):
                     my_question,
                     None,
                     elapsed_sum,
+                    group_id=get_current_group_id()
                 )
             )
     else:
@@ -354,6 +357,7 @@ def get_chart(my_question, sql, df):
                 my_question,
                 None,
                 0,
+                group_id=get_current_group_id()
             )
         )
 
@@ -368,9 +372,12 @@ def set_question(question: str, render=True):
             st.session_state.messages = None
 
     else:
+        # Start a new group for this question/answer flow
+        group_id = start_new_group()
+        
         # Set question
         st.session_state.my_question = question
-        add_message(Message(RoleType.USER, question, MessageType.TEXT), render)
+        add_message(Message(RoleType.USER, question, MessageType.TEXT, group_id=group_id), render)
 
 
 def get_unique_messages():
@@ -407,6 +414,24 @@ def set_feedback(index: int, value: str):
 
 def generate_guid():
     return str(uuid.uuid4())
+
+
+def generate_group_id():
+    """Generate a new group ID for message flows."""
+    return str(uuid.uuid4())
+
+
+def get_current_group_id():
+    """Get the current group ID from session state, or create a new one if none exists."""
+    if not hasattr(st.session_state, 'current_group_id') or st.session_state.current_group_id is None:
+        st.session_state.current_group_id = generate_group_id()
+    return st.session_state.current_group_id
+
+
+def start_new_group():
+    """Start a new message group by generating a new group ID."""
+    st.session_state.current_group_id = generate_group_id()
+    return st.session_state.current_group_id
 
 
 def get_followup_questions(my_question, sql, df):
@@ -508,7 +533,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             cols = st.columns((1, 1, 1, 1, 1))
             with cols[0]:
                 st.button(
-                    "Generate Plotly",
+                    "AI Generate Plotly",
                     key=f"graph_{message.id}",
                     on_click=lambda: get_chart(message.question, message.query, my_df),
                 )
@@ -678,3 +703,166 @@ def add_message(message: Message, render=True):
 
     if len(st.session_state.messages) > 0 and render:
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
+
+def add_acknowledgement():
+    acknowledgements = [
+        "That's an excellent question. Let me think about that for a moment.",
+        "Interesting point! Let me analyze this for you.",
+        "Great question! Let me dive into that.",
+        "I see where you're coming from. Let me process this.",
+        "That's a thoughtful question. Let me work through it.",
+        "Good question! Let me gather the relevant information.",
+        "I appreciate the depth of your question. Let me consider it carefully.",
+        "That's a valid and insightful question. Let me provide a detailed response.",
+        "You've raised an important point. Let me think this through.",
+        "I like the way you're thinking. Let me explore this further for you.",
+    ]
+
+    # write an acknowledgment message to
+    random_acknowledgment = random.choice(acknowledgements)
+    with st.chat_message(RoleType.ASSISTANT.value):
+        st.write(random_acknowledgment)
+
+def normal_message_flow(my_question:str):    
+    # check guardrails here
+    guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
+    logger.debug(
+        "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
+        my_question,
+        guardrail_score,
+        guardrail_sentence,
+    )
+    if guardrail_score == 2:
+        logger.info(
+            "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
+            my_question,
+            guardrail_score,
+            guardrail_sentence,
+        )
+        add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question, group_id=get_current_group_id()))
+        call_llm(my_question)
+        st.stop()
+    if guardrail_score >= 3:
+        logger.warning(
+            "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
+            my_question,
+            guardrail_score,
+            guardrail_sentence,
+        )
+        add_message(Message(RoleType.ASSISTANT, guardrail_sentence, MessageType.ERROR, "", my_question, group_id=get_current_group_id()))
+        st.stop()
+
+    add_acknowledgement()
+
+    if st.session_state.get("use_retry_context"):
+        sql, elapsed_time = get_vn().generate_sql_retry(
+            question=my_question,
+            failed_sql=st.session_state.get("retry_failed_sql"),
+            error_message=st.session_state.get("retry_error_msg"),
+        )
+        # Clear retry context after use
+        st.session_state["use_retry_context"] = False
+        st.session_state["retry_failed_sql"] = None
+        st.session_state["retry_error_msg"] = None
+    else:
+        sql, elapsed_time = get_vn().generate_sql(question=my_question)
+    st.session_state.my_question = None
+
+    if sql:
+        if get_vn().is_sql_valid(sql=sql):
+            if st.session_state.get("show_sql", True):
+                add_message(Message(RoleType.ASSISTANT, sql, MessageType.SQL, sql, my_question, None, elapsed_time, group_id=get_current_group_id()))
+        else:
+            logger.debug("sql is not valid")
+            add_message(Message(RoleType.ASSISTANT, sql, MessageType.ERROR, sql, my_question, None, elapsed_time, group_id=get_current_group_id()))
+            # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
+            if st.session_state.get("llm_fallback", True):
+                logger.debug("fallback to LLM")
+                call_llm(my_question)
+            st.stop()
+
+        # Query limiting is now handled inside the run_sql method via LIMIT clause
+        df, sql_elapsed_time = get_vn().run_sql(sql=sql)
+
+        # if sql doesn't return a dataframe, offer retry with LLM guidance
+        if not isinstance(df, pd.DataFrame):
+            error_msg = st.session_state.get("last_run_sql_error")
+            failed_sql = st.session_state.get("last_failed_sql")
+            with st.chat_message(RoleType.ASSISTANT.value):
+                st.error("I couldn't execute the generated SQL.")
+                if error_msg:
+                    st.caption(f"Database error: {error_msg}")
+                cols = st.columns([0.2, 0.8])
+                with cols[0]:
+                    retry_clicked = st.button("Retry", type="primary", key="retry_inline")
+                with cols[1]:
+                    show_sql_clicked = st.button("Show Failed SQL", key="show_failed_sql_inline")
+                if show_sql_clicked and failed_sql:
+                    st.code(failed_sql, language="sql", line_numbers=True)
+
+            if retry_clicked:
+                # Persist retry intent and context, then rerun so it flows through normal pipeline
+                st.session_state["use_retry_context"] = True
+                st.session_state["retry_failed_sql"] = failed_sql
+                st.session_state["retry_error_msg"] = error_msg
+                # Set a persistent flag so the panel can be re-rendered if needed
+                st.session_state["pending_sql_error"] = False
+                st.session_state["pending_question"] = my_question
+                st.session_state["my_question"] = my_question
+                st.rerun()
+            else:
+                # Mark pending error so a persistent panel can be shown if page reruns without action
+                st.session_state["pending_sql_error"] = True
+                st.session_state["pending_question"] = my_question
+                st.stop()
+        else:
+            st.session_state["df"] = df
+
+        if st.session_state.get("show_table", True):
+            df = st.session_state.get("df")
+            add_message(Message(RoleType.ASSISTANT, df, MessageType.DATAFRAME, sql, my_question, None, sql_elapsed_time, group_id=get_current_group_id()))
+
+        if st.session_state.get("show_chart", True):
+            get_chart(my_question, sql, df)
+
+        if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
+            summary, elapsed_time = get_vn().generate_summary(question=my_question, df=df)
+            if summary is not None:
+                if st.session_state.get("show_summary", True):
+                    add_message(
+                        Message(RoleType.ASSISTANT, summary, MessageType.SUMMARY, sql, my_question, df, elapsed_time, group_id=get_current_group_id())
+                    )
+
+                if st.session_state.get("speak_summary", True):
+                    speak(summary)
+            else:
+                add_message(
+                    Message(
+                        RoleType.ASSISTANT,
+                        "Could not generate a summary",
+                        MessageType.SUMMARY,
+                        sql,
+                        my_question,
+                        df,
+                        elapsed_time,
+                        group_id=get_current_group_id()
+                    )
+                )
+                if st.session_state.get("speak_summary", True):
+                    speak("Could not generate a summary")
+
+        if st.session_state.get("show_followup", True):
+            get_followup_questions(my_question, sql, df)
+    else:
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                "I wasn't able to generate SQL for that question",
+                MessageType.ERROR,
+                sql,
+                my_question,
+                group_id=get_current_group_id()
+            )
+        )
+        if st.session_state.get("llm_fallback", True):
+            call_llm(my_question)
