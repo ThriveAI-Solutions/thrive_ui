@@ -159,6 +159,10 @@
         {
             "question": "how many passengers were there based on age and gender",
             "query": "SELECT age, sex, COUNT(*) AS number_of_passengers FROM titanic GROUP BY age, sex LIMIT 1000"
+        },
+        {
+            "question": "*how many passengers were there based on age and gender",
+            "query": "SELECT age, sex, COUNT(*) AS number_of_passengers FROM titanic GROUP BY age, sex LIMIT 1000"
         }
     ],
     "sample_documents": [
