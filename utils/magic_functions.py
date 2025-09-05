@@ -625,12 +625,12 @@ def _followup_help(question, tuple, previous_df):
 
 
 def _history_search(question, match_dict, previous_df):
-    """Search for similar queries with thumbs up feedback from the current user."""
+    """Search for similar queries with thumbs up feedback from the current user using fuzzy matching."""
     try:
         start_time = time.perf_counter()
         
         # Get the search sentence from the question
-        search_text = match_dict.get("search_text", "").strip()
+        search_text = match_dict.get("search_text", "").strip().lower()
         
         if not search_text:
             add_message(Message(RoleType.ASSISTANT, "Please provide a search term after /h", MessageType.ERROR))
@@ -648,41 +648,61 @@ def _history_search(question, match_dict, previous_df):
             add_message(Message(RoleType.ASSISTANT, "Invalid user ID", MessageType.ERROR))
             return
         
-        # Query the database for similar queries with thumbs up
+        # Query the database for all thumbs up queries from this user
         with SessionLocal() as session:
-            # Get all messages from this user with thumbs up feedback
             from orm.models import Message as DBMessage
             
-            # Search for messages with similar questions that have thumbs up
-            thumbs_up_messages = session.query(DBMessage).filter(
+            # Get all messages from this user with thumbs up feedback
+            all_thumbs_up = session.query(DBMessage).filter(
                 DBMessage.user_id == user_id,
-                DBMessage.feedback == "up",
-                DBMessage.question.ilike(f"%{search_text}%")
+                DBMessage.feedback == "up"
             ).order_by(DBMessage.created_at.desc()).all()
             
-            if not thumbs_up_messages:
-                # Try searching in SQL queries as well
-                thumbs_up_messages = session.query(DBMessage).filter(
-                    DBMessage.user_id == user_id,
-                    DBMessage.feedback == "up",
-                    DBMessage.query.ilike(f"%{search_text}%")
-                ).order_by(DBMessage.created_at.desc()).all()
-            
-            if not thumbs_up_messages:
+            if not all_thumbs_up:
                 add_message(Message(
                     RoleType.ASSISTANT, 
-                    f"No thumbs-up queries found matching '{search_text}'", 
+                    "No thumbs-up queries found in your history", 
+                    MessageType.TEXT
+                ))
+                return
+            
+            # Use fuzzy matching to find similar queries (90% match threshold)
+            matched_messages = []
+            for msg in all_thumbs_up:
+                if msg.question:
+                    # Calculate similarity ratio for the question
+                    question_lower = msg.question.lower()
+                    similarity = difflib.SequenceMatcher(None, search_text, question_lower).ratio()
+                    
+                    # Check if similarity meets the 90% threshold
+                    if similarity >= 0.9:
+                        matched_messages.append((msg, similarity))
+                    # If not matched on question, try the SQL query
+                    elif msg.query:
+                        query_lower = msg.query.lower()
+                        query_similarity = difflib.SequenceMatcher(None, search_text, query_lower).ratio()
+                        if query_similarity >= 0.9:
+                            matched_messages.append((msg, query_similarity))
+            
+            # Sort by similarity score (highest first)
+            matched_messages.sort(key=lambda x: x[1], reverse=True)
+            
+            if not matched_messages:
+                add_message(Message(
+                    RoleType.ASSISTANT, 
+                    f"No queries found with 90% similarity to '{search_text}'", 
                     MessageType.TEXT
                 ))
                 return
             
             # Prepare results
             results = []
-            for msg in thumbs_up_messages:
+            for msg, similarity in matched_messages:
                 if msg.question and msg.query:
                     results.append({
+                        "Match %": f"{similarity*100:.1f}%",
                         "Question": msg.question[:100] + "..." if len(msg.question) > 100 else msg.question,
-                        "SQL": msg.query[:200] + "..." if len(msg.query) > 200 else msg.query,
+                        "SQL": msg.query[:150] + "..." if len(msg.query) > 150 else msg.query,
                         "Date": msg.created_at.strftime("%Y-%m-%d %H:%M") if msg.created_at else "N/A",
                     })
             
@@ -695,7 +715,7 @@ def _history_search(question, match_dict, previous_df):
                 
                 add_message(Message(
                     RoleType.ASSISTANT,
-                    f"Found {len(results)} thumbs-up queries matching '{search_text}':",
+                    f"Found {len(results)} similar queries (≥90% match) for '{search_text}':",
                     MessageType.TEXT
                 ))
                 
@@ -709,23 +729,23 @@ def _history_search(question, match_dict, previous_df):
                     elapsed_time
                 ))
                 
-                # Also execute the most recent matching query if desired
-                if thumbs_up_messages and thumbs_up_messages[0].query:
+                # Execute the best matching query
+                if matched_messages and matched_messages[0][0].query:
+                    best_match = matched_messages[0][0]
                     add_message(Message(
                         RoleType.ASSISTANT,
-                        "Executing the most recent matching query...",
+                        f"Executing best match ({matched_messages[0][1]*100:.1f}% similarity)...",
                         MessageType.TEXT
                     ))
                     
-                    most_recent_sql = thumbs_up_messages[0].query
                     try:
-                        result_df, query_elapsed = run_sql_cached(most_recent_sql)
+                        result_df, query_elapsed = run_sql_cached(best_match.query)
                         add_message(Message(
                             RoleType.ASSISTANT,
                             result_df,
                             MessageType.DATAFRAME,
-                            most_recent_sql,
-                            thumbs_up_messages[0].question,
+                            best_match.query,
+                            best_match.question,
                             result_df,
                             query_elapsed
                         ))
