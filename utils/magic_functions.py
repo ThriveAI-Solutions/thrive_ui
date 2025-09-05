@@ -15,7 +15,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
-from orm.models import Message
+from orm.models import Message, SessionLocal
 from utils.chat_bot_helper import add_message, set_question, get_vn
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import (
@@ -622,6 +622,132 @@ def _followup_help(question, tuple, previous_df):
         add_message(
             Message(RoleType.ASSISTANT, f"Error generating follow-up help message: {str(e)}", MessageType.ERROR)
         )
+
+
+def _history_search(question, match_dict, previous_df):
+    """Search for similar queries with thumbs up feedback from the current user."""
+    try:
+        start_time = time.perf_counter()
+        
+        # Get the search sentence from the question
+        search_text = match_dict.get("search_text", "").strip()
+        
+        if not search_text:
+            add_message(Message(RoleType.ASSISTANT, "Please provide a search term after /h", MessageType.ERROR))
+            return
+        
+        # Get current user ID from session
+        user_id_str = st.session_state.cookies.get("user_id")
+        if not user_id_str:
+            add_message(Message(RoleType.ASSISTANT, "User not authenticated", MessageType.ERROR))
+            return
+        
+        try:
+            user_id = int(user_id_str)
+        except (ValueError, TypeError):
+            add_message(Message(RoleType.ASSISTANT, "Invalid user ID", MessageType.ERROR))
+            return
+        
+        # Query the database for similar queries with thumbs up
+        with SessionLocal() as session:
+            # Get all messages from this user with thumbs up feedback
+            from orm.models import Message as DBMessage
+            
+            # Search for messages with similar questions that have thumbs up
+            thumbs_up_messages = session.query(DBMessage).filter(
+                DBMessage.user_id == user_id,
+                DBMessage.feedback == "up",
+                DBMessage.question.ilike(f"%{search_text}%")
+            ).order_by(DBMessage.created_at.desc()).all()
+            
+            if not thumbs_up_messages:
+                # Try searching in SQL queries as well
+                thumbs_up_messages = session.query(DBMessage).filter(
+                    DBMessage.user_id == user_id,
+                    DBMessage.feedback == "up",
+                    DBMessage.query.ilike(f"%{search_text}%")
+                ).order_by(DBMessage.created_at.desc()).all()
+            
+            if not thumbs_up_messages:
+                add_message(Message(
+                    RoleType.ASSISTANT, 
+                    f"No thumbs-up queries found matching '{search_text}'", 
+                    MessageType.TEXT
+                ))
+                return
+            
+            # Prepare results
+            results = []
+            for msg in thumbs_up_messages:
+                if msg.question and msg.query:
+                    results.append({
+                        "Question": msg.question[:100] + "..." if len(msg.question) > 100 else msg.question,
+                        "SQL": msg.query[:200] + "..." if len(msg.query) > 200 else msg.query,
+                        "Date": msg.created_at.strftime("%Y-%m-%d %H:%M") if msg.created_at else "N/A",
+                    })
+            
+            if results:
+                # Convert to DataFrame for display
+                df = pd.DataFrame(results)
+                
+                end_time = time.perf_counter()
+                elapsed_time = end_time - start_time
+                
+                add_message(Message(
+                    RoleType.ASSISTANT,
+                    f"Found {len(results)} thumbs-up queries matching '{search_text}':",
+                    MessageType.TEXT
+                ))
+                
+                add_message(Message(
+                    RoleType.ASSISTANT,
+                    df,
+                    MessageType.DATAFRAME,
+                    None,
+                    question,
+                    df,
+                    elapsed_time
+                ))
+                
+                # Also execute the most recent matching query if desired
+                if thumbs_up_messages and thumbs_up_messages[0].query:
+                    add_message(Message(
+                        RoleType.ASSISTANT,
+                        "Executing the most recent matching query...",
+                        MessageType.TEXT
+                    ))
+                    
+                    most_recent_sql = thumbs_up_messages[0].query
+                    try:
+                        result_df, query_elapsed = run_sql_cached(most_recent_sql)
+                        add_message(Message(
+                            RoleType.ASSISTANT,
+                            result_df,
+                            MessageType.DATAFRAME,
+                            most_recent_sql,
+                            thumbs_up_messages[0].question,
+                            result_df,
+                            query_elapsed
+                        ))
+                    except Exception as e:
+                        add_message(Message(
+                            RoleType.ASSISTANT,
+                            f"Error executing the query: {str(e)}",
+                            MessageType.ERROR
+                        ))
+            else:
+                add_message(Message(
+                    RoleType.ASSISTANT,
+                    f"No results found matching '{search_text}'",
+                    MessageType.TEXT
+                ))
+                
+    except Exception as e:
+        add_message(Message(
+            RoleType.ASSISTANT,
+            f"Error searching history: {str(e)}",
+            MessageType.ERROR
+        ))
 
 
 def _tables(question, tuple, previous_df):
@@ -4980,6 +5106,13 @@ MAGIC_RENDERERS = {
         "func": _followup,
         "description": "Ask a follow up question to the previous result set.  Also accepts magic commands ie: heatmap/wordcloud.",
         "sample_values": {"command": "how do these results compare to the national averages?"},
+        "category": "Help & System Commands",
+        "show_example": True,
+    },
+    r"^/h\s+(?P<search_text>.+)$": {
+        "func": _history_search,
+        "description": "Search for similar queries with thumbs up from your history",
+        "sample_values": {"search_text": "diabetes by county"},
         "category": "Help & System Commands",
         "show_example": True,
     },

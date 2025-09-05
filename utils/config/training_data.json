@@ -127,6 +127,10 @@
         {
             "question": "How many rows are in the wny_health table?",
             "query": "SELECT COUNT(*) AS total_rows FROM public.wny_health"
+        },
+        {
+            "question": "how many people were on the titanic",
+            "query": "SELECT COUNT(*) AS total_passengers FROM titanic LIMIT 1000"
         }
     ],
     "sample_documents": [
