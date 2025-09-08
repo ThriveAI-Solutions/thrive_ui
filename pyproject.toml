@@ -25,18 +25,13 @@ dependencies = [
     "vanna[anthropic,chromadb,gemini,ollama,postgres]==0.7.5",
     "wordcloud>=1.9.4",
     "vertexai>=1.71.1",
-    "pymilvus>=2.6.0",
+    "pymilvus>=2.6.0; sys_platform == 'linux' or sys_platform == 'darwin'",
     "milvus-lite>=2.5.1",
     "openpyxl>=3.1.0",
 ]
 
 [dependency-groups]
-dev = [
-    "pytest>=8.3.5",
-    "pytest-cov>=6.2.1",
-    "ruff>=0.11.9",
-    "watchdog>=6.0.0",
-]
+dev = ["pytest>=8.3.5", "pytest-cov>=6.2.1", "ruff>=0.11.9", "watchdog>=6.0.0"]
 
 [tool.ruff]
 # Allow lines to be as long as 120.
