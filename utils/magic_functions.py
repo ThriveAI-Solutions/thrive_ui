@@ -450,7 +450,7 @@ def is_magic_do_magic(question, previous_df=None):
                     return True
         else:
             for key, meta in MAGIC_RENDERERS.items():
-                match = re.match(key, question.strip())
+                match = re.match(key, question)# .strip()
                 if match:
                     if meta["func"] != _followup and meta["func"] != _history_search:
                         add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
@@ -5177,7 +5177,7 @@ MAGIC_RENDERERS = {
         "category": "Help & System Commands",
         "show_example": True,
     },
-    r"^\*(?P<search_text>.+)$": {
+    r"^ (?P<search_text>.+)$": {
         "func": _history_search,
         "description": "Find and recreate a thumbs-up conversation matching your search (≥90% similarity)",
         "sample_values": {"search_text": "diabetes by county"},
