@@ -26,7 +26,7 @@ dependencies = [
     "wordcloud>=1.9.4",
     "vertexai>=1.71.1",
     "pymilvus>=2.6.0; sys_platform == 'linux' or sys_platform == 'darwin'",
-    "milvus-lite>=2.5.1",
+    "milvus-lite>=2.5.1; sys_platform == 'linux' or sys_platform == 'darwin'",
     "openpyxl>=3.1.0",
 ]
 
