@@ -63,8 +63,8 @@ def get_chart(my_question, sql, df):
                 add_message(
                     Message(
                         RoleType.ASSISTANT,
-                        "I couldn't generate a chart",
-                        MessageType.ERROR,
+                        "Chart Placeholder",
+                        MessageType.TEXT,
                         sql,
                         my_question,
                         None,
@@ -76,8 +76,8 @@ def get_chart(my_question, sql, df):
             add_message(
                 Message(
                     RoleType.ASSISTANT,
-                    "I couldn't generate a chart",
-                    MessageType.ERROR,
+                    "Chart Placeholder",
+                    MessageType.TEXT,
                     sql,
                     my_question,
                     None,
@@ -89,8 +89,8 @@ def get_chart(my_question, sql, df):
         add_message(
             Message(
                 RoleType.ASSISTANT,
-                "I was unable to generate a chart for this question. Please ask another question.",
-                MessageType.ERROR,
+                "Chart Placeholder",
+                MessageType.TEXT,
                 sql,
                 my_question,
                 None,

@@ -5019,6 +5019,60 @@ def _suggestions(question, tuple, previous_df):
         add_message(Message(RoleType.ASSISTANT, f"Error generating suggestions: {str(e)}", MessageType.ERROR))
 
 
+def _loop_questions(question, tuple, previous_df):
+    """Loop through 10 pre-determined questions and call _history_search for each with delays."""
+    try:
+        # 10 pre-determined questions for health data analysis
+        predefined_questions = [
+            "How many records are there for people that survived the titanic?",
+            "How many passengers survived and did not survive?",
+            "How many people have diabetes and break it out by gender"
+        ]
+        
+        # add_message(Message(
+        #     RoleType.ASSISTANT,
+        #     f"🔄 Starting loop through {len(predefined_questions)} pre-determined health questions...",
+        #     MessageType.TEXT
+        # ))
+        
+        # Loop through each question
+        for i, search_question in enumerate(predefined_questions, 1):
+            add_message(Message(
+                RoleType.ASSISTANT,
+                f"{search_question}",
+                MessageType.TEXT
+            ))
+            
+            # Create a mock match_dict for _history_search
+            mock_match_dict = {"search_text": search_question}
+            
+            # Call _history_search with the current question
+            _history_search(search_question, mock_match_dict, previous_df)
+            
+            # Add delay between calls (random between 2-4 seconds)
+            if i < len(predefined_questions):  # Don't delay after the last question
+                delay_time = random.uniform(2.0, 2.0)
+                # add_message(Message(
+                #     RoleType.ASSISTANT,
+                #     f"⏳ Waiting {delay_time:.1f} seconds before next search...",
+                #     MessageType.TEXT
+                # ))
+                time.sleep(delay_time)
+        
+        # add_message(Message(
+        #     RoleType.ASSISTANT,
+        #     f"✅ Completed loop through all {len(predefined_questions)} questions!",
+        #     MessageType.TEXT
+        # ))
+        
+    except Exception as e:
+        add_message(Message(
+            RoleType.ASSISTANT,
+            f"Error in loop questions: {str(e)}",
+            MessageType.ERROR
+        ))
+
+
 FOLLOW_UP_MAGIC_RENDERERS = {
     # ==================== DATA EXPLORATION & BASIC INFO ====================
     r"^head\s+(?P<num_rows>\d+)$": {
@@ -5412,6 +5466,13 @@ MAGIC_RENDERERS = {
         "sample_values": {"table": "wny_health"},
         "category": "Comprehensive Reporting",
         "show_example": True,
+    },
+    r"^loop$": {
+        "func": _loop_questions,
+        "description": "Loop through 10 pre-determined health questions and search history for each",
+        "sample_values": {},
+        "category": "Help & System Commands",
+        "show_example": False,
     },
     # Add more as needed...
 }
