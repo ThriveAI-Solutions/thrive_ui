@@ -825,79 +825,35 @@ def normal_message_flow(my_question: str):
     # If we have a thinking model, display the thinking stream
     if has_thinking_model and hasattr(vn_instance, "stream_generate_sql"):
         try:
-            # In test environment, we may not have container support
-            thinking_container = st.empty()
             thinking_chunks = []
 
-            # Check if we're in a test environment
-            is_test_env = not hasattr(thinking_container, "container")
+            # Stream the SQL generation and collect thinking
+            stream_gen = vn_instance.stream_generate_sql(my_question)
+            for chunk in stream_gen:
+                thinking_chunks.append(chunk)
 
-            if not is_test_env:
-                with thinking_container.container():
-                    with st.chat_message(RoleType.ASSISTANT.value):
-                        thinking_placeholder = st.empty()
+            # After streaming completes, get the cached result
+            if hasattr(st.session_state, "streamed_sql"):
+                sql = st.session_state.streamed_sql
+                elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
+                thinking_text = st.session_state.get("streamed_thinking", "")
 
-                        # Stream the SQL generation and collect thinking
-                        stream_gen = vn_instance.stream_generate_sql(my_question)
-                        for chunk in stream_gen:
-                            thinking_chunks.append(chunk)
-                            # Update the thinking display in real-time
-                            thinking_placeholder.markdown("🤔 **Thinking...**\n\n" + "".join(thinking_chunks))
-
-                        # After streaming completes, get the cached result
-                        if hasattr(st.session_state, "streamed_sql"):
-                            sql = st.session_state.streamed_sql
-                            elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
-                            thinking_text = st.session_state.get("streamed_thinking", "")
-
-                            # Clear the temporary display
-                            thinking_container.empty()
-
-                            # If we collected thinking text, add it as a proper message
-                            if thinking_text and thinking_text.strip():
-                                add_message(
-                                    Message(
-                                        RoleType.ASSISTANT,
-                                        thinking_text,
-                                        MessageType.THINKING,
-                                        "",
-                                        my_question,
-                                        None,
-                                        elapsed_time,
-                                        group_id=get_current_group_id(),
-                                    )
-                                )
-            else:
-                # Test environment - just collect the thinking without display
-                stream_gen = vn_instance.stream_generate_sql(my_question)
-                for chunk in stream_gen:
-                    thinking_chunks.append(chunk)
-
-                # Get the cached result
-                if hasattr(st.session_state, "streamed_sql"):
-                    sql = st.session_state.streamed_sql
-                    elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
-                    thinking_text = st.session_state.get("streamed_thinking", "")
-
-                    # If we collected thinking text, add it as a proper message
-                    if thinking_text and thinking_text.strip():
-                        add_message(
-                            Message(
-                                RoleType.ASSISTANT,
-                                thinking_text,
-                                MessageType.THINKING,
-                                "",
-                                my_question,
-                                None,
-                                elapsed_time,
-                                group_id=get_current_group_id(),
-                            )
+                # If we collected thinking text, add it as a proper message
+                if thinking_text and thinking_text.strip():
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            thinking_text,
+                            MessageType.THINKING,
+                            "",
+                            my_question,
+                            None,
+                            elapsed_time,
+                            group_id=get_current_group_id(),
                         )
+                    )
         except Exception as e:
             logger.warning(f"Failed to stream SQL generation: {e}")
-            # Fall back to non-streaming
-            if "thinking_container" in locals() and hasattr(thinking_container, "empty"):
-                thinking_container.empty()
 
     # If no thinking model or streaming failed, use regular generation
     if sql is None:
@@ -1016,72 +972,48 @@ def normal_message_flow(my_question: str):
 
         if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
             # Try streaming summary first
-            summary_container = st.empty()
-            summary_chunks = []
             summary = None
             elapsed_time = 0
 
             # Check if we should show thinking for summaries
             show_summary_thinking = has_thinking_model and st.session_state.get("show_summary", True)
 
-            # Check if we're in a test environment
-            is_test_env = not hasattr(summary_container, "container")
-
             try:
-                if not is_test_env:
-                    # Use event stream to get both thinking and content
-                    event_stream = get_summary_event_stream(my_question, df, think=show_summary_thinking)
-                    thinking_chunks = []
-                    content_chunks = []
+                # Use event stream to get both thinking and content
+                event_stream = get_summary_event_stream(my_question, df, think=show_summary_thinking)
+                thinking_chunks = []
+                content_chunks = []
 
-                    with summary_container.container():
-                        with st.chat_message(RoleType.ASSISTANT.value):
-                            summary_placeholder = st.empty()
+                for kind, text in event_stream:
+                    if kind == "thinking":
+                        thinking_chunks.append(text)
+                    elif kind == "content":
+                        content_chunks.append(text)
 
-                            for kind, text in event_stream:
-                                if kind == "thinking":
-                                    thinking_chunks.append(text)
-                                    # Show thinking in real-time
-                                    summary_placeholder.markdown(
-                                        "🤔 **Analyzing data...**\n\n" + "".join(thinking_chunks)
-                                    )
-                                elif kind == "content":
-                                    content_chunks.append(text)
-                                    # Once we start getting content, switch to showing the summary
-                                    summary_placeholder.markdown("".join(content_chunks))
+                # Get the final summary from session state
+                if hasattr(st.session_state, "streamed_summary"):
+                    summary = st.session_state.streamed_summary
+                    elapsed_time = st.session_state.get("streamed_summary_elapsed_time", 0)
 
-                            # Get the final summary from session state
-                            if hasattr(st.session_state, "streamed_summary"):
-                                summary = st.session_state.streamed_summary
-                                elapsed_time = st.session_state.get("streamed_summary_elapsed_time", 0)
-
-                    # Clear the streaming container
-                    summary_container.empty()
-
-                    # Add thinking message if we collected thinking text
-                    if thinking_chunks and show_summary_thinking:
-                        thinking_text = "".join(thinking_chunks)
-                        if thinking_text.strip():
-                            add_message(
-                                Message(
-                                    RoleType.ASSISTANT,
-                                    thinking_text,
-                                    MessageType.THINKING,
-                                    sql,
-                                    my_question,
-                                    df,
-                                    elapsed_time,
-                                    group_id=get_current_group_id(),
-                                )
+                # Add thinking message if we collected thinking text
+                if thinking_chunks and show_summary_thinking:
+                    thinking_text = "".join(thinking_chunks)
+                    if thinking_text.strip():
+                        add_message(
+                            Message(
+                                RoleType.ASSISTANT,
+                                thinking_text,
+                                MessageType.THINKING,
+                                sql,
+                                my_question,
+                                df,
+                                elapsed_time,
+                                group_id=get_current_group_id(),
                             )
-                else:
-                    # Test environment - skip streaming UI but still process the stream
-                    summary, elapsed_time = get_vn().generate_summary(question=my_question, df=df)
+                        )
 
             except Exception as e:
                 logger.warning(f"Failed to stream summary: {e}")
-                if hasattr(summary_container, "empty"):
-                    summary_container.empty()
                 # Fall back to non-streaming
                 summary, elapsed_time = get_vn().generate_summary(question=my_question, df=df)
 
