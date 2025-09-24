@@ -827,31 +827,41 @@ def normal_message_flow(my_question: str):
         try:
             thinking_chunks = []
 
-            # Stream the SQL generation and collect thinking
-            stream_gen = vn_instance.stream_generate_sql(my_question)
-            for chunk in stream_gen:
-                thinking_chunks.append(chunk)
+            # Create a placeholder for real-time thinking display
+            with st.chat_message(RoleType.ASSISTANT.value):
+                thinking_placeholder = st.empty()
 
-            # After streaming completes, get the cached result
-            if hasattr(st.session_state, "streamed_sql"):
-                sql = st.session_state.streamed_sql
-                elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
-                thinking_text = st.session_state.get("streamed_thinking", "")
+                # Stream the SQL generation and show thinking in real-time
+                stream_gen = vn_instance.stream_generate_sql(my_question)
+                for chunk in stream_gen:
+                    thinking_chunks.append(chunk)
+                    # Update the thinking display in real-time
+                    thinking_placeholder.markdown("🤔 **Thinking...**\n\n" + "".join(thinking_chunks))
 
-                # If we collected thinking text, add it as a proper message
-                if thinking_text and thinking_text.strip():
-                    add_message(
-                        Message(
-                            RoleType.ASSISTANT,
-                            thinking_text,
-                            MessageType.THINKING,
-                            "",
-                            my_question,
-                            None,
-                            elapsed_time,
-                            group_id=get_current_group_id(),
-                        )
-                    )
+                # After streaming completes, get the cached result
+                if hasattr(st.session_state, "streamed_sql"):
+                    sql = st.session_state.streamed_sql
+                    elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
+                    thinking_text = st.session_state.get("streamed_thinking", "")
+
+                    # Clear the placeholder - we'll add the thinking as a proper message
+                    thinking_placeholder.empty()
+
+            # If we collected thinking text, add it as a proper message
+            if thinking_text and thinking_text.strip():
+                add_message(
+                    Message(
+                        RoleType.ASSISTANT,
+                        thinking_text,
+                        MessageType.THINKING,
+                        "",
+                        my_question,
+                        None,
+                        elapsed_time,
+                        group_id=get_current_group_id(),
+                    ),
+                    render=False,  # Don't render, we'll rerun at the end
+                )
         except Exception as e:
             logger.warning(f"Failed to stream SQL generation: {e}")
 
@@ -975,42 +985,28 @@ def normal_message_flow(my_question: str):
             summary = None
             elapsed_time = 0
 
-            # Check if we should show thinking for summaries
-            show_summary_thinking = has_thinking_model and st.session_state.get("show_summary", True)
-
             try:
-                # Use event stream to get both thinking and content
-                event_stream = get_summary_event_stream(my_question, df, think=show_summary_thinking)
-                thinking_chunks = []
-                content_chunks = []
+                # Stream summary content only (no thinking)
+                with st.chat_message(RoleType.ASSISTANT.value):
+                    summary_placeholder = st.empty()
 
-                for kind, text in event_stream:
-                    if kind == "thinking":
-                        thinking_chunks.append(text)
-                    elif kind == "content":
-                        content_chunks.append(text)
+                    # Use event stream to get content only (think=False)
+                    event_stream = get_summary_event_stream(my_question, df, think=False)
+                    content_chunks = []
 
-                # Get the final summary from session state
-                if hasattr(st.session_state, "streamed_summary"):
-                    summary = st.session_state.streamed_summary
-                    elapsed_time = st.session_state.get("streamed_summary_elapsed_time", 0)
+                    for kind, text in event_stream:
+                        if kind == "content":
+                            content_chunks.append(text)
+                            # Show the summary streaming in real-time
+                            summary_placeholder.markdown("".join(content_chunks))
 
-                # Add thinking message if we collected thinking text
-                if thinking_chunks and show_summary_thinking:
-                    thinking_text = "".join(thinking_chunks)
-                    if thinking_text.strip():
-                        add_message(
-                            Message(
-                                RoleType.ASSISTANT,
-                                thinking_text,
-                                MessageType.THINKING,
-                                sql,
-                                my_question,
-                                df,
-                                elapsed_time,
-                                group_id=get_current_group_id(),
-                            )
-                        )
+                    # Get the final summary from session state
+                    if hasattr(st.session_state, "streamed_summary"):
+                        summary = st.session_state.streamed_summary
+                        elapsed_time = st.session_state.get("streamed_summary_elapsed_time", 0)
+
+                    # Clear the placeholder - we'll add the summary as a proper message
+                    summary_placeholder.empty()
 
             except Exception as e:
                 logger.warning(f"Failed to stream summary: {e}")
@@ -1053,6 +1049,12 @@ def normal_message_flow(my_question: str):
 
         if st.session_state.get("show_followup", True):
             get_followup_questions(my_question, sql, df)
+
+        # Clear the question from session state after successful processing
+        st.session_state.my_question = None
+
+        # Trigger a rerun to properly refresh the UI
+        st.rerun()
     else:
         add_message(
             Message(
@@ -1066,3 +1068,9 @@ def normal_message_flow(my_question: str):
         )
         if st.session_state.get("llm_fallback", True):
             call_llm(my_question)
+
+        # Clear the question from session state after error processing
+        st.session_state.my_question = None
+
+        # Trigger a rerun to properly refresh the UI
+        st.rerun()
