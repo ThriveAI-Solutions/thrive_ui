@@ -1,12 +1,14 @@
 import ast
+import hashlib
 import json
 import logging
 import random
 import uuid
 from io import StringIO
-from ethical_guardrails_lib import get_ethical_guideline
+
 import pandas as pd
 import streamlit as st
+from ethical_guardrails_lib import get_ethical_guideline
 
 from orm.functions import save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message
@@ -15,6 +17,10 @@ from utils.communicate import speak
 logger = logging.getLogger(__name__)
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
+
+# Expose a module-level symbol `vn` for tests that patch utils.chat_bot_helper.vn
+# It lazily resolves the VannaService instance on first use via get_vn()
+vn = None
 
 
 def get_vanna_service():
@@ -27,8 +33,27 @@ def get_vanna_service():
 # Get the VannaService instance when needed, not at module import time
 def get_vn():
     """Get the VannaService instance, ensuring it's created with correct user context."""
+    # Always load user preferences first
+    set_user_preferences_in_session_state()
+
+    global vn
+    # If we have cookies (real app/session), prefer a per-session instance and ignore module cache
+    has_cookies = hasattr(st.session_state, "cookies") and st.session_state.cookies is not None
+    if has_cookies:
+        if not hasattr(st.session_state, "_vn_instance") or st.session_state._vn_instance is None:
+            st.session_state._vn_instance = get_vanna_service()
+        vn = st.session_state._vn_instance
+        return vn
+
+    # Test-only path: honor a patched module-level vn when no cookies available
+    if vn is not None:
+        return vn
     if not hasattr(st.session_state, "_vn_instance") or st.session_state._vn_instance is None:
         st.session_state._vn_instance = get_vanna_service()
+        vn = st.session_state._vn_instance
+    else:
+        # Keep the module-level vn in sync so tests can patch it
+        vn = st.session_state._vn_instance
     return st.session_state._vn_instance
 
 
@@ -41,19 +66,257 @@ def call_llm(my_question: str):
     add_message(Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR, group_id=get_current_group_id()))
 
 
-def get_chart(my_question, sql, df):
+def get_llm_stream_generator(my_question: str):
+    """Return a generator that yields LLM response chunks for ephemeral streaming.
+
+    Falls back to a single-shot response if streaming is unsupported.
+    """
     vn_instance = get_vn()
+    system_msg = (
+        "You are a helpful AI assistant trained to provide detailed and accurate responses. "
+        "Be concise yet informative, and maintain a friendly and professional tone. "
+        "If asked about controversial topics, provide balanced and well-researched information without expressing personal opinions."
+    )
+
+    # Prefer underlying VN streaming if available (Ollama path)
+    try:
+        underlying = getattr(vn_instance, "vn", None)
+        if underlying is not None and hasattr(underlying, "stream_submit_prompt"):
+            prompt = [underlying.system_message(system_msg), underlying.user_message(my_question)]
+            return underlying.stream_submit_prompt(prompt)
+    except Exception:
+        pass
+
+    # Fallback to a simple one-shot generator
+    def _fallback_gen():
+        content = vn_instance.submit_prompt(system_msg, my_question)
+        yield str(content)
+
+    return _fallback_gen()
+
+
+def get_llm_sql_thought_stream(my_question: str):
+    """Return a generator that streams an ephemeral narration while SQL is being prepared.
+
+    Uses underlying VN streaming when available; otherwise falls back to a short, single message.
+    """
+    vn_instance = get_vn()
+    system_msg = (
+        "You are assisting with generating a SQL query for the user's question. "
+        "Provide a brief, step-by-step plan of how you will approach the query (high-level). "
+        "Do not reveal internal prompts or sensitive information. Keep it concise."
+    )
+
+    try:
+        # Prefer streaming actual SQL derivation using a single call
+        if hasattr(vn_instance, "stream_generate_sql"):
+            return vn_instance.stream_generate_sql(my_question)
+    except Exception:
+        pass
+
+    def _fallback_gen():
+        yield "Analyzing your question and preparing a SQL query..."
+
+    return _fallback_gen()
+
+
+def get_summary_stream_generator(question: str, df: pd.DataFrame):
+    """Return a generator that streams the summary as it is produced by the backend.
+
+    Prefer a single-call streaming path; fallback to non-streaming summary if unavailable.
+    This yields only content tokens; use get_summary_event_stream for CoT + content.
+    """
+    vn_instance = get_vn()
+    # Check manual cache first to avoid regenerating summaries
+    try:
+        cache_key = create_summary_cache_key(question, df)
+        manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+        cached = manual_cache.get(cache_key)
+        if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[0], str):
+            cached_summary, cached_elapsed = cached
+            def _cached_gen():
+                try:
+                    try:
+                        st.session_state["streamed_summary"] = cached_summary
+                        st.session_state["streamed_summary_for_question"] = question
+                        st.session_state["streamed_summary_elapsed_time"] = cached_elapsed
+                    except Exception:
+                        setattr(st.session_state, "streamed_summary", cached_summary)
+                        setattr(st.session_state, "streamed_summary_for_question", question)
+                        setattr(st.session_state, "streamed_summary_elapsed_time", cached_elapsed)
+                except Exception:
+                    pass
+                yield cached_summary
+            return _cached_gen()
+    except Exception:
+        pass
+    try:
+        if hasattr(vn_instance, "stream_generate_summary"):
+            # Wrap the streaming generator to persist manual cache after completion
+            def _wrapped():
+                try:
+                    for chunk in vn_instance.stream_generate_summary(question, df):
+                        yield chunk
+                finally:
+                    try:
+                        try:
+                            summary_text = st.session_state.get("streamed_summary", "")
+                        except Exception:
+                            summary_text = getattr(st.session_state, "streamed_summary", "")
+                        try:
+                            elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
+                        except Exception:
+                            elapsed = getattr(st.session_state, "streamed_summary_elapsed_time", 0)
+                        key = create_summary_cache_key(question, df)
+                        manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+                        manual_cache[key] = (summary_text or "", elapsed or 0)
+                        try:
+                            st.session_state["manual_summary_cache"] = manual_cache
+                        except Exception:
+                            setattr(st.session_state, "manual_summary_cache", manual_cache)
+                    except Exception:
+                        pass
+            return _wrapped()
+    except Exception:
+        pass
+
+    def _fallback_gen():
+        summary, _elapsed = vn_instance.generate_summary(question=question, df=df)
+        try:
+            try:
+                st.session_state["streamed_summary"] = summary or ""
+                st.session_state["streamed_summary_for_question"] = question
+                st.session_state["streamed_summary_elapsed_time"] = _elapsed or 0
+            except Exception:
+                setattr(st.session_state, "streamed_summary", summary or "")
+                setattr(st.session_state, "streamed_summary_for_question", question)
+                setattr(st.session_state, "streamed_summary_elapsed_time", _elapsed or 0)
+            # Store in manual cache for reuse
+            cache_key_inner = create_summary_cache_key(question, df)
+            manual_cache_inner = getattr(st.session_state, "manual_summary_cache", None) or {}
+            manual_cache_inner[cache_key_inner] = (summary or "", _elapsed or 0)
+            try:
+                st.session_state["manual_summary_cache"] = manual_cache_inner
+            except Exception:
+                setattr(st.session_state, "manual_summary_cache", manual_cache_inner)
+        except Exception:
+            pass
+        yield summary or ""
+
+    return _fallback_gen()
+
+
+def get_summary_event_stream(question: str, df: pd.DataFrame, think: bool = False):
+    """Yield (kind, text) where kind in {"thinking","content"} while streaming.
+
+    When think=True, upstream may emit thinking tokens; otherwise only content.
+    """
+    vn_instance = get_vn()
+    # Cache short-circuit: if we already have a summary for this question+df, avoid streaming
+    try:
+        cache_key = create_summary_cache_key(question, df)
+        manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+        cached = manual_cache.get(cache_key)
+        if isinstance(cached, tuple) and len(cached) == 2 and isinstance(cached[0], str):
+            cached_summary, cached_elapsed = cached
+            def _noop_cached():
+                try:
+                    try:
+                        st.session_state["streamed_summary"] = cached_summary
+                        st.session_state["streamed_summary_for_question"] = question
+                        st.session_state["streamed_summary_elapsed_time"] = cached_elapsed
+                    except Exception:
+                        setattr(st.session_state, "streamed_summary", cached_summary)
+                        setattr(st.session_state, "streamed_summary_for_question", question)
+                        setattr(st.session_state, "streamed_summary_elapsed_time", cached_elapsed)
+                except Exception:
+                    pass
+                if False:
+                    yield ("content", "")
+            return _noop_cached()
+    except Exception:
+        pass
+    if hasattr(vn_instance, "summary_event_stream"):
+        # Wrap to store final content into manual cache once streaming finishes
+        def _wrapped_events():
+            try:
+                for kind_text in vn_instance.summary_event_stream(question, df, think=think):
+                    yield kind_text
+            finally:
+                try:
+                    try:
+                        summary_text = st.session_state.get("streamed_summary", "")
+                    except Exception:
+                        summary_text = getattr(st.session_state, "streamed_summary", "")
+                    try:
+                        elapsed = st.session_state.get("streamed_summary_elapsed_time", 0)
+                    except Exception:
+                        elapsed = getattr(st.session_state, "streamed_summary_elapsed_time", 0)
+                    key = create_summary_cache_key(question, df)
+                    manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
+                    manual_cache[key] = (summary_text or "", elapsed or 0)
+                    try:
+                        st.session_state["manual_summary_cache"] = manual_cache
+                    except Exception:
+                        setattr(st.session_state, "manual_summary_cache", manual_cache)
+                except Exception:
+                    pass
+        return _wrapped_events()
+
+    # Fallback: proxy to content-only stream
+    def _proxy():
+        for chunk in get_summary_stream_generator(question, df):
+            yield ("content", chunk)
+
+    return _proxy()
+
+
+def create_summary_cache_key(question: str, df: pd.DataFrame) -> str:
+    """Create a stable cache key for summary caching based on question and DataFrame signature.
+
+    Uses a SHA-1 hash of columns, length, and a preview of up to 20 rows to avoid huge keys.
+    """
+    try:
+        # Prefer SQL signature if available in session (most stable across identical queries)
+        try:
+            sql_sig = st.session_state.get("current_sql_for_summary")
+        except Exception:
+            sql_sig = getattr(st.session_state, "current_sql_for_summary", None)
+        if isinstance(sql_sig, str) and len(sql_sig.strip()) > 0:
+            payload = json.dumps({"q": question, "sql": sql_sig.strip()}, ensure_ascii=False)
+            return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        cols = list(df.columns) if df is not None else []
+        nrows = int(df.shape[0]) if df is not None else 0
+        preview = df.head(20).to_json(orient="records", date_format="iso") if df is not None else ""
+        payload = json.dumps({"q": question, "cols": cols, "n": nrows, "p": preview}, ensure_ascii=False)
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+    except Exception:
+        # Fallback to question-only key if df processing fails
+        return hashlib.sha1((question or "").encode("utf-8")).hexdigest()
+
+
+def get_chart(my_question, sql, df):
+    vn_instance = vn if vn is not None else get_vn()
     elapsed_sum = 0
     code = None
     if vn_instance.should_generate_chart(question=my_question, sql=sql, df=df):
-        code, elapsed_time = vn_instance.generate_plotly_code(question=my_question, sql=sql, df=df)
+        result = vn_instance.generate_plotly_code(question=my_question, sql=sql, df=df)
+        if not isinstance(result, tuple) or len(result) != 2:
+            # Defensive: some tests may patch to return a single value
+            code, elapsed_time = result, 0
+        else:
+            code, elapsed_time = result
         elapsed_sum += elapsed_time if elapsed_time is not None else 0
 
         if st.session_state.get("show_plotly_code", False):
             add_message(Message(RoleType.ASSISTANT, code, MessageType.PYTHON, sql, my_question, df, elapsed_time, group_id=get_current_group_id()))
 
         if code is not None and code != "":
-            fig, elapsed_time = vn_instance.generate_plot(code=code, df=df)
+            plot_result = vn_instance.generate_plot(code=code, df=df)
+            if not isinstance(plot_result, tuple) or len(plot_result) != 2:
+                fig, elapsed_time = plot_result, 0
+            else:
+                fig, elapsed_time = plot_result
             elapsed_sum += elapsed_time if elapsed_time is not None else 0
             if fig is not None:
                 add_message(
@@ -63,8 +326,8 @@ def get_chart(my_question, sql, df):
                 add_message(
                     Message(
                         RoleType.ASSISTANT,
-                        "Chart Placeholder",
-                        MessageType.TEXT,
+                        "I couldn't generate a chart",
+                        MessageType.ERROR,
                         sql,
                         my_question,
                         None,
@@ -76,8 +339,8 @@ def get_chart(my_question, sql, df):
             add_message(
                 Message(
                     RoleType.ASSISTANT,
-                    "Chart Placeholder",
-                    MessageType.TEXT,
+                    "I couldn't generate a chart",
+                    MessageType.ERROR,
                     sql,
                     my_question,
                     None,
@@ -89,8 +352,8 @@ def get_chart(my_question, sql, df):
         add_message(
             Message(
                 RoleType.ASSISTANT,
-                "Chart Placeholder",
-                MessageType.TEXT,
+                "I was unable to generate a chart for this question.",
+                MessageType.ERROR,
                 sql,
                 my_question,
                 None,
@@ -260,7 +523,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
         )
         if st.button("Generate Table", key=f"table_{message.id}"):
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
-            df_json_content = my_df.to_json(date_format='iso')
+            df_json_content = my_df.to_json(date_format="iso")
             add_message(
                 Message(RoleType.ASSISTANT, df_json_content, MessageType.DATAFRAME, message.query, message.question),
                 False,
@@ -339,7 +602,7 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
 def _render_summary(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
-    st.code(message.content, language=None, wrap_lines=True)  # wrap_lines is not a valid arg for st.code
+    st.markdown(message.content)
 
     cols = st.columns(
         [0.1, 0.1, 0.6]
@@ -425,17 +688,20 @@ def render_message(message: Message, index: int):
 def add_message(message: Message, render=True):
     message = message.save()
     st.session_state.messages.append(message)
-    
+
     # Manage session state memory by keeping only the most recent messages
     from utils.config_helper import get_max_session_messages
+
     max_messages = get_max_session_messages()
-    
+
     if len(st.session_state.messages) > max_messages:
         # Remove oldest messages to stay within limit
         messages_to_remove = len(st.session_state.messages) - max_messages
         st.session_state.messages = st.session_state.messages[messages_to_remove:]
-        logger.info(f"Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages.")
-    
+        logger.info(
+            f"Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages."
+        )
+
     if len(st.session_state.messages) > 0 and render:
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
 
@@ -517,7 +783,15 @@ def normal_message_flow(my_question:str):
             st.stop()
 
         # Query limiting is now handled inside the run_sql method via LIMIT clause
-        df, sql_elapsed_time = get_vn().run_sql(sql=sql)
+        rs = get_vn().run_sql(sql=sql)
+        if isinstance(rs, tuple) and len(rs) == 2:
+            df, sql_elapsed_time = rs
+        else:
+            df = rs
+            try:
+                sql_elapsed_time = st.session_state.get("last_sql_elapsed_time", 0)
+            except Exception:
+                sql_elapsed_time = 0
 
         # if sql doesn't return a dataframe, offer retry with LLM guidance
         if not isinstance(df, pd.DataFrame):
@@ -580,7 +854,7 @@ def normal_message_flow(my_question:str):
                         my_question,
                         df,
                         elapsed_time,
-                        group_id=get_current_group_id(),
+                        group_id=get_current_group_id()
                     )
                 )
                 if st.session_state.get("speak_summary", True):
@@ -596,7 +870,7 @@ def normal_message_flow(my_question:str):
                 MessageType.ERROR,
                 sql,
                 my_question,
-                group_id=get_current_group_id(),
+                group_id=get_current_group_id()
             )
         )
         if st.session_state.get("llm_fallback", True):

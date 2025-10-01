@@ -27,11 +27,14 @@ if st.session_state.messages is None:
 
 # Manage session state memory by limiting messages for performance
 from utils.config_helper import get_max_session_messages
+
 max_messages = get_max_session_messages()
 if len(st.session_state.messages) > max_messages:
     messages_to_remove = len(st.session_state.messages) - max_messages
     st.session_state.messages = st.session_state.messages[messages_to_remove:]
-    logger.info(f"Session startup: Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages.")
+    logger.info(
+        f"Session startup: Trimmed {messages_to_remove} messages from session state. Kept most recent {max_messages} messages."
+    )
 
 
 ######### Sidebar settings #########
@@ -62,11 +65,21 @@ def save_settings_on_click():
 
 
 st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
+
+# Display current LLM
+try:
+    vn_instance = get_vn()
+    if vn_instance:
+        llm_name = vn_instance.get_llm_name()
+        st.sidebar.info(f"🤖 **Current LLM:** {llm_name}")
+except Exception:
+    pass
+
 with st.sidebar.expander("Settings"):
     st.checkbox("Show SQL", value=st.session_state.get("show_sql", True), key="temp_show_sql")
     st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
     # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
+    st.checkbox("Show AI Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
     st.checkbox(
         "Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time"
     )
@@ -138,11 +151,16 @@ if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):
         st.markdown("Ask me a question about your data")
 
-# Populate messages in the chat message component everytime the streamlit is run
-index = 0
-for message in st.session_state.messages:
-    render_message(message, index)
-    index = index + 1
+# Populate messages in a dedicated container so we can keep a footer below
+messages_container = st.container()
+with messages_container:
+    index = 0
+    for message in st.session_state.messages:
+        render_message(message, index)
+        index = index + 1
+
+# Footer placeholder that always stays at the end
+tail_placeholder = st.empty()
 
 # Always show chat input
 chat_input = st.chat_input("Ask me a question about your data")

@@ -96,3 +96,28 @@ class ThriveAI_Ollama(ThriveAI_Base):
         self.log(f"Ollama Response:\n{str(response_dict)}")
 
         return response_dict["message"]["content"]
+
+    def stream_submit_prompt(self, prompt, **kwargs):
+        """Yield assistant content chunks by streaming from Ollama chat API.
+
+        Designed to be consumed by Streamlit's st.write_stream.
+        """
+        self.log(
+            f"Ollama parameters (stream):\nmodel={self.model},\noptions={self.ollama_options},\nkeep_alive={self.keep_alive}"
+        )
+        self.log(f"Prompt Content (stream):\n{json.dumps(prompt, ensure_ascii=False)}")
+        stream = self.ollama_client.chat(
+            model=self.model,
+            messages=prompt,
+            stream=True,
+            options=self.ollama_options,
+            keep_alive=self.keep_alive,
+        )
+        for event in stream:
+            try:
+                message = event.get("message", {})
+                content = message.get("content", "")
+                if content:
+                    yield content
+            except Exception:
+                continue
