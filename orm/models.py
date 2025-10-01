@@ -2,9 +2,10 @@ import enum
 import json
 import logging
 from decimal import Decimal
+
 import pandas as pd
 import streamlit as st
-from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Integer, Numeric, String, create_engine, func
+from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Index, Integer, Numeric, String, create_engine, func
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
@@ -34,7 +35,7 @@ Base = declarative_base()
 def content_to_json(type, content):
     if type == MessageType.DATAFRAME.value and not isinstance(content, str):
         panda_frame = pd.DataFrame(content)
-        return panda_frame.to_json(date_format='iso')
+        return panda_frame.to_json(date_format="iso")
     if type == MessageType.PLOTLY_CHART.value and not isinstance(content, str):
         json_content = content.to_json()
         return json_content
@@ -84,6 +85,7 @@ class User(Base):
     min_message_id = Column(Integer, default=0)
 
     role = relationship("UserRole", back_populates="users")
+    messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -110,6 +112,11 @@ class User(Base):
 
 class Message(Base):
     __tablename__ = "thrive_message"
+    __table_args__ = (
+        Index("ix_thrive_message_user_id", "user_id"),
+        Index("ix_thrive_message_created_at", "created_at"),
+        Index("ix_thrive_message_type", "type"),
+    )
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("thrive_user.id"))
     group_id = Column(String(50))  # UUID to group messages in the same flow
@@ -123,6 +130,9 @@ class Message(Base):
     elapsed_time = Column(Numeric(10, 6))
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    # ORM relationship back to user
+    user = relationship("User", back_populates="messages")
 
     def __init__(
         self,
@@ -166,7 +176,7 @@ class Message(Base):
         if dataframe is not None:
             # Handle both DataFrame objects and serialized JSON strings
             if isinstance(dataframe, pd.DataFrame):
-                self.dataframe = dataframe.to_json(date_format='iso')  # Convert DataFrame to JSON
+                self.dataframe = dataframe.to_json(date_format="iso")  # Convert DataFrame to JSON
             elif isinstance(dataframe, str):
                 # Assume it's already a JSON string
                 self.dataframe = dataframe

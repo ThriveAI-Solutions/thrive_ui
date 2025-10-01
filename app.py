@@ -1,7 +1,9 @@
 import logging
+
 import streamlit as st
+
+from utils.discord_logging import add_discord_handler_if_configured, initialize_discord_logging_after_streamlit
 from utils.logging_config import setup_logging
-from utils.discord_logging import initialize_discord_logging_after_streamlit, add_discord_handler_if_configured
 
 # Set the page configuration to wide mode
 st.set_page_config(layout="wide")
@@ -47,7 +49,17 @@ user_page = st.Page(
     icon="👤",
 )
 
-pg = st.navigation(pages=[chat_bot_page, user_page])
+# Conditionally add Admin Analytics page for admins
+pages = [chat_bot_page, user_page]
+if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
+    analytics_page = st.Page(
+        page="views/admin_analytics.py",
+        title="Admin Analytics",
+        icon="📈",
+    )
+    pages.append(analytics_page)
+
+pg = st.navigation(pages=pages)
 
 check_authenticate()
 
