@@ -4,16 +4,15 @@ import time
 import streamlit as st
 
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
-from utils.chat_bot_helper import (
-    get_unique_messages,
-    get_vn,
-    render_message,
-    set_question,
-    normal_message_flow
-)
+from utils.chat_bot_helper import get_unique_messages, get_vn, normal_message_flow, render_message, set_question
 from utils.communicate import listen, speak
-from utils.enums import RoleType
-from utils.magic_functions import is_magic_do_magic
+from utils.enums import MessageType, RoleType, ThemeType
+
+
+def get_themed_asset_path(asset_name):
+    theme = st.session_state.get("user_theme", ThemeType.HEALTHELINK.value).lower()
+    return f"assets/themes/{theme}/{asset_name}"
+
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +63,7 @@ def save_settings_on_click():
     save_user_settings()
 
 
-st.logo(image="assets/logo.png", size="medium", icon_image="assets/icon.jpg")
+st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
 
 # Display current LLM
 try:
