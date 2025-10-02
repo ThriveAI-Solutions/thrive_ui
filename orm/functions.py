@@ -87,6 +87,7 @@ def set_user_preferences_in_session_state():
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.min_message_id = user.min_message_id
         st.session_state.user_role = user.role.role.value
+        st.session_state.user_theme = user.theme
         st.session_state.loaded = True  # dont call after initial load
         st.session_state.username = f"{user.first_name} {user.last_name}"
 
@@ -136,7 +137,7 @@ def save_user_settings():
         logger.error(f"Error saving user settings: {e}")
 
 
-def create_user(username: str, password: str, first_name: str, last_name: str, role_id: int) -> bool:
+def create_user(username: str, password: str, first_name: str, last_name: str, role_id: int, theme: str = None) -> bool:
     """
     Create a new user with the specified details.
     
@@ -179,7 +180,8 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
                 show_followup=False,
                 show_elapsed_time=True,
                 llm_fallback=False,
-                min_message_id=0
+                min_message_id=0,
+                theme=theme
             )
             
             session.add(new_user)
@@ -216,6 +218,7 @@ def get_all_users():
                     'last_name': user.last_name,
                     'role_id': user.user_role_id,
                     'role_name': user.role.role_name if user.role else 'No Role',
+                    'theme': user.theme,
                     'created_at': user.created_at
                 })
             return user_list
@@ -225,7 +228,7 @@ def get_all_users():
 
 
 def update_user(user_id: int, username: str = None, first_name: str = None, 
-                last_name: str = None, role_id: int = None) -> bool:
+                last_name: str = None, role_id: int = None, theme: str = None) -> bool:
     """Update user details."""
     try:
         with SessionLocal() as session:
@@ -251,6 +254,8 @@ def update_user(user_id: int, username: str = None, first_name: str = None,
                 user.last_name = last_name
             if role_id:
                 user.user_role_id = role_id
+            if theme:
+                user.theme = theme
             
             session.commit()
             return True

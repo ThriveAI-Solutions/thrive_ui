@@ -163,6 +163,14 @@
         {
             "question": "*how many passengers were there based on age and gender",
             "query": "SELECT age, sex, COUNT(*) AS number_of_passengers FROM titanic GROUP BY age, sex LIMIT 1000"
+        },
+        {
+            "question": "How many individual patients are in the wny_health table?",
+            "query": "SELECT COUNT(DISTINCT research_id) AS unique_patients FROM wny_health"
+        },
+        {
+            "question": "How many patients have diabetes? What percentage of the population is that?",
+            "query": "SELECT\n    COUNT(DISTINCT CASE WHEN diabetes = 'Y' THEN research_id END) AS diabetes_count,\n    COUNT(DISTINCT research_id) AS total_patients,\n    ROUND(100.0 * COUNT(DISTINCT CASE WHEN diabetes = 'Y' THEN research_id END) / COUNT(DISTINCT research_id), 2) AS diabetes_percentage\nFROM wny_health"
         }
     ],
     "sample_documents": [

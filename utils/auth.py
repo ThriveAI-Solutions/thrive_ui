@@ -1,7 +1,9 @@
 import logging
 from datetime import datetime, timedelta
-import utils.chat_bot_helper as chat_helper  # need to do this even though its not used,  so that the class is initialized before its used.
+
 import streamlit as st
+
+import utils.chat_bot_helper as chat_helper  # need to do this even though its not used,  so that the class is initialized before its used.
 from orm.functions import set_user_preferences_in_session_state, verify_user_credentials
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,6 @@ def show_login():
             unsafe_allow_html=True,
         )
         # --- HIDE LOGIN NAVIGATION ---
-        st.image("assets/logo.png", width=200)
         st.title("🔓 Log In")
 
         with st.form("login_form"):

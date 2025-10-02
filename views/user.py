@@ -25,7 +25,8 @@ from orm.functions import (
 from orm.models import RoleTypeEnum, SessionLocal, User, UserRole
 from utils.authentication_management import get_user_list_excel
 from utils.chat_bot_helper import get_vn
-from utils.vanna_calls import VannaService, train_ddl, train_file, training_plan
+from utils.enums import ThemeType
+from utils.vanna_calls import train_ddl, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
@@ -582,10 +583,13 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                     nu_first = st.text_input("First Name", value=selected["first_name"]) 
                     nu_last = st.text_input("Last Name", value=selected["last_name"]) 
                     nu_role_name = st.selectbox("Role", options=role_names, index=role_names.index(selected["role_name"]) if selected["role_name"] in role_names else 0)
+                    theme_options = [t.value for t in ThemeType]
+                    current_theme = selected.get("theme", ThemeType.HEALTHELINK.value)
+                    nu_theme = st.selectbox("Theme", options=theme_options, index=theme_options.index(current_theme) if current_theme in theme_options else 0)
                     cols = st.columns(2)
                     with cols[0]:
                         if st.button("Save Profile", key="save_profile", type="primary"):
-                            ok = update_user(selected["id"], nu_username, nu_first, nu_last, role_id_by_name.get(nu_role_name))
+                            ok = update_user(selected["id"], nu_username, nu_first, nu_last, role_id_by_name.get(nu_role_name), nu_theme)
                             if ok:
                                 st.success("Profile updated.")
                                 st.rerun()
