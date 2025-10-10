@@ -154,7 +154,7 @@ if st.session_state.messages == []:
 # Populate messages in a dedicated container so we can keep a footer below
 messages_container = st.container()
 with messages_container:
-    index = 0
+    index = 0 
     for message in st.session_state.messages:
         render_message(message, index)
         index = index + 1
