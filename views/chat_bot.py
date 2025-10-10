@@ -1,17 +1,46 @@
+import io
 import logging
 import time
 
+import pandas as pd
 import streamlit as st
 
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
 from utils.chat_bot_helper import get_unique_messages, get_vn, normal_message_flow, render_message, set_question
 from utils.communicate import listen, speak
 from utils.enums import MessageType, RoleType, ThemeType
+from utils.magic_functions import is_magic_do_magic
 
 
 def get_themed_asset_path(asset_name):
     theme = st.session_state.get("user_theme", ThemeType.HEALTHELINK.value).lower()
     return f"assets/themes/{theme}/{asset_name}"
+
+
+def load_community_questions(csv_file):
+    """Load questions from a CSV file and store them in session state."""
+    try:
+        # Read the CSV file
+        df = pd.read_csv(csv_file)
+
+        # Validate the CSV has a 'question' column
+        if 'question' not in df.columns:
+            st.error("CSV must have a 'question' column")
+            return
+
+        # Get the list of questions
+        questions = df['question'].dropna().tolist()
+
+        if not questions:
+            st.error("No questions found in CSV")
+            return
+
+        # Store questions in session state
+        st.session_state.community_questions = questions
+        st.success(f"✅ Loaded {len(questions)} community questions")
+
+    except Exception as e:
+        st.error(f"Error loading CSV: {str(e)}")
 
 
 logger = logging.getLogger(__name__)
@@ -99,6 +128,53 @@ with st.sidebar.expander("Settings"):
     st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
 st.sidebar.button("Clear", on_click=lambda: set_question(None), use_container_width=True, type="primary")
+
+# Community Engagement CSV Upload
+with st.sidebar.popover("📊 Community Engagement", use_container_width=True):
+    st.markdown("**Upload a CSV file with questions**")
+    st.caption("CSV should have a 'question' column")
+
+    uploaded_file = st.file_uploader(
+        "Choose a CSV file",
+        type=['csv'],
+        key="community_csv_uploader",
+        help="Upload a CSV file with a 'question' column"
+    )
+
+    if uploaded_file is not None:
+        if st.button("Load Questions", use_container_width=True, type="primary"):
+            load_community_questions(uploaded_file)
+            st.rerun()
+
+    # Show sample format
+    with st.expander("View Sample Format"):
+        st.code("""question
+What is the average patient age?
+How many patients visited last month?
+What are the top diagnoses?""", language="csv")
+
+# Display Community Questions in sidebar
+if st.session_state.get("community_questions"):
+    with st.sidebar:
+        st.title("Community Questions")
+        community_questions = st.session_state.get("community_questions", [])
+
+        # Add "Ask All Questions" button at the top
+        if st.button("🚀 Ask All Questions", use_container_width=True, type="primary", key="ask_all_community_questions"):
+            st.session_state.processing_community_questions = True
+            st.session_state.community_question_index = 0
+            set_question(community_questions[0], False)
+            st.rerun()
+
+        # Display individual question buttons
+        for idx, question in enumerate(community_questions):
+            st.sidebar.button(
+                question,
+                on_click=set_question,
+                args=(question, False),
+                key=f"community_question_{idx}",
+                use_container_width=True,
+            )
 
 if st.session_state.get("voice_input", True):
     with st.sidebar.popover("🎤 Speak Your Question", use_container_width=True):
@@ -209,4 +285,30 @@ if my_question:
         st.stop()
 
     normal_message_flow(my_question)
+    # normal_message_flow calls st.rerun() at the end, so code after this won't execute
+
+# Check if we need to continue processing community questions after a rerun
+# This runs when my_question is None (cleared after processing)
+if not my_question and st.session_state.get("processing_community_questions", False):
+    community_questions = st.session_state.get("community_questions", [])
+    current_index = st.session_state.get("community_question_index", 0)
+
+    # Move to next question
+    next_index = current_index + 1
+
+    if next_index < len(community_questions):
+        # Update index and process next question
+        st.session_state.community_question_index = next_index
+        with st.chat_message(RoleType.ASSISTANT.value):
+            st.info(f"Processing question {next_index + 1} of {len(community_questions)}...")
+        time.sleep(1)  # Brief pause between questions
+        set_question(community_questions[next_index], False)
+        st.rerun()
+    else:
+        # All questions processed
+        with st.chat_message(RoleType.ASSISTANT.value):
+            st.success(f"✅ Completed processing all {len(community_questions)} community questions!")
+        st.session_state.processing_community_questions = False
+        st.session_state.community_question_index = 0
+
 ######### Handle new chat input #########
