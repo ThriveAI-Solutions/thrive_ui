@@ -14,6 +14,7 @@ class MessageType(Enum):
     FOLLOWUP = "followup"
     ERROR = "error"
     TEXT = "text"
+    THINKING = "thinking"
 
 
 class RoleType(Enum):
