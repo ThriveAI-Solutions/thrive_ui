@@ -20,3 +20,9 @@ class MessageType(Enum):
 class RoleType(Enum):
     ASSISTANT = "assistant"
     USER = "user"
+
+
+class ThemeType(Enum):
+    THRIVEAI = "ThriveAI"
+    WELLTELLAI = "WellTellAI"
+    HEALTHELINK = "HEALTHeLINK"

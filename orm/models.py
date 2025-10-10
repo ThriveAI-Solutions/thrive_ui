@@ -10,7 +10,7 @@ from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
-from utils.enums import MessageType, RoleType
+from utils.enums import MessageType, RoleType, ThemeType
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ class User(Base):
     show_elapsed_time = Column(Boolean, default=True)
     llm_fallback = Column(Boolean, default=False)
     min_message_id = Column(Integer, default=0)
+    theme = Column(String(50), default=ThemeType.HEALTHELINK.value)
 
     role = relationship("UserRole", back_populates="users")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
@@ -107,6 +108,7 @@ class User(Base):
             "show_elapsed_time": self.show_elapsed_time,
             "llm_fallback": self.llm_fallback,
             "min_message_id": self.min_message_id,
+            "theme": self.theme,
         }
 
 
