@@ -47,107 +47,105 @@ def import_users():
     """
     try:
         import os
-        
+
         # Use robust path resolution
         possible_paths = [
             "./utils/config/user_list.xlsx",
             "utils/config/user_list.xlsx",
             os.path.join(os.path.dirname(__file__), "..", "utils", "config", "user_list.xlsx"),
         ]
-        
+
         file_path = None
         for path in possible_paths:
             abs_path = os.path.abspath(path)
             if os.path.exists(abs_path):
                 file_path = abs_path
                 break
-        
+
         if not file_path:
             st.error("Excel file not found. Please ensure 'utils/config/user_list.xlsx' exists.")
             return False
-        
+
         # Read the Excel file (with CSV fallback)
         try:
             df = get_user_list_excel(file_path)
         except:
             # Try CSV fallback
-            csv_path = file_path.replace('.xlsx', '.csv')
+            csv_path = file_path.replace(".xlsx", ".csv")
             if os.path.exists(csv_path):
                 st.info("Using CSV fallback file")
                 df = pd.read_csv(csv_path)
             else:
                 st.error("Excel file requires openpyxl library. Please install openpyxl or provide a CSV file.")
                 return False
-        
+
         if df is False or df is None:
             st.error(f"Failed to read user list Excel file. Please check the file format and dependencies.")
             return False
-        
+
         if df.empty:
             st.warning("Excel file contains no data")
             return False
-        
+
         # Track import results
         success_count = 0
         failed_count = 0
         failed_users = []
-        
+
         with SessionLocal() as session:
             # Get all existing roles for mapping
             roles = session.query(UserRole).all()
             role_map = {role.role_name.lower(): role.id for role in roles}
-            
+
             # Also check for common variations
-            role_map.update({
-                'administrator': role_map.get('admin', None),
-                'physician': role_map.get('doctor', None),
-            })
-            
+            role_map.update(
+                {
+                    "administrator": role_map.get("admin", None),
+                    "physician": role_map.get("doctor", None),
+                }
+            )
+
             # Process each row in the DataFrame
             for index, row in df.iterrows():
                 try:
                     # Extract user data with default values if columns are missing
-                    username = str(row.get('UserID', '')).strip()
-                    password = str(row.get('start_password', '')).strip()
-                    first_name = str(row.get('First Name ', '')).strip()  # Note the space after 'Name'
-                    last_name = str(row.get('Last Name ', '')).strip()    # Note the space after 'Name'
-                    role_name = 'Doctor'  # Default role since not in Excel
-                    
+                    username = str(row.get("UserID", "")).strip()
+                    password = str(row.get("start_password", "")).strip()
+                    first_name = str(row.get("First Name ", "")).strip()  # Note the space after 'Name'
+                    last_name = str(row.get("Last Name ", "")).strip()  # Note the space after 'Name'
+                    role_name = "Doctor"  # Default role since not in Excel
+
                     # Skip rows with missing required data
                     if not username or not password:
                         failed_count += 1
                         failed_users.append(f"Row {index + 2}: Missing username or password")
                         continue
-                    
+
                     # Check if user already exists
-                    existing_user = session.query(User).filter(
-                        func.lower(User.username) == username.lower()
-                    ).first()
-                    
+                    existing_user = session.query(User).filter(func.lower(User.username) == username.lower()).first()
+
                     if existing_user:
                         failed_count += 1
                         failed_users.append(f"{username}: Already exists")
                         continue
-                    
+
                     # Map role name to role ID
                     role_id = role_map.get(role_name.lower())
                     if not role_id:
                         # Default to Patient role if role not found
-                        default_role = session.query(UserRole).filter(
-                            UserRole.role_name == "Patient"
-                        ).first()
+                        default_role = session.query(UserRole).filter(UserRole.role_name == "Patient").first()
                         role_id = default_role.id if default_role else 1
                         logger.warning(f"Role '{role_name}' not found for user {username}, defaulting to Patient")
-                    
+
                     # Hash the password using SHA-256 (matching existing pattern)
                     hashed_password = hashlib.sha256(password.encode()).hexdigest()
-                    
+
                     # Create new user
                     new_user = User(
                         username=username,
                         password=hashed_password,
                         first_name=first_name if first_name else username,
-                        last_name=last_name if last_name else '',
+                        last_name=last_name if last_name else "",
                         user_role_id=role_id,
                         show_sql=True,
                         show_table=True,
@@ -161,33 +159,33 @@ def import_users():
                         show_followup=False,
                         show_elapsed_time=True,
                         llm_fallback=False,
-                        min_message_id=0
+                        min_message_id=0,
                     )
-                    
+
                     session.add(new_user)
                     success_count += 1
-                    
+
                 except Exception as e:
                     failed_count += 1
                     failed_users.append(f"{row.get('username', f'Row {index + 2}')}: {str(e)}")
                     logger.error(f"Error importing user at row {index + 2}: {e}")
-            
+
             # Commit all successful imports
             session.commit()
-        
+
         # Display results
         if success_count > 0:
             st.success(f"✅ Successfully imported {success_count} user(s)")
-        
+
         if failed_count > 0:
             st.warning(f"⚠️ Failed to import {failed_count} user(s)")
             if failed_users:
                 with st.expander("Failed imports details"):
                     for failure in failed_users:
                         st.text(f"• {failure}")
-        
+
         return success_count > 0
-        
+
     except Exception as e:
         st.error(f"Error during user import: {e}")
         logger.error(f"Error during user import: {e}")
@@ -387,7 +385,7 @@ with tab2:
         with cols[7]:
             if st.button("Export CSV"):
                 export_training_data_to_csv()
-        
+
         # (Moved Bulk User Import to Manage Users tab)
 
         # Add CSV import functionality
@@ -455,13 +453,19 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 cu_password = st.text_input("Temporary Password", type="password")
                 cu_first = st.text_input("First Name")
                 cu_last = st.text_input("Last Name")
-                cu_role_name = st.selectbox("Role", options=role_names, index=role_names.index("Patient") if "Patient" in role_names else 0)
+                cu_role_name = st.selectbox(
+                    "Role", options=role_names, index=role_names.index("Patient") if "Patient" in role_names else 0
+                )
+                theme_options = [t.value for t in ThemeType]
+                cu_theme = st.selectbox("Theme", options=theme_options, index=0)
                 submitted = st.form_submit_button("Create User", type="primary")
                 if submitted:
                     if not cu_username or not cu_password or not cu_first:
                         st.error("Please provide username, password, and first name.")
                     else:
-                        ok = create_user(cu_username, cu_password, cu_first, cu_last, role_id_by_name.get(cu_role_name))
+                        ok = create_user(
+                            cu_username, cu_password, cu_first, cu_last, role_id_by_name.get(cu_role_name), cu_theme
+                        )
                         if ok:
                             st.success("User created.")
                             st.rerun()
@@ -481,10 +485,16 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
             search = st.text_input("Search users", placeholder="Filter by username or name…")
             if search:
                 s = search.lower()
-                users = [u for u in users if s in u["username"].lower() or s in f"{u['first_name']} {u['last_name']}`".lower()]
+                users = [
+                    u
+                    for u in users
+                    if s in u["username"].lower() or s in f"{u['first_name']} {u['last_name']}`".lower()
+                ]
 
             if users:
-                user_options = {f"{u['username']} ({u['first_name']} {u['last_name']}) - {u['role_name']}": u for u in users}
+                user_options = {
+                    f"{u['username']} ({u['first_name']} {u['last_name']}) - {u['role_name']}": u for u in users
+                }
                 selected_label = st.selectbox("Select a user", options=list(user_options.keys()))
                 selected = user_options[selected_label]
 
@@ -499,6 +509,7 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 daily = get_user_daily_stats(selected["id"], days=days)
                 if daily:
                     import plotly.express as px
+
                     chart_df = pd.DataFrame(daily)
                     chart_df["date"] = pd.to_datetime(chart_df["date"])
                     melted = chart_df.melt(
@@ -521,7 +532,9 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                     if "q_page_num" not in st.session_state:
                         st.session_state["q_page_num"] = 1
                     if "q_page_bump" in st.session_state:
-                        st.session_state["q_page_num"] = max(1, int(st.session_state.get("q_page_num", 1)) + int(st.session_state["q_page_bump"]))
+                        st.session_state["q_page_num"] = max(
+                            1, int(st.session_state.get("q_page_num", 1)) + int(st.session_state["q_page_bump"])
+                        )
                         del st.session_state["q_page_bump"]
 
                     colq1, colq2, colq3 = st.columns([1, 1, 6])
@@ -537,18 +550,34 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
 
                     if items:
                         qdf = pd.DataFrame(items)
-                        qdf.rename(columns={"question": "Question", "created_at": "Asked At", "status": "Status", "elapsed_seconds": "Elapsed (s)"}, inplace=True)
+                        qdf.rename(
+                            columns={
+                                "question": "Question",
+                                "created_at": "Asked At",
+                                "status": "Status",
+                                "elapsed_seconds": "Elapsed (s)",
+                            },
+                            inplace=True,
+                        )
                         st.dataframe(qdf, use_container_width=True, hide_index=True)
 
                         # Pagination controls
                         total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
                         cprev, cinfo, cnext = st.columns([1, 3, 1])
                         with cprev:
-                            st.button("Prev", disabled=int(page) <= 1, on_click=lambda: st.session_state.update({"q_page_bump": -1}))
+                            st.button(
+                                "Prev",
+                                disabled=int(page) <= 1,
+                                on_click=lambda: st.session_state.update({"q_page_bump": -1}),
+                            )
                         with cinfo:
                             st.caption(f"Page {int(page)} of {total_pages} • {total} total")
                         with cnext:
-                            st.button("Next", disabled=int(page) >= total_pages, on_click=lambda: st.session_state.update({"q_page_bump": 1}))
+                            st.button(
+                                "Next",
+                                disabled=int(page) >= total_pages,
+                                on_click=lambda: st.session_state.update({"q_page_bump": 1}),
+                            )
 
                         # Download all recent questions as CSV including status/elapsed when available
                         all_rows = []
@@ -565,7 +594,15 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                             page_iter += 1
                         if all_rows:
                             all_df = pd.DataFrame(all_rows)
-                            all_df.rename(columns={"question": "Question", "created_at": "Asked At", "status": "Status", "elapsed_seconds": "Elapsed (s)"}, inplace=True)
+                            all_df.rename(
+                                columns={
+                                    "question": "Question",
+                                    "created_at": "Asked At",
+                                    "status": "Status",
+                                    "elapsed_seconds": "Elapsed (s)",
+                                },
+                                inplace=True,
+                            )
                             csv_bytes = all_df.to_csv(index=False).encode("utf-8")
                             st.download_button(
                                 label="Download all questions (.csv)",
@@ -579,17 +616,32 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 c1, c2 = st.columns([2, 1])
                 with c1:
                     st.markdown("**Profile**")
-                    nu_username = st.text_input("Username", value=selected["username"]) 
-                    nu_first = st.text_input("First Name", value=selected["first_name"]) 
-                    nu_last = st.text_input("Last Name", value=selected["last_name"]) 
-                    nu_role_name = st.selectbox("Role", options=role_names, index=role_names.index(selected["role_name"]) if selected["role_name"] in role_names else 0)
+                    nu_username = st.text_input("Username", value=selected["username"])
+                    nu_first = st.text_input("First Name", value=selected["first_name"])
+                    nu_last = st.text_input("Last Name", value=selected["last_name"])
+                    nu_role_name = st.selectbox(
+                        "Role",
+                        options=role_names,
+                        index=role_names.index(selected["role_name"]) if selected["role_name"] in role_names else 0,
+                    )
                     theme_options = [t.value for t in ThemeType]
                     current_theme = selected.get("theme", ThemeType.HEALTHELINK.value)
-                    nu_theme = st.selectbox("Theme", options=theme_options, index=theme_options.index(current_theme) if current_theme in theme_options else 0)
+                    nu_theme = st.selectbox(
+                        "Theme",
+                        options=theme_options,
+                        index=theme_options.index(current_theme) if current_theme in theme_options else 0,
+                    )
                     cols = st.columns(2)
                     with cols[0]:
                         if st.button("Save Profile", key="save_profile", type="primary"):
-                            ok = update_user(selected["id"], nu_username, nu_first, nu_last, role_id_by_name.get(nu_role_name), nu_theme)
+                            ok = update_user(
+                                selected["id"],
+                                nu_username,
+                                nu_first,
+                                nu_last,
+                                role_id_by_name.get(nu_role_name),
+                                nu_theme,
+                            )
                             if ok:
                                 st.success("Profile updated.")
                                 st.rerun()
@@ -608,14 +660,16 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
 
                 with c2:
                     st.markdown("**Stats**")
-                    s = stats_map.get(selected["id"], {"questions": 0, "charts": 0, "errors": 0, "dataframes": 0, "summaries": 0})
+                    s = stats_map.get(
+                        selected["id"], {"questions": 0, "charts": 0, "errors": 0, "dataframes": 0, "summaries": 0}
+                    )
                     m1, m2, m3 = st.columns(3)
-                    m1.metric("Questions", s["questions"]) 
-                    m2.metric("Charts", s["charts"]) 
-                    m3.metric("Errors", s["errors"]) 
+                    m1.metric("Questions", s["questions"])
+                    m2.metric("Charts", s["charts"])
+                    m3.metric("Errors", s["errors"])
                     m4, m5 = st.columns(2)
-                    m4.metric("DataFrames", s["dataframes"]) 
-                    m5.metric("Summaries", s["summaries"]) 
+                    m4.metric("DataFrames", s["dataframes"])
+                    m5.metric("Summaries", s["summaries"])
 
                 st.divider()
                 st.markdown("**Preferences**")

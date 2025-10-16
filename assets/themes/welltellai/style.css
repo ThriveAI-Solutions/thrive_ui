@@ -1,0 +1,22 @@
+/* WellTellAI Theme */
+
+/* Main background */
+[data-testid="stAppViewContainer"] {
+    background-color: #F8F9FA;
+}
+
+/* Sidebar background */
+[data-testid="stSidebar"] {
+    background-color: #E9ECEF;
+}
+
+/* Text color */
+body, p, h1, h2, h3, h4, h5, h6 {
+    color: #212529;
+}
+
+/* Primary color for buttons and other elements */
+button {
+    background-color: #007BFF;
+    color: white;
+}

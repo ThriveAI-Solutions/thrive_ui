@@ -1,0 +1,22 @@
+/* HEALTHeLINK Theme */
+
+/* Main background */
+[data-testid="stAppViewContainer"] {
+    background-color: #FFF;
+}
+
+/* Sidebar background */
+[data-testid="stSidebar"] {
+    background-color: #dee2e6;
+}
+
+/* Text color */
+body, p, h1, h2, h3, h4, h5, h6 {
+    color: #000;
+}
+
+/* Primary color for buttons and other elements */
+button {
+    background-color: #0b5258;
+    color: white;
+}
