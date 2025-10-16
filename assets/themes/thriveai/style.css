@@ -1,0 +1,27 @@
+/* ThriveAI Theme */
+
+/* Main background */
+[data-testid="stAppViewContainer"] {
+    background-color: #FFFFFF;
+}
+
+/* Sidebar background */
+[data-testid="stSidebar"] {
+    background-color: #F4F0F7;
+}
+
+/* Text color */
+body, p, h1, h2, h3, h4, h5, h6 {
+    color: #333333;
+}
+
+/* Primary color for buttons and other elements */
+button {
+    background-color: #6A0DAD;
+    color: white;
+}
+
+/* Accent color for links */
+a {
+    color: #00A86B;
+}
