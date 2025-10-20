@@ -64,7 +64,7 @@ def call_llm(my_question: str):
         my_question,
     )
     add_message(
-        Message(role=RoleType.ASSISTANT, content=response, type=MessageType.ERROR, group_id=get_current_group_id())
+        Message(role=RoleType.ASSISTANT, content=response, type=MessageType.TEXT, group_id=get_current_group_id())
     )
 
 
@@ -547,6 +547,8 @@ def _render_plotly_chart(message: Message, index: int):
 
 
 def _render_error(message: Message, index: int):
+    if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
+        st.write(f"Elapsed Time: {message.elapsed_time}")
     st.error(message.content)
 
 
@@ -806,7 +808,6 @@ def normal_message_flow(my_question: str):
                 group_id=get_current_group_id(),
             )
         )
-        call_llm(my_question)
         st.stop()
     if guardrail_score >= 3:
         logger.warning(
@@ -933,10 +934,6 @@ def normal_message_flow(my_question: str):
                     group_id=get_current_group_id(),
                 )
             )
-            # TODO: not sure if calling the LLM here is the correct spot or not, it seems to be necessary
-            if st.session_state.get("llm_fallback", True):
-                logger.debug("fallback to LLM")
-                call_llm(my_question)
             st.stop()
 
         # Query limiting is now handled inside the run_sql method via LIMIT clause
@@ -1002,16 +999,20 @@ def normal_message_flow(my_question: str):
         if st.session_state.get("show_chart", True):
             get_chart(my_question, sql, df)
 
-        # Successful data path: clear any error flags so the persistent panel won't show
+        # Successful data path: clear error flags ONLY if we have a real DataFrame result
         try:
-            st.session_state["pending_sql_error"] = False
-            st.session_state["last_run_sql_error"] = None
-            st.session_state["last_failed_sql"] = None
+            if isinstance(st.session_state.get("df"), pd.DataFrame):
+                st.session_state["pending_sql_error"] = False
+                st.session_state["last_run_sql_error"] = None
+                st.session_state["last_failed_sql"] = None
         except Exception:
             pass
 
         # Only generate summary if SQL ran and produced a DataFrame
-        if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
+        _df_for_summary = st.session_state.get("df")
+        if isinstance(_df_for_summary, pd.DataFrame) and (
+            st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True)
+        ):
             # Provide SQL signature for stable summary cache keys and reset streamed summary state
             try:
                 st.session_state["current_sql_for_summary"] = sql
@@ -1027,25 +1028,53 @@ def normal_message_flow(my_question: str):
             try:
                 # Stream summary content only (no thinking)
                 with st.chat_message(RoleType.ASSISTANT.value):
-                    summary_placeholder = st.empty()
+                    # Use a visible status/spinner while generating the summary
+                    try:
+                        status_cm = st.status("Generating summary...", expanded=False)
+                    except Exception:
+                        status_cm = None
 
-                    # Use event stream to get content only (think=False)
-                    event_stream = get_summary_event_stream(my_question, df, think=False)
-                    content_chunks = []
+                    if status_cm is not None:
+                        with status_cm:
+                            event_stream = get_summary_event_stream(my_question, _df_for_summary, think=False)
+                            # Prefer Streamlit write_stream when available for typewriter effect
+                            if hasattr(st, "write_stream"):
+                                def _content_only():
+                                    for kind, text in event_stream:
+                                        if kind == "content":
+                                            yield text
+                                st.write_stream(_content_only())
+                            else:
+                                # Fallback to manual placeholder loop when write_stream is unavailable (tests)
+                                summary_placeholder = st.empty()
+                                content_chunks = []
+                                for kind, text in event_stream:
+                                    if kind == "content":
+                                        content_chunks.append(text)
+                                        summary_placeholder.markdown("".join(content_chunks))
+                                summary_placeholder.empty()
+                    else:
+                        # No status context available; fallback to manual rendering
+                        event_stream = get_summary_event_stream(my_question, _df_for_summary, think=False)
+                        if hasattr(st, "write_stream"):
+                            def _content_only2():
+                                for kind, text in event_stream:
+                                    if kind == "content":
+                                        yield text
+                            st.write_stream(_content_only2())
+                        else:
+                            summary_placeholder = st.empty()
+                            content_chunks = []
+                            for kind, text in event_stream:
+                                if kind == "content":
+                                    content_chunks.append(text)
+                                    summary_placeholder.markdown("".join(content_chunks))
+                            summary_placeholder.empty()
 
-                    for kind, text in event_stream:
-                        if kind == "content":
-                            content_chunks.append(text)
-                            # Show the summary streaming in real-time
-                            summary_placeholder.markdown("".join(content_chunks))
-
-                    # Get the final summary from session state
+                    # Get the final summary from session state after streaming completes
                     if hasattr(st.session_state, "streamed_summary"):
                         summary = st.session_state.streamed_summary
                         elapsed_time = st.session_state.get("streamed_summary_elapsed_time", 0)
-
-                    # Clear the placeholder - we'll add the summary as a proper message
-                    summary_placeholder.empty()
 
             except Exception as e:
                 logger.warning(f"Failed to stream summary: {e}")

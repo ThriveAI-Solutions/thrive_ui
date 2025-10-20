@@ -15,6 +15,7 @@ from sqlparse.tokens import DML, Keyword
 from vanna.anthropic import Anthropic_Chat
 from vanna.google import GoogleGeminiChat
 from vanna.ollama import Ollama  # imported to satisfy tests that patch utils.vanna_calls.Ollama
+from vanna.openai import OpenAI_Chat
 from vanna.remote import VannaDefault
 from vanna.vannadb import VannaDB_VectorStore
 
@@ -404,6 +405,110 @@ class MyVannaOllamaMilvus(ThriveAI_Milvus, ThriveAI_Ollama):
         return message_log
 
 
+class MyVannaOpenAIMilvus(ThriveAI_Milvus, OpenAI_Chat):
+    def __init__(self, user_role: int, config=None):
+        try:
+            logger.info("Using OpenAI and Milvus Lite")
+            # Initialize Milvus-backed store first
+            ThriveAI_Milvus.__init__(self, user_role=user_role, config=config)
+
+            OpenAI_Chat.__init__(
+                self,
+                config={
+                    "model": st.secrets["ai_keys"]["openai_model"],
+                    "api_key": st.secrets["ai_keys"]["openai_api"],
+                    "schema": st.secrets["postgres"].get("schema_name", "public"),
+                    "dialect": st.secrets["postgres"].get("dialect", "postgresql"),
+                    "temperature": 1,  # if using gpt-5-nano, only use 1. 0.7 is set in Vanna
+                },
+            )
+            # Provide sane defaults used by prompt helpers if base class didn't set them
+            if not hasattr(self, "max_tokens"):
+                self.max_tokens = 2048
+            if not hasattr(self, "static_documentation"):
+                self.static_documentation = ""
+            if not hasattr(self, "language"):
+                self.language = None
+        except Exception as e:
+            logger.exception("Error Configuring MyVannaOllamaMilvus: %s", e)
+            raise
+
+    def log(self, message: str, title: str = "Info"):
+        logger.debug("%s: %s", title, message)
+
+    # override the default get_sql_prompt to add clearer instructions to the LLM regarding question/sql pairs
+    def get_sql_prompt(
+        self,
+        initial_prompt: str,
+        question: str,
+        question_sql_list: list,
+        ddl_list: list,
+        doc_list: list,
+        **kwargs,
+    ):
+        """
+        Example:
+        ```python
+        vn.get_sql_prompt(
+            question="What are the top 10 customers by sales?",
+            question_sql_list=[{"question": "What are the top 10 customers by sales?", "sql": "SELECT * FROM customers ORDER BY sales DESC LIMIT 10"}],
+            ddl_list=["CREATE TABLE customers (id INT, name TEXT, sales DECIMAL)"],
+            doc_list=["The customers table contains information about customers and their sales."],
+        )
+
+        ```
+
+        This method is used to generate a prompt for the LLM to generate SQL.
+
+        Args:
+            question (str): The question to generate SQL for.
+            question_sql_list (list): A list of questions and their corresponding SQL statements.
+            ddl_list (list): A list of DDL statements.
+            doc_list (list): A list of documentation.
+
+        Returns:
+            any: The prompt for the LLM to generate SQL.
+        """
+
+        if initial_prompt is None:
+            initial_prompt = (
+                f"You are a {self.dialect} expert. "
+                + "Please help to generate a SQL query to answer the question. Your response should ONLY be based on the given context and follow the response guidelines and format instructions. "
+            )
+
+        initial_prompt = self.add_ddl_to_prompt(initial_prompt, ddl_list, max_tokens=getattr(self, "max_tokens", 2048))
+
+        if getattr(self, "static_documentation", ""):
+            doc_list.append(self.static_documentation)
+
+        initial_prompt = self.add_documentation_to_prompt(
+            initial_prompt, doc_list, max_tokens=getattr(self, "max_tokens", 2048)
+        )
+
+        initial_prompt += (
+            "===Response Guidelines \n"
+            "1. If the provided context is sufficient, please generate a valid SQL query without any explanations for the question. \n"
+            "2. If the provided context is almost sufficient but requires knowledge of a specific string in a particular column, please generate an intermediate SQL query to find the distinct strings in that column. Prepend the query with a comment saying intermediate_sql \n"
+            "3. If the provided context is insufficient, please explain why it can't be generated. \n"
+            "4. Please use the most relevant table(s). \n"
+            "5. If the question has been asked and answered before, please repeat the answer exactly as it was given before. \n"
+            f"6. Ensure that the output SQL is {self.dialect}-compliant and executable, and free of syntax errors. \n"
+        )
+
+        initial_prompt += "===Similar Question and SQL Examples \n"
+
+        message_log = [self.system_message(initial_prompt)]
+
+        for example in question_sql_list:
+            if example is not None and "question" in example and "sql" in example:
+                message_log.append(self.user_message(example["question"]))
+                message_log.append(self.assistant_message(example["sql"]))
+
+        message_log.append(self.user_message(question))
+
+        return message_log
+
+
 def read_forbidden_from_json():
     try:
         # Path to the forbidden_references.json file
@@ -506,7 +611,9 @@ class VannaService:
 
             if milvus_config is not None:
                 # Prefer Ollama+Milvus when ollama configured; otherwise Gemini+Milvus
-                if "ollama_model" in self.config["ai_keys"]:
+                if "openai_model" in self.config["ai_keys"]:
+                    self.vn = MyVannaOpenAIMilvus(user_role=self.user_context.user_role, config=milvus_config)
+                elif "ollama_model" in self.config["ai_keys"]:
                     self.vn = MyVannaOllamaMilvus(user_role=self.user_context.user_role, config=milvus_config)
                 elif "gemini_model" in self.config["ai_keys"] and "gemini_api" in self.config["ai_keys"]:
                     self.vn = MyVannaGeminiMilvus(user_role=self.user_context.user_role, config=milvus_config)
@@ -589,6 +696,9 @@ class VannaService:
         elif vn_class_name == "VannaDefault":
             model = self.config.get("ai_keys", {}).get("vanna_model", "Vanna Cloud")
             return f"Vanna Cloud (GPT)"
+        elif "OpenAI" in vn_class_name:
+            model = self.config.get("ai_keys", {}).get("openai_model", None)
+            return f"OpenAI {model}"
         else:
             return vn_class_name
 
@@ -988,9 +1098,7 @@ class VannaService:
                     # Fallback: For non-Ollama backends (like Gemini), use non-streaming summary
                     # and yield the complete result as a single chunk for compatibility
                     try:
-                        summary_result = underlying.generate_summary(
-                            question=question, df=df
-                        )
+                        summary_result = underlying.generate_summary(question=question, df=df)
                         if summary_result:
                             acc_content.append(summary_result)
                             yield summary_result
@@ -1045,11 +1153,41 @@ class VannaService:
         client = getattr(underlying, "ollama_client", None)
         if client is None:
 
-            def _noop():
-                if False:
-                    yield ("content", "")
+            def _fallback():
+                try:
+                    start = time.perf_counter()
+                    result = underlying.generate_summary(question=question, df=df)
+                    if isinstance(result, tuple) and len(result) == 2:
+                        summary_text, elapsed = result
+                    else:
+                        summary_text = result
+                        elapsed = time.perf_counter() - start
+                except Exception as e:
+                    logger.warning("Failed to generate non-streaming summary: %s", e)
+                    summary_text = ""
+                    elapsed = 0
+                # Persist final content to session_state for downstream helpers/cache
+                try:
+                    st.session_state["streamed_summary"] = summary_text or ""
+                except Exception:
+                    try:
+                        setattr(st.session_state, "streamed_summary", summary_text or "")
+                    except Exception:
+                        pass
+                try:
+                    st.session_state["streamed_summary_elapsed_time"] = elapsed or 0
+                except Exception:
+                    try:
+                        setattr(st.session_state, "streamed_summary_elapsed_time", elapsed or 0)
+                    except Exception:
+                        pass
+                if isinstance(summary_text, str) and summary_text.strip() != "":
+                    yield ("content", summary_text)
+                else:
+                    if False:
+                        yield ("content", "")
 
-            return _noop()
+            return _fallback()
 
         start = time.perf_counter()
         acc_content: list[str] = []
