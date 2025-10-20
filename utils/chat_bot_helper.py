@@ -168,7 +168,13 @@ def get_summary_stream_generator(question: str, df: pd.DataFrame):
                             elapsed = getattr(st.session_state, "streamed_summary_elapsed_time", 0)
                         key = create_summary_cache_key(question, df)
                         manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
-                        manual_cache[key] = (summary_text or "", elapsed or 0)
+                        # Only cache non-empty summaries; avoid poisoning cache with blanks
+                        if isinstance(summary_text, str) and summary_text.strip() != "":
+                            manual_cache[key] = (summary_text, elapsed or 0)
+                        else:
+                            # Ensure we do not persist an empty/failed entry
+                            if key in manual_cache:
+                                del manual_cache[key]
                         try:
                             st.session_state["manual_summary_cache"] = manual_cache
                         except Exception:
@@ -194,7 +200,11 @@ def get_summary_stream_generator(question: str, df: pd.DataFrame):
             # Store in manual cache for reuse
             cache_key_inner = create_summary_cache_key(question, df)
             manual_cache_inner = getattr(st.session_state, "manual_summary_cache", None) or {}
-            manual_cache_inner[cache_key_inner] = (summary or "", _elapsed or 0)
+            if isinstance(summary, str) and summary.strip() != "":
+                manual_cache_inner[cache_key_inner] = (summary, _elapsed or 0)
+            else:
+                if cache_key_inner in manual_cache_inner:
+                    del manual_cache_inner[cache_key_inner]
             try:
                 st.session_state["manual_summary_cache"] = manual_cache_inner
             except Exception:
@@ -256,7 +266,11 @@ def get_summary_event_stream(question: str, df: pd.DataFrame, think: bool = Fals
                         elapsed = getattr(st.session_state, "streamed_summary_elapsed_time", 0)
                     key = create_summary_cache_key(question, df)
                     manual_cache = getattr(st.session_state, "manual_summary_cache", None) or {}
-                    manual_cache[key] = (summary_text or "", elapsed or 0)
+                    if isinstance(summary_text, str) and summary_text.strip() != "":
+                        manual_cache[key] = (summary_text, elapsed or 0)
+                    else:
+                        if key in manual_cache:
+                            del manual_cache[key]
                     try:
                         st.session_state["manual_summary_cache"] = manual_cache
                     except Exception:
@@ -401,6 +415,14 @@ def set_question(question: str, render=True):
 
         # Set question
         st.session_state.my_question = question
+        # Clear any lingering error state from prior flows so it doesn't leak
+        try:
+            st.session_state["pending_sql_error"] = False
+            st.session_state["last_run_sql_error"] = None
+            st.session_state["last_failed_sql"] = None
+            st.session_state["show_failed_sql_open"] = False
+        except Exception:
+            pass
         add_message(Message(RoleType.USER, question, MessageType.TEXT, group_id=group_id), render)
 
 
@@ -980,7 +1002,24 @@ def normal_message_flow(my_question: str):
         if st.session_state.get("show_chart", True):
             get_chart(my_question, sql, df)
 
+        # Successful data path: clear any error flags so the persistent panel won't show
+        try:
+            st.session_state["pending_sql_error"] = False
+            st.session_state["last_run_sql_error"] = None
+            st.session_state["last_failed_sql"] = None
+        except Exception:
+            pass
+
+        # Only generate summary if SQL ran and produced a DataFrame
         if st.session_state.get("show_summary", True) or st.session_state.get("speak_summary", True):
+            # Provide SQL signature for stable summary cache keys and reset streamed summary state
+            try:
+                st.session_state["current_sql_for_summary"] = sql
+                st.session_state["streamed_summary"] = None
+                st.session_state["streamed_summary_for_question"] = None
+                st.session_state["streamed_summary_elapsed_time"] = 0
+            except Exception:
+                pass
             # Try streaming summary first
             summary = None
             elapsed_time = 0
@@ -1013,8 +1052,8 @@ def normal_message_flow(my_question: str):
                 # Fall back to non-streaming
                 summary, elapsed_time = get_vn().generate_summary(question=my_question, df=df)
 
-            # Add the summary message
-            if summary is not None:
+            # Add the summary message only if we have non-empty content
+            if summary is not None and str(summary).strip() != "":
                 if st.session_state.get("show_summary", True):
                     add_message(
                         Message(
@@ -1032,20 +1071,9 @@ def normal_message_flow(my_question: str):
                 if st.session_state.get("speak_summary", True):
                     speak(summary)
             else:
-                add_message(
-                    Message(
-                        RoleType.ASSISTANT,
-                        "Could not generate a summary",
-                        MessageType.SUMMARY,
-                        sql,
-                        my_question,
-                        df,
-                        elapsed_time,
-                        group_id=get_current_group_id(),
-                    )
-                )
+                # Do not add a blank/failed summary message per guidance; optionally speak a brief notice
                 if st.session_state.get("speak_summary", True):
-                    speak("Could not generate a summary")
+                    speak("Summary is unavailable for this result")
 
         if st.session_state.get("show_followup", True):
             get_followup_questions(my_question, sql, df)
