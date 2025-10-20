@@ -166,3 +166,49 @@ def test_stream_summary_wrap_persists_cache(monkeypatch):
     key = cbh.create_summary_cache_key("Q2", df)
     cache = getattr(ss.session_state, "manual_summary_cache", {})
     assert key in cache
+
+
+def test_summary_event_stream_non_streaming_fallback(monkeypatch):
+    import types
+
+    import pandas as pd
+
+    from utils import chat_bot_helper as cbh
+    from utils import vanna_calls as vc
+
+    # Prepare a fake DF
+    df = pd.DataFrame({"a": [1, 2]})
+
+    # Build a VannaService with no streaming client but working generate_summary
+    class _UnderlyingNoStream:
+        def system_message(self, c):
+            return {"role": "system", "content": c}
+
+        def user_message(self, c):
+            return {"role": "user", "content": c}
+
+        # No ollama_client present → triggers fallback
+        def generate_summary(self, question, df):
+            return (f"Sum: {question}", 0.1)
+
+    class _Svc:
+        def __init__(self):
+            self.vn = _UnderlyingNoStream()
+
+    # Patch get_vn to return our service
+    service = _Svc()
+    monkeypatch.setattr(cbh, "get_vn", lambda: service)
+
+    # Monkeypatch st in vanna_calls for session_state storage
+    ss = types.SimpleNamespace()
+    ss.session_state = types.SimpleNamespace()
+    monkeypatch.setattr(vc, "st", ss)
+
+    # Invoke the service event stream directly to validate fallback
+    gen = vc.VannaService.summary_event_stream(service, "Q-ns", df, think=False)
+    chunks = list(gen)
+
+    # Should yield exactly one content chunk with the full summary
+    assert chunks == [("content", "Sum: Q-ns")]
+    # And session_state should reflect final summary text
+    assert getattr(ss.session_state, "streamed_summary", "") == "Sum: Q-ns"

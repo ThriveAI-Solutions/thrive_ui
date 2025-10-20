@@ -104,3 +104,83 @@ def test_clears_pending_sql_error_after_success(monkeypatch):
     assert fake_st.session_state.get("last_failed_sql") in (None, "")
 
 
+def test_invalid_sql_does_not_call_llm(monkeypatch):
+    import utils.chat_bot_helper as cbh
+
+    fake_st = _fake_st()
+    fake_st.session_state.update({
+        "show_sql": True,
+        "show_table": False,
+        "show_chart": False,
+        "show_summary": False,
+        "speak_summary": False,
+    })
+
+    called_llm = {"called": False}
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh, "call_llm", lambda *_a, **_k: called_llm.__setitem__("called", True))
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+
+    class _VNInvalid:
+        def is_sql_valid(self, sql: str) -> bool:
+            return False
+        def generate_sql(self, question: str):
+            return ("SELECT oops", 0.01)
+
+    monkeypatch.setattr(cbh, "get_vn", lambda: _VNInvalid())
+
+    cbh.set_question("Q invalid", render=False)
+    try:
+        cbh.normal_message_flow("Q invalid")
+    except Exception:
+        pass
+
+    # Ensure we posted an ERROR message and did not call LLM fallback
+    assert any(getattr(m, "type", None) == "error" for m in fake_st.session_state.get("messages", []))
+    assert called_llm["called"] is False
+
+
+def test_no_summary_added_when_sql_error(monkeypatch):
+    import utils.chat_bot_helper as cbh
+
+    fake_st = _fake_st()
+    # Ensure UI toggles would normally allow summary generation
+    fake_st.session_state.update({
+        "show_sql": True,
+        "show_table": False,
+        "show_chart": False,
+        "show_summary": True,
+        "speak_summary": False,
+    })
+
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+
+    class _FailExecSvc:
+        def is_sql_valid(self, sql: str) -> bool:
+            return True
+
+        def generate_sql(self, question: str):
+            return ("SELECT 1", 0.01)
+
+        def run_sql(self, sql: str):
+            # Simulate execution error: returns non-DataFrame path
+            return ("not-a-df", 0.01)
+
+    vn = _FailExecSvc()
+    monkeypatch.setattr(cbh, "get_vn", lambda: vn)
+
+    # Trigger flow; it should render inline error and st.stop() early, so we simulate no exception
+    cbh.set_question("Q err", render=False)
+    try:
+        cbh.normal_message_flow("Q err")
+    except Exception:
+        # In tests we avoid raising; the fake st.stop() is a no-op
+        pass
+
+    # Verify that an error is pending and no SUMMARY message exists in messages
+    assert fake_st.session_state.get("pending_sql_error", False) is True
+    assert all(getattr(m, "type", None) != "summary" for m in fake_st.session_state.get("messages", []))
+
+
