@@ -196,3 +196,5 @@ MILVUS_DELIVERY_PLAN.md
 MILVUS_TASKS.md
 PROJECT_OUTLINE.md
 milvus_demo.db
+*.sqlite3
+*.sqlite3.*
