@@ -248,7 +248,12 @@ if chat_input:
 my_question = st.session_state.get("my_question", None)
 
 # If we have a pending SQL error from a prior run, render a persistent retry panel
-if not my_question and st.session_state.get("pending_sql_error", False):
+# Gate on an actual stored error message to avoid showing stale panels
+if (
+    not my_question
+    and st.session_state.get("pending_sql_error", False)
+    and st.session_state.get("last_run_sql_error")
+):
     pending_question = st.session_state.get("pending_question")
     error_msg = st.session_state.get("last_run_sql_error")
     failed_sql = st.session_state.get("last_failed_sql")
