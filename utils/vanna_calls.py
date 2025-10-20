@@ -985,11 +985,19 @@ class VannaService:
                         except Exception:
                             continue
                 else:
-                    # Fallback: stream generic chunks
-                    for chunk in getattr(underlying, "stream_submit_prompt")(prompt):
-                        if chunk:
-                            acc_content.append(chunk)
-                            yield chunk
+                    # Fallback: For non-Ollama backends (like Gemini), use non-streaming summary
+                    # and yield the complete result as a single chunk for compatibility
+                    try:
+                        summary_result = underlying.generate_summary(
+                            question=question, df=df
+                        )
+                        if summary_result:
+                            acc_content.append(summary_result)
+                            yield summary_result
+                    except Exception as e:
+                        logger.warning(f"Failed to generate summary for streaming fallback: {e}")
+                        # Return empty string to avoid breaking the UI
+                        yield ""
             finally:
                 full_text = "".join(acc_content)
                 elapsed = time.perf_counter() - start_time
