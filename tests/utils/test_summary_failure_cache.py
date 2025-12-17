@@ -45,6 +45,7 @@ def _fake_st():
     st.code = lambda *a, **k: None
     st.error = lambda *a, **k: None
     st.caption = lambda *a, **k: None
+    st.info = lambda *a, **k: None
     st.stop = lambda: None
     st.expander = lambda *_a, **_k: nullcontext()
     st.dataframe = lambda *a, **k: None
@@ -78,6 +79,9 @@ class _VNServiceSummarySometimesEmpty:
             self.empty_first = False
             return ("", 0.01)
         return ("non-empty summary", 0.02)
+
+    def generate_followup_questions(self, question: str, sql: str, df):
+        return ["Follow-up 1", "Follow-up 2"]
 
 
 def test_failed_summary_does_not_cache(monkeypatch):
