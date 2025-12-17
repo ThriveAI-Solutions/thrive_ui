@@ -29,7 +29,13 @@ def _fake_st():
 
     # UI no-ops
     st.chat_message = lambda *_args, **_kwargs: nullcontext()
-    st.empty = lambda: types.SimpleNamespace()
+    # Create a placeholder-like object with markdown and empty methods
+    class _Placeholder:
+        def markdown(self, *args, **kwargs):
+            pass
+        def empty(self):
+            pass
+    st.empty = lambda: _Placeholder()
     class _Ctx:
         def __enter__(self):
             return self
@@ -44,6 +50,8 @@ def _fake_st():
     st.caption = lambda *a, **k: None
     st.toast = lambda *a, **k: None
     st.stop = lambda: None
+    st.rerun = lambda: None
+    st.info = lambda *a, **k: None
     st.expander = lambda *_a, **_k: nullcontext()
     st.dataframe = lambda *a, **k: None
     st.plotly_chart = lambda *a, **k: None
@@ -67,12 +75,24 @@ class _DummyUnderlying:
 
 
 class _DummyVNService:
-    def __init__(self, has_thinking: bool):
+    def __init__(self, has_thinking: bool, fake_st=None):
         self.vn = _DummyUnderlying(has_thinking)
+        self._has_thinking = has_thinking
+        self._fake_st = fake_st
 
     # Decision helpers
     def is_sql_valid(self, sql: str) -> bool:
         return True
+
+    # Thinking model streaming support
+    def stream_generate_sql(self, question: str):
+        """Stream SQL generation with thinking output."""
+        if self._fake_st:
+            self._fake_st.session_state["streamed_sql"] = "SELECT 1 AS total_patients"
+            self._fake_st.session_state["streamed_sql_elapsed_time"] = 0.01
+            self._fake_st.session_state["streamed_thinking"] = "Analyzing the question..."
+        yield "Analyzing..."
+        yield " Done."
 
     # Main pipeline
     def generate_sql(self, question: str):
@@ -112,8 +132,8 @@ def test_message_ordering_thinking_and_summary(monkeypatch, has_thinking):
     # Patch Message.save to bypass DB
     monkeypatch.setattr(cbh.Message, "save", _fake_save, raising=True)
 
-    # Provide a deterministic Vanna service
-    monkeypatch.setattr(cbh, "get_vn", lambda: _DummyVNService(has_thinking))
+    # Provide a deterministic Vanna service (pass fake_st for thinking model support)
+    monkeypatch.setattr(cbh, "get_vn", lambda: _DummyVNService(has_thinking, fake_st))
     # Provide a simple thought stream for thinking backends
     monkeypatch.setattr(cbh, "get_llm_sql_thought_stream", _fake_thought_stream)
 
@@ -158,14 +178,14 @@ def test_two_questions_ordering(monkeypatch, first_thinking, second_thinking):
     monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", _fake_save, raising=True)
 
-    # First question
-    monkeypatch.setattr(cbh, "get_vn", lambda: _DummyVNService(first_thinking))
+    # First question (pass fake_st for thinking model support)
+    monkeypatch.setattr(cbh, "get_vn", lambda: _DummyVNService(first_thinking, fake_st))
     monkeypatch.setattr(cbh, "get_llm_sql_thought_stream", _fake_thought_stream)
     cbh.set_question("Q1: wny_health rows?", render=False)
     cbh.normal_message_flow("Q1: wny_health rows?")
 
-    # Second question
-    monkeypatch.setattr(cbh, "get_vn", lambda: _DummyVNService(second_thinking))
+    # Second question (pass fake_st for thinking model support)
+    monkeypatch.setattr(cbh, "get_vn", lambda: _DummyVNService(second_thinking, fake_st))
     cbh.set_question("Q2: wny_health rows again?", render=False)
     cbh.normal_message_flow("Q2: wny_health rows again?")
 
