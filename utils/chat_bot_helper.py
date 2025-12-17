@@ -573,7 +573,10 @@ def _render_plotly_chart(message: Message, index: int):
 def _render_error(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
-    st.error(message.content)
+    # Use warning with collapsible details for less intrusive error display
+    st.warning("An error occurred while processing your request.")
+    with st.expander("View error details", expanded=False):
+        st.code(message.content, language="text")
 
 
 def _render_dataframe(message: Message, index: int):
