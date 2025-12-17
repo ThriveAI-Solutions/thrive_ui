@@ -346,7 +346,9 @@ class TestRenderMessage:
         render_message(msg, 4)
 
         self.common_asserts(mock_st, RoleType.ASSISTANT.value)
-        mock_st.error.assert_called_once_with("An error occurred")
+        # Error messages now use warning with collapsible details
+        mock_st.warning.assert_called_once_with("An error occurred while processing your request.")
+        mock_st.expander.assert_called_once_with("View error details", expanded=False)
 
     @patch("utils.chat_bot_helper.st")
     def test_render_dataframe_message(self, mock_st):
