@@ -766,13 +766,40 @@ class VannaService:
             return response, elapsed_time
 
     @st.cache_data(show_spinner="Regenerating SQL after failure ...")
-    def generate_sql_retry(_self, question: str, failed_sql: str | None = None, error_message: str | None = None):
-        """Regenerate SQL including prior failure context so the LLM can correct mistakes."""
+    def generate_sql_retry(
+        _self,
+        question: str,
+        failed_sql: str | None = None,
+        error_message: str | None = None,
+        attempt_number: int = 2,
+    ):
+        """Regenerate SQL including prior failure context so the LLM can correct mistakes.
+
+        Args:
+            question: The original user question
+            failed_sql: The SQL that failed to execute
+            error_message: The database error message
+            attempt_number: Current attempt number (2 = first retry, 3 = second retry, etc.)
+        """
         try:
+            # Progressive guidance based on attempt number
+            if attempt_number == 2:
+                guidance = (
+                    "The previous SQL failed. Please try a DIFFERENT approach to answer this question. "
+                    "Consider using different JOINs, subqueries, or alternative column selections."
+                )
+            elif attempt_number >= 3:
+                guidance = (
+                    "Multiple SQL attempts have failed. Please try the SIMPLEST possible query that could answer this question. "
+                    "Consider: removing JOINs, using only essential columns, or breaking into smaller queries."
+                )
+            else:
+                guidance = "The previous SQL failed to execute. Please return only a corrected, executable SQL query."
+
             # Build a retry-aware question while preserving the user's original intent
             augmented_question_parts = [
                 f"Original question: {question}",
-                "The previous SQL failed to execute. Please return only a corrected, executable SQL query.",
+                guidance,
             ]
             if failed_sql:
                 augmented_question_parts.append("Failed SQL:\n" + failed_sql)
