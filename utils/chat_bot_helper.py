@@ -1035,6 +1035,21 @@ def normal_message_flow(my_question: str):
         # SQL executed successfully
         st.session_state["df"] = df
 
+        # Show SQL if enabled and this was a successful retry (SQL wasn't shown during first attempt)
+        if attempt > 1 and st.session_state.get("show_sql", True):
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    final_sql,
+                    MessageType.SQL,
+                    final_sql,
+                    my_question,
+                    None,
+                    elapsed_time,
+                    group_id=get_current_group_id(),
+                )
+            )
+
         if st.session_state.get("show_table", True):
             df = st.session_state.get("df")
             add_message(
