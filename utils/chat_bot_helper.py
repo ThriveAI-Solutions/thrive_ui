@@ -15,8 +15,32 @@ from orm.models import Message
 from utils.communicate import speak
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
+import re
 
 logger = logging.getLogger(__name__)
+
+# Patterns for non-recoverable SQL errors that won't benefit from retries
+NON_RECOVERABLE_ERROR_PATTERNS = [
+    r"relation.*does not exist",
+    r"table.*does not exist",
+    r"column.*does not exist",
+    r"permission denied",
+    r"access denied",
+    r"authentication failed",
+    r"database.*does not exist",
+    r"schema.*does not exist",
+]
+
+
+def is_non_recoverable_error(error_message: str | None) -> bool:
+    """Check if an error is non-recoverable and shouldn't be retried."""
+    if not error_message:
+        return False
+    error_lower = error_message.lower()
+    for pattern in NON_RECOVERABLE_ERROR_PATTERNS:
+        if re.search(pattern, error_lower):
+            return True
+    return False
 
 # Expose a module-level symbol `vn` for tests that patch utils.chat_bot_helper.vn
 # It lazily resolves the VannaService instance on first use via get_vn()
@@ -889,44 +913,74 @@ def normal_message_flow(my_question: str):
             logger.warning(f"Failed to stream SQL generation: {e}")
 
     # If no thinking model or streaming failed, use regular generation
-    if sql is None:
-        if st.session_state.get("use_retry_context"):
+    # Import retry config
+    from utils.config_helper import get_max_sql_retries
+
+    max_retries = get_max_sql_retries()
+    attempt = 1
+    df = None
+    sql_elapsed_time = 0
+    last_error_msg = None
+    last_failed_sql = None
+
+    # Check if this is a manual retry (user clicked retry button after auto-retries exhausted)
+    if st.session_state.get("use_retry_context"):
+        # Manual retry starts fresh from attempt 1
+        st.session_state["use_retry_context"] = False
+        last_failed_sql = st.session_state.get("retry_failed_sql")
+        last_error_msg = st.session_state.get("retry_error_msg")
+        st.session_state["retry_failed_sql"] = None
+        st.session_state["retry_error_msg"] = None
+        # For manual retry, generate with context from attempt 2
+        if sql is None:
             sql, elapsed_time = get_vn().generate_sql_retry(
                 question=my_question,
-                failed_sql=st.session_state.get("retry_failed_sql"),
-                error_message=st.session_state.get("retry_error_msg"),
+                failed_sql=last_failed_sql,
+                error_message=last_error_msg,
+                attempt_number=2,
             )
-            # Clear retry context after use
-            st.session_state["use_retry_context"] = False
-            st.session_state["retry_failed_sql"] = None
-            st.session_state["retry_error_msg"] = None
-        else:
-            sql, elapsed_time = get_vn().generate_sql(question=my_question)
 
-    st.session_state.my_question = None
-
-    if sql:
-        if get_vn().is_sql_valid(sql=sql):
-            if st.session_state.get("show_sql", True):
-                add_message(
-                    Message(
-                        RoleType.ASSISTANT,
-                        sql,
-                        MessageType.SQL,
-                        sql,
-                        my_question,
-                        None,
-                        elapsed_time,
-                        group_id=get_current_group_id(),
-                    )
+    # Auto-retry loop for SQL generation and execution
+    while attempt <= max_retries + 1:  # +1 because first attempt is not a "retry"
+        # Generate SQL on first attempt if not already generated (e.g., from thinking model)
+        if sql is None:
+            if attempt == 1:
+                sql, elapsed_time = get_vn().generate_sql(question=my_question)
+            else:
+                # Show retry status to user
+                with st.chat_message(RoleType.ASSISTANT.value):
+                    st.info(f"Attempt {attempt}/{max_retries + 1}: Trying a different approach...")
+                logger.info(
+                    f"SQL retry attempt {attempt}/{max_retries + 1} for question: {my_question}. "
+                    f"Previous error: {last_error_msg}"
                 )
-        else:
-            logger.debug("sql is not valid")
+                sql, elapsed_time = get_vn().generate_sql_retry(
+                    question=my_question,
+                    failed_sql=last_failed_sql,
+                    error_message=last_error_msg,
+                    attempt_number=attempt,
+                )
+
+        if not sql:
+            # SQL generation failed completely, break out of retry loop
+            break
+
+        # Validate SQL
+        if not get_vn().is_sql_valid(sql=sql):
+            logger.debug(f"sql is not valid on attempt {attempt}")
+            last_failed_sql = sql
+            last_error_msg = "SQL syntax validation failed"
+            sql = None
+            attempt += 1
+            continue
+
+        # Show SQL if enabled (only on first attempt to avoid clutter)
+        if attempt == 1 and st.session_state.get("show_sql", True):
             add_message(
                 Message(
                     RoleType.ASSISTANT,
                     sql,
-                    MessageType.ERROR,
+                    MessageType.SQL,
                     sql,
                     my_question,
                     None,
@@ -934,9 +988,8 @@ def normal_message_flow(my_question: str):
                     group_id=get_current_group_id(),
                 )
             )
-            st.stop()
 
-        # Query limiting is now handled inside the run_sql method via LIMIT clause
+        # Execute SQL
         rs = get_vn().run_sql(sql=sql)
         if isinstance(rs, tuple) and len(rs) == 2:
             df, sql_elapsed_time = rs
@@ -947,39 +1000,40 @@ def normal_message_flow(my_question: str):
             except Exception:
                 sql_elapsed_time = 0
 
-        # if sql doesn't return a dataframe, offer retry with LLM guidance
-        if not isinstance(df, pd.DataFrame):
-            error_msg = st.session_state.get("last_run_sql_error")
-            failed_sql = st.session_state.get("last_failed_sql")
-            with st.chat_message(RoleType.ASSISTANT.value):
-                st.error("I couldn't execute the generated SQL.")
-                if error_msg:
-                    st.caption(f"Database error: {error_msg}")
-                cols = st.columns([0.2, 0.8])
-                with cols[0]:
-                    retry_clicked = st.button("Retry", type="primary", key="retry_inline")
-                with cols[1]:
-                    show_sql_clicked = st.button("Show Failed SQL", key="show_failed_sql_inline")
-                if show_sql_clicked and failed_sql:
-                    st.code(failed_sql, language="sql", line_numbers=True)
+        # Check if execution succeeded
+        if isinstance(df, pd.DataFrame):
+            # Success! Break out of retry loop
+            logger.info(f"SQL execution succeeded on attempt {attempt}")
+            break
 
-            if retry_clicked:
-                # Persist retry intent and context, then rerun so it flows through normal pipeline
-                st.session_state["use_retry_context"] = True
-                st.session_state["retry_failed_sql"] = failed_sql
-                st.session_state["retry_error_msg"] = error_msg
-                # Set a persistent flag so the panel can be re-rendered if needed
-                st.session_state["pending_sql_error"] = False
-                st.session_state["pending_question"] = my_question
-                st.session_state["my_question"] = my_question
-                st.rerun()
-            else:
-                # Mark pending error so a persistent panel can be shown if page reruns without action
-                st.session_state["pending_sql_error"] = True
-                st.session_state["pending_question"] = my_question
-                st.stop()
-        else:
-            st.session_state["df"] = df
+        # Execution failed - prepare for retry
+        last_error_msg = st.session_state.get("last_run_sql_error")
+        last_failed_sql = st.session_state.get("last_failed_sql") or sql
+
+        # Check if error is non-recoverable
+        if is_non_recoverable_error(last_error_msg):
+            logger.info(f"Non-recoverable error detected, skipping auto-retry: {last_error_msg}")
+            break
+
+        # Log the retry attempt
+        logger.warning(
+            f"SQL execution failed on attempt {attempt}/{max_retries + 1}. "
+            f"Error: {last_error_msg}. SQL: {last_failed_sql[:200]}..."
+        )
+
+        # Preserve the last SQL that was tried before resetting for regeneration
+        final_sql = sql
+        sql = None  # Reset SQL for next iteration to force regeneration
+        attempt += 1
+
+    st.session_state.my_question = None
+
+    # Determine the final SQL: either the successful one or the last failed one
+    final_sql = sql if sql else (last_failed_sql if last_failed_sql else None)
+
+    if final_sql and isinstance(df, pd.DataFrame):
+        # SQL executed successfully
+        st.session_state["df"] = df
 
         if st.session_state.get("show_table", True):
             df = st.session_state.get("df")
@@ -988,7 +1042,7 @@ def normal_message_flow(my_question: str):
                     RoleType.ASSISTANT,
                     df,
                     MessageType.DATAFRAME,
-                    sql,
+                    final_sql,
                     my_question,
                     None,
                     sql_elapsed_time,
@@ -997,7 +1051,7 @@ def normal_message_flow(my_question: str):
             )
 
         if st.session_state.get("show_chart", True):
-            get_chart(my_question, sql, df)
+            get_chart(my_question, final_sql, df)
 
         # Successful data path: clear error flags ONLY if we have a real DataFrame result
         try:
@@ -1015,7 +1069,7 @@ def normal_message_flow(my_question: str):
         ):
             # Provide SQL signature for stable summary cache keys and reset streamed summary state
             try:
-                st.session_state["current_sql_for_summary"] = sql
+                st.session_state["current_sql_for_summary"] = final_sql
                 st.session_state["streamed_summary"] = None
                 st.session_state["streamed_summary_for_question"] = None
                 st.session_state["streamed_summary_elapsed_time"] = 0
@@ -1089,7 +1143,7 @@ def normal_message_flow(my_question: str):
                             RoleType.ASSISTANT,
                             summary,
                             MessageType.SUMMARY,
-                            sql,
+                            final_sql,
                             my_question,
                             df,
                             elapsed_time,
@@ -1105,20 +1159,85 @@ def normal_message_flow(my_question: str):
                     speak("Summary is unavailable for this result")
 
         if st.session_state.get("show_followup", True):
-            get_followup_questions(my_question, sql, df)
+            get_followup_questions(my_question, final_sql, df)
 
         # Clear the question from session state after successful processing
         st.session_state.my_question = None
 
         # Trigger a rerun to properly refresh the UI
         st.rerun()
+    elif final_sql:
+        # SQL was generated but execution/validation failed after all retries
+        error_msg = last_error_msg or st.session_state.get("last_run_sql_error")
+        failed_sql = last_failed_sql or st.session_state.get("last_failed_sql")
+
+        # Add error message to messages for test verification and history
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                f"SQL failed: {error_msg}" if error_msg else "SQL failed after retries",
+                MessageType.ERROR,
+                failed_sql,
+                my_question,
+                None,
+                elapsed_time,
+                group_id=get_current_group_id(),
+            )
+        )
+
+        # Show SQL that was tried (if not already shown)
+        if attempt > 1 or not st.session_state.get("show_sql", True):
+            if st.session_state.get("show_sql", True):
+                add_message(
+                    Message(
+                        RoleType.ASSISTANT,
+                        failed_sql,
+                        MessageType.SQL,
+                        failed_sql,
+                        my_question,
+                        None,
+                        elapsed_time,
+                        group_id=get_current_group_id(),
+                    )
+                )
+
+        with st.chat_message(RoleType.ASSISTANT.value):
+            if attempt > 1:
+                st.error(f"I couldn't execute the SQL after {attempt - 1} automatic retries.")
+            else:
+                st.error("I couldn't execute the generated SQL.")
+            if error_msg:
+                st.caption(f"Database error: {error_msg}")
+            cols = st.columns([0.2, 0.8])
+            with cols[0]:
+                retry_clicked = st.button("Retry", type="primary", key="retry_inline")
+            with cols[1]:
+                show_sql_clicked = st.button("Show Failed SQL", key="show_failed_sql_inline")
+            if show_sql_clicked and failed_sql:
+                st.code(failed_sql, language="sql", line_numbers=True)
+
+        if retry_clicked:
+            # Persist retry intent and context, then rerun so it flows through normal pipeline
+            st.session_state["use_retry_context"] = True
+            st.session_state["retry_failed_sql"] = failed_sql
+            st.session_state["retry_error_msg"] = error_msg
+            # Set a persistent flag so the panel can be re-rendered if needed
+            st.session_state["pending_sql_error"] = False
+            st.session_state["pending_question"] = my_question
+            st.session_state["my_question"] = my_question
+            st.rerun()
+        else:
+            # Mark pending error so a persistent panel can be shown if page reruns without action
+            st.session_state["pending_sql_error"] = True
+            st.session_state["pending_question"] = my_question
+            st.stop()
     else:
         add_message(
             Message(
                 RoleType.ASSISTANT,
                 "I wasn't able to generate SQL for that question",
                 MessageType.ERROR,
-                sql,
+                final_sql,
                 my_question,
                 group_id=get_current_group_id(),
             )

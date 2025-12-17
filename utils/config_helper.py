@@ -69,6 +69,37 @@ def get_max_session_messages() -> int:
     return 20
 
 
+def get_max_sql_retries() -> int:
+    """
+    Get the maximum number of automatic SQL retries on execution failure.
+
+    Checks in order:
+    1. Environment variable MAX_SQL_RETRIES
+    2. Streamlit secrets retry.max_sql_retries
+    3. Default value of 2
+
+    Returns:
+        int: Maximum number of automatic retries (0 disables auto-retry)
+    """
+    # Check environment variable first
+    env_value = os.getenv("MAX_SQL_RETRIES")
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            pass
+
+    # Check Streamlit secrets
+    try:
+        if hasattr(st, "secrets") and "retry" in st.secrets and "max_sql_retries" in st.secrets["retry"]:
+            return int(st.secrets["retry"]["max_sql_retries"])
+    except:
+        pass
+
+    # Default value
+    return 2
+
+
 def ensure_query_has_limit(sql: str, max_rows: Union[int, None] = None) -> str:
     """
     Ensure a SQL query has a LIMIT clause. If it doesn't, add one.
