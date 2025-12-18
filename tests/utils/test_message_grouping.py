@@ -103,43 +103,35 @@ class TestGetMessageGroupCSS:
 
     def test_css_contains_border_styling(self):
         """CSS should include left border styling."""
-        css = get_message_group_css(0)
+        css = get_message_group_css()
         assert "border-left:" in css
         assert "#0b5258" in css  # Theme color
 
     def test_css_contains_background_color(self):
         """CSS should include background color."""
-        css = get_message_group_css(0)
+        css = get_message_group_css()
         assert "background-color:" in css
         assert "rgba" in css
 
-    def test_alternating_backgrounds(self):
-        """Even and odd groups should have different backgrounds."""
-        css_even = get_message_group_css(0)
-        css_odd = get_message_group_css(1)
+    def test_css_includes_alternating_selector(self):
+        """CSS should include selector for alternating backgrounds."""
+        css = get_message_group_css()
+        # Should have nth-of-type selector for alternating backgrounds
+        assert "nth-of-type" in css
 
-        # Extract background colors
-        # They should be different (alternating)
-        assert "0.03" in css_even or "0.06" in css_even
-        assert "0.03" in css_odd or "0.06" in css_odd
-        # Ensure they're different
-        assert css_even != css_odd
+    def test_css_targets_streamlit_containers(self):
+        """CSS should target Streamlit's container elements."""
+        css = get_message_group_css()
+        # Should target Streamlit's data-testid elements
+        assert "stVerticalBlock" in css
+        assert "stChatMessage" in css
 
-    def test_css_includes_proper_class_name(self):
-        """CSS should include proper class name based on group index."""
-        css_0 = get_message_group_css(0)
-        css_5 = get_message_group_css(5)
-
-        assert ".message-group-0" in css_0
-        assert ".message-group-5" in css_5
-
-    def test_css_includes_padding_and_margin(self):
-        """CSS should include padding and margin for spacing."""
-        css = get_message_group_css(0)
-        assert "padding:" in css
-        assert "margin-bottom:" in css
+    def test_css_includes_padding(self):
+        """CSS should include padding for spacing."""
+        css = get_message_group_css()
+        assert "padding" in css
 
     def test_css_includes_border_radius(self):
         """CSS should include border radius for rounded corners."""
-        css = get_message_group_css(0)
+        css = get_message_group_css()
         assert "border-radius:" in css
