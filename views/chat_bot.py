@@ -6,7 +6,16 @@ import pandas as pd
 import streamlit as st
 
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
-from utils.chat_bot_helper import get_unique_messages, get_vn, normal_message_flow, render_message, set_question
+from utils.chat_bot_helper import (
+    get_message_group_css,
+    get_unique_messages,
+    get_vn,
+    group_messages_by_id,
+    normal_message_flow,
+    render_message,
+    render_message_group,
+    set_question,
+)
 from utils.communicate import listen, speak
 from utils.enums import MessageType, RoleType, ThemeType
 from utils.magic_functions import is_magic_do_magic
@@ -229,10 +238,17 @@ if st.session_state.messages == []:
 # Populate messages in a dedicated container so we can keep a footer below
 messages_container = st.container()
 with messages_container:
-    index = 0 
-    for message in st.session_state.messages:
-        render_message(message, index)
-        index = index + 1
+    # Inject global CSS for message group styling (once at the top)
+    st.markdown(get_message_group_css(), unsafe_allow_html=True)
+
+    # Group messages by group_id for visual grouping
+    message_groups = group_messages_by_id(st.session_state.messages)
+
+    # Track the overall message index for callbacks
+    message_index = 0
+    for group_index, (group_id, group_messages) in enumerate(message_groups):
+        render_message_group(group_messages, group_index, message_index)
+        message_index += len(group_messages)
 
 # Footer placeholder that always stays at the end
 tail_placeholder = st.empty()

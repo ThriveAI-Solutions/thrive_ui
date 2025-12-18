@@ -504,6 +504,98 @@ def start_new_group():
     return st.session_state.current_group_id
 
 
+def group_messages_by_id(messages: list) -> list:
+    """Group consecutive messages by their group_id.
+
+    Returns a list of tuples: (group_id, [messages_in_group])
+    Messages without a group_id are treated as individual groups.
+    """
+    if not messages:
+        return []
+
+    groups = []
+    current_group_id = None
+    current_group_messages = []
+
+    for message in messages:
+        msg_group_id = getattr(message, "group_id", None)
+
+        if msg_group_id is None:
+            # Message has no group_id - treat as individual group
+            if current_group_messages:
+                groups.append((current_group_id, current_group_messages))
+            groups.append((None, [message]))
+            current_group_id = None
+            current_group_messages = []
+        elif msg_group_id == current_group_id:
+            # Same group - add to current group
+            current_group_messages.append(message)
+        else:
+            # New group - save current group and start new one
+            if current_group_messages:
+                groups.append((current_group_id, current_group_messages))
+            current_group_id = msg_group_id
+            current_group_messages = [message]
+
+    # Don't forget the last group
+    if current_group_messages:
+        groups.append((current_group_id, current_group_messages))
+
+    return groups
+
+
+def get_message_group_css() -> str:
+    """Generate global CSS styling for message group containers.
+
+    Uses custom styling to override Streamlit's default container border
+    with a left border accent for visual distinction between groups.
+    Only targets innermost containers (those without nested bordered containers).
+    """
+    border_color = "#0b5258"  # Primary theme color
+
+    return """
+        <style>
+            /* Only style innermost bordered containers - exclude parents that have nested bordered containers */
+            div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]):not(:has(div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]))) {
+                border: none !important;
+                border-left: 4px solid """ + border_color + """ !important;
+                border-radius: 0 8px 8px 0 !important;
+                background-color: rgba(11, 82, 88, 0.03) !important;
+                padding-left: 1rem !important;
+            }
+
+            /* Alternating background for visual distinction between groups */
+            div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]):not(:has(div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]))):nth-of-type(even) {
+                background-color: rgba(11, 82, 88, 0.06) !important;
+            }
+        </style>
+    """
+
+
+def render_message_group(messages: list, group_index: int, start_index: int):
+    """Render a group of messages within a styled container.
+
+    Args:
+        messages: List of messages in this group
+        group_index: Index of the group for CSS styling
+        start_index: Starting index for individual message rendering
+    """
+    # Only apply grouping if there's a valid group_id (indicating it's part of a Q&A flow)
+    has_group_id = messages and getattr(messages[0], "group_id", None) is not None
+
+    if has_group_id and len(messages) > 0:
+        # Use Streamlit's native container with border=True
+        # This creates a proper wrapper that contains all child elements
+        with st.container(border=True):
+            # Render each message in the group
+            for i, message in enumerate(messages):
+                render_message(message, start_index + i)
+    else:
+        # No grouping - render messages individually
+        for i, message in enumerate(messages):
+            render_message(message, start_index + i)
+
+
 def get_followup_questions(my_question, sql, df):
     vn_instance = get_vn()
     followup_questions = vn_instance.generate_followup_questions(question=my_question, sql=sql, df=df)
