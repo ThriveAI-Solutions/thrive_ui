@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import random
+import time
 import uuid
 from io import StringIO
 
@@ -971,6 +972,7 @@ def normal_message_flow(my_question: str):
         pass
 
     # If we have a thinking model, display the thinking stream
+    thinking_text = ""  # Initialize outside the try block for use later
     if has_thinking_model and hasattr(vn_instance, "stream_generate_sql"):
         try:
             thinking_chunks = []
@@ -992,9 +994,19 @@ def normal_message_flow(my_question: str):
                     elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
                     thinking_text = st.session_state.get("streamed_thinking", "")
 
+                    # Phase 1: Graceful transition - show completion indicator
+                    if thinking_text and thinking_text.strip():
+                        # Show "Done thinking" state for a brief moment
+                        thinking_placeholder.markdown(
+                            "✅ **Done thinking**\n\n" + "".join(thinking_chunks)
+                        )
+                        # Brief delay for visual continuity (1.5 seconds)
+                        time.sleep(1.5)
+
                     # Clear the placeholder - we'll add the thinking as a proper message
                     thinking_placeholder.empty()
 
+            # Phase 2: Persistent display - add thinking to chat history as collapsible expander
             # If we collected thinking text, add it as a proper message
             if thinking_text and thinking_text.strip():
                 add_message(
@@ -1008,7 +1020,7 @@ def normal_message_flow(my_question: str):
                         elapsed_time,
                         group_id=get_current_group_id(),
                     ),
-                    render=False,  # Don't render, we'll rerun at the end
+                    render=True,  # Render so it appears in chat history as collapsible expander
                 )
         except Exception as e:
             logger.warning(f"Failed to stream SQL generation: {e}")
