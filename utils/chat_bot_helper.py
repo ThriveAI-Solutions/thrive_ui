@@ -544,26 +544,30 @@ def group_messages_by_id(messages: list) -> list:
     return groups
 
 
-def get_message_group_css(group_index: int) -> str:
-    """Generate CSS styling for a message group container.
+def get_message_group_css() -> str:
+    """Generate global CSS styling for message group containers.
 
-    Uses alternating subtle background colors and a left border accent
-    for visual distinction between groups.
+    Uses custom styling to override Streamlit's default container border
+    with a left border accent for visual distinction between groups.
+    Only targets innermost containers (those without nested bordered containers).
     """
-    # Alternate between two subtle background tints
-    is_even = group_index % 2 == 0
-    bg_color = "rgba(11, 82, 88, 0.03)" if is_even else "rgba(11, 82, 88, 0.06)"
     border_color = "#0b5258"  # Primary theme color
 
-    return f"""
+    return """
         <style>
-            .message-group-{group_index} {{
-                border-left: 3px solid {border_color};
-                background-color: {bg_color};
-                padding: 0.5rem 0.5rem 0.5rem 1rem;
-                margin-bottom: 1rem;
-                border-radius: 0 8px 8px 0;
-            }}
+            /* Only style innermost bordered containers - exclude parents that have nested bordered containers */
+            div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]):not(:has(div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]))) {
+                border: none !important;
+                border-left: 4px solid """ + border_color + """ !important;
+                border-radius: 0 8px 8px 0 !important;
+                background-color: rgba(11, 82, 88, 0.03) !important;
+                padding-left: 1rem !important;
+            }
+
+            /* Alternating background for visual distinction between groups */
+            div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]):not(:has(div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]))):nth-of-type(even) {
+                background-color: rgba(11, 82, 88, 0.06) !important;
+            }
         </style>
     """
 
@@ -576,22 +580,16 @@ def render_message_group(messages: list, group_index: int, start_index: int):
         group_index: Index of the group for CSS styling
         start_index: Starting index for individual message rendering
     """
-    # Only apply grouping CSS if there are multiple messages in the group
-    # or if the group has a valid group_id (indicating it's part of a Q&A flow)
+    # Only apply grouping if there's a valid group_id (indicating it's part of a Q&A flow)
     has_group_id = messages and getattr(messages[0], "group_id", None) is not None
 
     if has_group_id and len(messages) > 0:
-        # Inject CSS for this group
-        st.markdown(get_message_group_css(group_index), unsafe_allow_html=True)
-
-        # Use a container with the group class
-        st.markdown(f'<div class="message-group-{group_index}">', unsafe_allow_html=True)
-
-        # Render each message in the group
-        for i, message in enumerate(messages):
-            render_message(message, start_index + i)
-
-        st.markdown("</div>", unsafe_allow_html=True)
+        # Use Streamlit's native container with border=True
+        # This creates a proper wrapper that contains all child elements
+        with st.container(border=True):
+            # Render each message in the group
+            for i, message in enumerate(messages):
+                render_message(message, start_index + i)
     else:
         # No grouping - render messages individually
         for i, message in enumerate(messages):

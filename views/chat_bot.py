@@ -7,6 +7,7 @@ import streamlit as st
 
 from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
 from utils.chat_bot_helper import (
+    get_message_group_css,
     get_unique_messages,
     get_vn,
     group_messages_by_id,
@@ -237,6 +238,9 @@ if st.session_state.messages == []:
 # Populate messages in a dedicated container so we can keep a footer below
 messages_container = st.container()
 with messages_container:
+    # Inject global CSS for message group styling (once at the top)
+    st.markdown(get_message_group_css(), unsafe_allow_html=True)
+
     # Group messages by group_id for visual grouping
     message_groups = group_messages_by_id(st.session_state.messages)
 
