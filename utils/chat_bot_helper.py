@@ -573,10 +573,16 @@ def _render_plotly_chart(message: Message, index: int):
 def _render_error(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
-    # Use warning with collapsible details for less intrusive error display
-    st.warning("An error occurred while processing your request.")
-    with st.expander("View error details", expanded=False):
-        st.code(message.content, language="text")
+    # Short error messages are displayed directly; long ones (stack traces) use collapsible
+    error_length_threshold = 300
+    if len(message.content) <= error_length_threshold:
+        # Short, user-friendly error - display directly in warning
+        st.warning(message.content)
+    else:
+        # Long error (likely stack trace) - use collapsible to reduce visual clutter
+        st.warning("An error occurred while processing your request.")
+        with st.expander("View error details", expanded=False):
+            st.code(message.content, language="text")
 
 
 def _render_dataframe(message: Message, index: int):

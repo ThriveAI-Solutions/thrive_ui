@@ -340,13 +340,29 @@ class TestRenderMessage:
         mock_st.plotly_chart.assert_called_once()
 
     @patch("utils.chat_bot_helper.st")
-    def test_render_error_message(self, mock_st):
+    def test_render_short_error_message(self, mock_st):
+        """Short error messages are displayed directly in warning without collapsible."""
         msg = Message(role=RoleType.ASSISTANT, content="An error occurred", type=MessageType.ERROR)
 
         render_message(msg, 4)
 
         self.common_asserts(mock_st, RoleType.ASSISTANT.value)
-        # Error messages now use warning with collapsible details
+        # Short errors display directly in warning
+        mock_st.warning.assert_called_once_with("An error occurred")
+        mock_st.expander.assert_not_called()
+
+    @patch("utils.chat_bot_helper.st")
+    def test_render_long_error_message(self, mock_st):
+        """Long error messages (stack traces) use collapsible details."""
+        # Create a long error message (over 300 chars) to trigger collapsible
+        long_error = "x" * 350
+
+        msg = Message(role=RoleType.ASSISTANT, content=long_error, type=MessageType.ERROR)
+
+        render_message(msg, 4)
+
+        self.common_asserts(mock_st, RoleType.ASSISTANT.value)
+        # Long errors use warning with collapsible details
         mock_st.warning.assert_called_once_with("An error occurred while processing your request.")
         mock_st.expander.assert_called_once_with("View error details", expanded=False)
 
