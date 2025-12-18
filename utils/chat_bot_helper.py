@@ -573,7 +573,16 @@ def _render_plotly_chart(message: Message, index: int):
 def _render_error(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
-    st.error(message.content)
+    # Short error messages are displayed directly; long ones (stack traces) use collapsible
+    error_length_threshold = 300
+    if len(message.content) <= error_length_threshold:
+        # Short, user-friendly error - display directly in warning
+        st.warning(message.content)
+    else:
+        # Long error (likely stack trace) - use collapsible to reduce visual clutter
+        st.warning("An error occurred while processing your request.")
+        with st.expander("View error details", expanded=False):
+            st.code(message.content, language="text")
 
 
 def _render_dataframe(message: Message, index: int):
@@ -1217,19 +1226,22 @@ def normal_message_flow(my_question: str):
                 )
 
         with st.chat_message(RoleType.ASSISTANT.value):
+            # Use warning with collapsible details for less intrusive error display
             if attempt > 1:
-                st.error(f"I couldn't execute the SQL after {attempt - 1} automatic retries.")
+                st.warning(f"I couldn't execute the SQL after {attempt - 1} automatic retries.")
             else:
-                st.error("I couldn't execute the generated SQL.")
-            if error_msg:
-                st.caption(f"Database error: {error_msg}")
+                st.warning("I couldn't execute the generated SQL.")
+            # Collapsible error details section
+            with st.expander("View error details", expanded=False):
+                if error_msg:
+                    st.markdown(f"**Database error:** {error_msg}")
+                if failed_sql:
+                    st.markdown("**Failed SQL:**")
+                    st.code(failed_sql, language="sql", line_numbers=True)
+            # Action buttons remain outside expander for easy access
             cols = st.columns([0.2, 0.8])
             with cols[0]:
                 retry_clicked = st.button("Retry", type="primary", key="retry_inline")
-            with cols[1]:
-                show_sql_clicked = st.button("Show Failed SQL", key="show_failed_sql_inline")
-            if show_sql_clicked and failed_sql:
-                st.code(failed_sql, language="sql", line_numbers=True)
 
         if retry_clicked:
             # Persist retry intent and context, then rerun so it flows through normal pipeline

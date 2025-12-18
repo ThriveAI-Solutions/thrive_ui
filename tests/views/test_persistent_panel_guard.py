@@ -25,8 +25,11 @@ def _fake_st():
     st.columns = lambda sizes: [nullcontext() for _ in sizes]
     st.button = lambda *a, **k: False
     st.error = lambda *a, **k: None
+    st.warning = lambda *a, **k: None
+    st.markdown = lambda *a, **k: None
     st.caption = lambda *a, **k: None
     st.code = lambda *a, **k: None
+    st.expander = lambda *_a, **_k: nullcontext()
     st.rerun = lambda: None
     st.stop = lambda: None
     return st

@@ -258,19 +258,17 @@ if (
     error_msg = st.session_state.get("last_run_sql_error")
     failed_sql = st.session_state.get("last_failed_sql")
     with st.chat_message(RoleType.ASSISTANT.value):
-        st.error("I couldn't execute the generated SQL.")
-        if error_msg:
-            st.caption(f"Database error: {error_msg}")
-        cols = st.columns([0.25, 0.25, 0.5])
-        with cols[0]:
-            retry_clicked = st.button("Retry", type="primary", key="retry_persist")
-        with cols[1]:
-            show_sql_clicked = st.button("Show Failed SQL", key="show_failed_sql_persist")
-        if show_sql_clicked:
-            st.session_state["show_failed_sql_open"] = True
-            st.rerun()
-        if st.session_state.get("show_failed_sql_open") and failed_sql:
-            st.code(failed_sql, language="sql", line_numbers=True)
+        # Use warning with collapsible details for less intrusive error display
+        st.warning("I couldn't execute the generated SQL.")
+        # Collapsible error details section
+        with st.expander("View error details", expanded=False):
+            if error_msg:
+                st.markdown(f"**Database error:** {error_msg}")
+            if failed_sql:
+                st.markdown("**Failed SQL:**")
+                st.code(failed_sql, language="sql", line_numbers=True)
+        # Action button remains outside expander for easy access
+        retry_clicked = st.button("Retry", type="primary", key="retry_persist")
 
     if retry_clicked:
         st.session_state["use_retry_context"] = True

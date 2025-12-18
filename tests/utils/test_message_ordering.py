@@ -47,6 +47,7 @@ def _fake_st():
     st.markdown = lambda *a, **k: None
     st.code = lambda *a, **k: None
     st.error = lambda *a, **k: None
+    st.warning = lambda *a, **k: None
     st.caption = lambda *a, **k: None
     st.toast = lambda *a, **k: None
     st.stop = lambda: None
