@@ -414,25 +414,90 @@ with tab2:
         # Get training data with current user's role-based filtering
         df = get_vn().get_training_data()
 
-        colms = st.columns((1, 2, 3, 1))
-        fields = ["Type", "Question", "Sql", "Action"]
-        for col, field_name in zip(colms, fields):
-            # header
-            col.write(field_name)
-
         if isinstance(df, DataFrame) and not df.empty:
-            for index, row in df.iterrows():
-                col1, col2, col3, col4 = st.columns((1, 2, 3, 1))
-                col1.write(row["training_data_type"])
-                col2.write(row["question"])
-                col3.write(row["content"])
-                if st.session_state.cookies.get("role_name") == "Admin":
-                    button_phold = col4.empty()
-                    do_action = button_phold.button(label="Delete", type="primary", key=f"delete{row['id']}")
-                    if do_action:
-                        get_vn().remove_from_training(row["id"])
-                        st.toast("Training Data Deleted Successfully!")
-                        st.rerun()
+            st.divider()
+            st.subheader("Training Data")
+
+            # Prepare display dataframe with renamed columns for clarity
+            display_df = df[["id", "training_data_type", "question", "content"]].copy()
+            display_df.columns = ["ID", "Type", "Question", "Content"]
+
+            # Use data_editor for interactive grid with selection for deletion
+            if st.session_state.cookies.get("role_name") == "Admin":
+                # Add selection column for bulk delete
+                display_df.insert(0, "Select", False)
+
+                edited_df = st.data_editor(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Delete?",
+                            help="Select rows to delete",
+                            default=False,
+                            width="small",
+                        ),
+                        "ID": st.column_config.TextColumn(
+                            "ID",
+                            width="small",
+                            disabled=True,
+                        ),
+                        "Type": st.column_config.TextColumn(
+                            "Type",
+                            width="small",
+                            disabled=True,
+                        ),
+                        "Question": st.column_config.TextColumn(
+                            "Question",
+                            width="medium",
+                            disabled=True,
+                        ),
+                        "Content": st.column_config.TextColumn(
+                            "Content",
+                            width="large",
+                            disabled=True,
+                        ),
+                    },
+                    num_rows="fixed",
+                    key="training_data_grid",
+                )
+
+                # Delete selected rows
+                selected_rows = edited_df[edited_df["Select"]]
+                if not selected_rows.empty:
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        if st.button(
+                            f"🗑️ Delete {len(selected_rows)} Selected",
+                            type="primary",
+                            help="Delete all selected training data entries",
+                        ):
+                            vn = get_vn()
+                            for _, row in selected_rows.iterrows():
+                                vn.remove_from_training(row["ID"])
+                            st.toast(f"Deleted {len(selected_rows)} training data entries!")
+                            st.rerun()
+                    with col2:
+                        st.caption(f"Selected {len(selected_rows)} of {len(display_df)} entries for deletion")
+            else:
+                # Non-admin view: read-only dataframe
+                st.dataframe(
+                    display_df[["ID", "Type", "Question", "Content"]],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "ID": st.column_config.TextColumn("ID", width="small"),
+                        "Type": st.column_config.TextColumn("Type", width="small"),
+                        "Question": st.column_config.TextColumn("Question", width="medium"),
+                        "Content": st.column_config.TextColumn("Content", width="large"),
+                    },
+                )
+
+            # Show record count
+            st.caption(f"Total: {len(df)} training data entries")
+        else:
+            st.info("No training data available.")
 
 if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
     with tab3:
