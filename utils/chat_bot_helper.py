@@ -504,6 +504,23 @@ def start_new_group():
     return st.session_state.current_group_id
 
 
+def group_has_data_results(messages: list) -> bool:
+    """Check if a message group contains data results that support follow-up commands.
+
+    Returns True if the group contains a DATAFRAME or SUMMARY message type,
+    indicating that follow-up analysis commands would be applicable.
+    """
+    if not messages:
+        return False
+
+    data_types = {MessageType.DATAFRAME.value, MessageType.SUMMARY.value}
+    for message in messages:
+        msg_type = getattr(message, "type", None)
+        if msg_type in data_types:
+            return True
+    return False
+
+
 def group_messages_by_id(messages: list) -> list:
     """Group consecutive messages by their group_id.
 
@@ -568,17 +585,75 @@ def get_message_group_css() -> str:
             div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]):not(:has(div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]))):nth-of-type(even) {
                 background-color: rgba(11, 82, 88, 0.06) !important;
             }
+
+            /* Follow-up button wrapper - positioned to overlap container bottom border */
+            .followup-button-wrapper {
+                display: flex;
+                justify-content: center;
+                margin-top: -0.75rem;
+                margin-bottom: 0.5rem;
+                position: relative;
+                z-index: 10;
+            }
         </style>
     """
 
 
-def render_message_group(messages: list, group_index: int, start_index: int):
+def get_followup_command_suggestions() -> list:
+    """Get a curated list of follow-up command suggestions.
+
+    Returns a list of tuples: (command, label, description)
+    These are the most commonly useful follow-up commands.
+    """
+    return [
+        ("describe", "Describe", "Get descriptive statistics"),
+        ("profile", "Profile", "Comprehensive data profiling"),
+        ("heatmap", "Heatmap", "Correlation heatmap"),
+        ("missing", "Missing", "Analyze missing data"),
+        ("duplicates", "Duplicates", "Find duplicate rows"),
+        ("head 10", "Head 10", "View first 10 rows"),
+    ]
+
+
+def render_followup_button(group_id: str):
+    """Render a follow-up button with a popover showing available commands.
+
+    Args:
+        group_id: The group ID to associate with follow-up commands
+    """
+    # Create a unique key based on group_id
+    button_key = f"followup_popover_{group_id}"
+
+    # Center the button using columns
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        with st.popover("Follow Up", use_container_width=True):
+            st.markdown("**Quick Analysis Commands**")
+            st.caption("Click to run on your query results")
+
+            commands = get_followup_command_suggestions()
+            for cmd, label, description in commands:
+                if st.button(
+                    f"{label}",
+                    key=f"{button_key}_{cmd}",
+                    help=description,
+                    use_container_width=True,
+                ):
+                    # Execute the follow-up command
+                    set_question(f"/followup {cmd}")
+
+            st.divider()
+            st.caption("Type `/followuphelp` for all commands")
+
+
+def render_message_group(messages: list, group_index: int, start_index: int, is_last_group: bool = False):
     """Render a group of messages within a styled container.
 
     Args:
         messages: List of messages in this group
         group_index: Index of the group for CSS styling
         start_index: Starting index for individual message rendering
+        is_last_group: Whether this is the last message group (shows follow-up button)
     """
     # Only apply grouping if there's a valid group_id (indicating it's part of a Q&A flow)
     has_group_id = messages and getattr(messages[0], "group_id", None) is not None
@@ -590,6 +665,12 @@ def render_message_group(messages: list, group_index: int, start_index: int):
             # Render each message in the group
             for i, message in enumerate(messages):
                 render_message(message, start_index + i)
+
+        # Show follow-up button after the last group if it has data results
+        if is_last_group and group_has_data_results(messages):
+            group_id = getattr(messages[0], "group_id", None)
+            if group_id:
+                render_followup_button(group_id)
     else:
         # No grouping - render messages individually
         for i, message in enumerate(messages):

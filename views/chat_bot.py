@@ -246,8 +246,10 @@ with messages_container:
 
     # Track the overall message index for callbacks
     message_index = 0
+    total_groups = len(message_groups)
     for group_index, (group_id, group_messages) in enumerate(message_groups):
-        render_message_group(group_messages, group_index, message_index)
+        is_last_group = group_index == total_groups - 1
+        render_message_group(group_messages, group_index, message_index, is_last_group=is_last_group)
         message_index += len(group_messages)
 
 # Footer placeholder that always stays at the end
