@@ -17,7 +17,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from orm.models import Message, SessionLocal
-from utils.chat_bot_helper import add_message, set_question, get_vn, normal_message_flow, add_acknowledgement
+from utils.chat_bot_helper import add_message, set_question, get_vn, normal_message_flow, add_acknowledgement, get_current_group_id
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import (
     read_forbidden_from_json,
@@ -445,7 +445,7 @@ def is_magic_do_magic(question, previous_df=None):
             for key, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
                 match = re.match(key, question.strip())
                 if match:
-                    add_message(Message(RoleType.ASSISTANT, "Sounds like followup magic!", MessageType.TEXT))
+                    add_message(Message(RoleType.ASSISTANT, "Sounds like followup magic!", MessageType.TEXT, group_id=get_current_group_id()))
                     meta["func"](question, match.groupdict(), previous_df)
                     return True
         else:
@@ -453,12 +453,12 @@ def is_magic_do_magic(question, previous_df=None):
                 match = re.match(key, question)# .strip()
                 if match:
                     if meta["func"] != _followup and meta["func"] != _history_search:
-                        add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT))
+                        add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT, group_id=get_current_group_id()))
                     meta["func"](question, match.groupdict(), None)
                     return True
         return False
     except Exception as e:
-        add_message(Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR))
+        add_message(Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR, group_id=get_current_group_id()))
         return False
 
 
@@ -927,7 +927,7 @@ def _followup(question, tuple, previous_df):
 
         if last_assistant_msg is None:
             add_message(
-                Message(RoleType.ASSISTANT, "No previous assistant message found to follow up on.", MessageType.ERROR)
+                Message(RoleType.ASSISTANT, "No previous assistant message found to follow up on.", MessageType.ERROR, group_id=get_current_group_id())
             )
             return
 
@@ -954,9 +954,9 @@ def _followup(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, response, type, None, command, df, elapsed_time))
+        add_message(Message(RoleType.ASSISTANT, response, type, None, command, df, elapsed_time, group_id=get_current_group_id()))
     except Exception as e:
-        add_message(Message(RoleType.ASSISTANT, f"Error generating follow up message: {str(e)}", MessageType.ERROR))
+        add_message(Message(RoleType.ASSISTANT, f"Error generating follow up message: {str(e)}", MessageType.ERROR, group_id=get_current_group_id()))
 
 
 def _followup_llm(command, last_content, previous_df):
@@ -964,10 +964,10 @@ def _followup_llm(command, last_content, previous_df):
     try:
         start_time = time.perf_counter()
 
-        add_message(Message(RoleType.ASSISTANT, "Asking LLM!", MessageType.TEXT))
+        add_message(Message(RoleType.ASSISTANT, "Asking LLM!", MessageType.TEXT, group_id=get_current_group_id()))
 
         if previous_df is None or previous_df.empty:
-            add_message(Message(RoleType.ASSISTANT, "No previous data available for LLM analysis.", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "No previous data available for LLM analysis.", MessageType.ERROR, group_id=get_current_group_id()))
             return
 
         if not command.strip():
@@ -976,6 +976,7 @@ def _followup_llm(command, last_content, previous_df):
                     RoleType.ASSISTANT,
                     "Please provide a question for the LLM. Usage: /followup llm <your question>",
                     MessageType.ERROR,
+                    group_id=get_current_group_id(),
                 )
             )
             return
@@ -1040,7 +1041,7 @@ Please analyze this data and provide insights based on the user's question. Be s
         return vn.submit_prompt(enhanced_prompt, "Data analysis request")
 
     except Exception as e:
-        add_message(Message(RoleType.ASSISTANT, f"Error in LLM followup: {str(e)}", MessageType.ERROR))
+        add_message(Message(RoleType.ASSISTANT, f"Error in LLM followup: {str(e)}", MessageType.ERROR, group_id=get_current_group_id()))
 
 
 def _get_data_context(df):
