@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import random
+import time
 import uuid
 from io import StringIO
 
@@ -434,8 +435,12 @@ def set_question(question: str, render=True):
             st.session_state.messages = None
 
     else:
-        # Start a new group for this question/answer flow
-        group_id = start_new_group()
+        # For /followup commands, use the previous group to keep messages together
+        # For regular questions, start a new group
+        if is_followup_command(question):
+            group_id = use_previous_group()
+        else:
+            group_id = start_new_group()
 
         # Set question
         st.session_state.my_question = question
@@ -502,6 +507,42 @@ def start_new_group():
     """Start a new message group by generating a new group ID."""
     st.session_state.current_group_id = generate_group_id()
     return st.session_state.current_group_id
+
+
+def get_previous_group_id():
+    """Get the group_id from the last message that has one.
+
+    Used for /followup commands that should be grouped with the previous Q&A flow.
+    Returns None if no previous group exists.
+    """
+    if not hasattr(st.session_state, "messages") or not st.session_state.messages:
+        return None
+
+    # Find the last message with a group_id
+    for msg in reversed(st.session_state.messages):
+        group_id = getattr(msg, "group_id", None)
+        if group_id is not None:
+            return group_id
+    return None
+
+
+def use_previous_group():
+    """Set current group to the previous group's ID (for /followup commands).
+
+    Returns the previous group_id, or starts a new group if none exists.
+    """
+    previous_group_id = get_previous_group_id()
+    if previous_group_id:
+        st.session_state.current_group_id = previous_group_id
+        return previous_group_id
+    return start_new_group()
+
+
+def is_followup_command(question: str) -> bool:
+    """Check if a question is a /followup command."""
+    if not question:
+        return False
+    return question.strip().lower().startswith("/followup")
 
 
 def group_has_data_results(messages: list) -> bool:
@@ -695,7 +736,16 @@ def get_followup_questions(my_question, sql, df):
     vn_instance = get_vn()
     followup_questions = vn_instance.generate_followup_questions(question=my_question, sql=sql, df=df)
 
-    add_message(Message(RoleType.ASSISTANT, followup_questions, MessageType.FOLLOWUP, sql, my_question))
+    add_message(
+        Message(
+            RoleType.ASSISTANT,
+            followup_questions,
+            MessageType.FOLLOWUP,
+            sql,
+            my_question,
+            group_id=get_current_group_id(),
+        )
+    )
 
 
 # --- Private helper functions for rendering specific message types ---
@@ -962,6 +1012,11 @@ def render_message(message: Message, index: int):
 
 
 def add_message(message: Message, render=True):
+    # Automatically set group_id if not already set
+    # This ensures all messages in a flow are grouped together
+    if message.group_id is None:
+        message.group_id = get_current_group_id()
+
     message = message.save()
     st.session_state.messages.append(message)
 
@@ -1066,6 +1121,7 @@ def normal_message_flow(my_question: str):
         pass
 
     # If we have a thinking model, display the thinking stream
+    thinking_text = ""  # Initialize outside the try block for use later
     if has_thinking_model and hasattr(vn_instance, "stream_generate_sql"):
         try:
             thinking_chunks = []
@@ -1087,9 +1143,19 @@ def normal_message_flow(my_question: str):
                     elapsed_time = st.session_state.get("streamed_sql_elapsed_time", 0)
                     thinking_text = st.session_state.get("streamed_thinking", "")
 
+                    # Phase 1: Graceful transition - show completion indicator
+                    if thinking_text and thinking_text.strip():
+                        # Show "Done thinking" state for a brief moment
+                        thinking_placeholder.markdown(
+                            "✅ **Done thinking**\n\n" + "".join(thinking_chunks)
+                        )
+                        # Brief delay for visual continuity (1.5 seconds)
+                        time.sleep(1.5)
+
                     # Clear the placeholder - we'll add the thinking as a proper message
                     thinking_placeholder.empty()
 
+            # Phase 2: Persistent display - add thinking to chat history as collapsible expander
             # If we collected thinking text, add it as a proper message
             if thinking_text and thinking_text.strip():
                 add_message(
@@ -1103,7 +1169,7 @@ def normal_message_flow(my_question: str):
                         elapsed_time,
                         group_id=get_current_group_id(),
                     ),
-                    render=False,  # Don't render, we'll rerun at the end
+                    render=True,  # Render so it appears in chat history as collapsible expander
                 )
         except Exception as e:
             logger.warning(f"Failed to stream SQL generation: {e}")
