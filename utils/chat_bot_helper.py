@@ -545,6 +545,23 @@ def is_followup_command(question: str) -> bool:
     return question.strip().lower().startswith("/followup")
 
 
+def group_has_data_results(messages: list) -> bool:
+    """Check if a message group contains data results that support follow-up commands.
+
+    Returns True if the group contains a DATAFRAME or SUMMARY message type,
+    indicating that follow-up analysis commands would be applicable.
+    """
+    if not messages:
+        return False
+
+    data_types = {MessageType.DATAFRAME.value, MessageType.SUMMARY.value}
+    for message in messages:
+        msg_type = getattr(message, "type", None)
+        if msg_type in data_types:
+            return True
+    return False
+
+
 def group_messages_by_id(messages: list) -> list:
     """Group consecutive messages by their group_id.
 
@@ -613,13 +630,85 @@ def get_message_group_css() -> str:
     """
 
 
-def render_message_group(messages: list, group_index: int, start_index: int):
+def get_followup_command_suggestions() -> dict:
+    """Get a categorized dictionary of follow-up command suggestions.
+
+    Returns a dict with category names as keys and lists of (command, label, description) tuples as values.
+    These are the most commonly useful follow-up commands organized by category.
+    """
+    return {
+        "📊 Data Exploration": [
+            ("describe", "Describe", "Descriptive statistics"),
+            ("profile", "Profile", "Comprehensive profiling"),
+            ("datatypes", "Data Types", "Column type analysis"),
+            ("head 10", "Head 10", "First 10 rows"),
+            ("tail 10", "Tail 10", "Last 10 rows"),
+        ],
+        "🔍 Data Quality": [
+            ("missing", "Missing", "Missing data analysis"),
+            ("duplicates", "Duplicates", "Find duplicate rows"),
+        ],
+        "📈 Visualizations": [
+            ("heatmap", "Heatmap", "Correlation heatmap"),
+            ("wordcloud", "Word Cloud", "Text visualization"),
+        ],
+        "🤖 Machine Learning": [
+            ("clusters", "Clusters", "K-means clustering"),
+            ("pca", "PCA", "Principal components"),
+        ],
+        "📋 Reports": [
+            ("report", "Full Report", "Comprehensive analysis"),
+            ("summary", "Summary", "Executive summary"),
+            ("suggestions", "Suggestions", "Analysis suggestions"),
+        ],
+    }
+
+
+def render_followup_button(group_id: str):
+    """Render a follow-up button with a popover showing available commands in a grid.
+
+    Args:
+        group_id: The group ID to associate with follow-up commands
+    """
+    # Create a unique key based on group_id
+    button_key = f"followup_popover_{group_id}"
+
+    # Center the button using columns
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        with st.popover("Follow Up", use_container_width=True):
+            st.markdown("**Quick Analysis Commands**")
+            st.caption("Click to run on your query results")
+
+            categories = get_followup_command_suggestions()
+            for category, commands in categories.items():
+                st.markdown(f"**{category}**")
+                # Create a 3-column grid for commands
+                cols = st.columns(3)
+                for i, (cmd, label, description) in enumerate(commands):
+                    col_idx = i % 3
+                    with cols[col_idx]:
+                        if st.button(
+                            label,
+                            key=f"{button_key}_{cmd.replace(' ', '_')}",
+                            help=description,
+                            use_container_width=True,
+                        ):
+                            # Execute the follow-up command
+                            set_question(f"/followup {cmd}")
+
+            st.divider()
+            st.caption("Type `/followuphelp` for all commands")
+
+
+def render_message_group(messages: list, group_index: int, start_index: int, is_last_group: bool = False):
     """Render a group of messages within a styled container.
 
     Args:
         messages: List of messages in this group
         group_index: Index of the group for CSS styling
         start_index: Starting index for individual message rendering
+        is_last_group: Whether this is the last message group (shows follow-up button)
     """
     # Only apply grouping if there's a valid group_id (indicating it's part of a Q&A flow)
     has_group_id = messages and getattr(messages[0], "group_id", None) is not None
@@ -631,6 +720,12 @@ def render_message_group(messages: list, group_index: int, start_index: int):
             # Render each message in the group
             for i, message in enumerate(messages):
                 render_message(message, start_index + i)
+
+        # Show follow-up button after the last group if it has data results
+        if is_last_group and group_has_data_results(messages):
+            group_id = getattr(messages[0], "group_id", None)
+            if group_id:
+                render_followup_button(group_id)
     else:
         # No grouping - render messages individually
         for i, message in enumerate(messages):
