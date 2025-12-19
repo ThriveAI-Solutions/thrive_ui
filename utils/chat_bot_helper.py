@@ -585,16 +585,6 @@ def get_message_group_css() -> str:
             div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]):not(:has(div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]))):nth-of-type(even) {
                 background-color: rgba(11, 82, 88, 0.06) !important;
             }
-
-            /* Follow-up button wrapper - positioned to overlap container bottom border */
-            .followup-button-wrapper {
-                display: flex;
-                justify-content: center;
-                margin-top: -0.75rem;
-                margin-bottom: 0.5rem;
-                position: relative;
-                z-index: 10;
-            }
         </style>
     """
 

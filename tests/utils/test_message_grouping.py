@@ -143,10 +143,11 @@ class TestGetMessageGroupCSS:
         css = get_message_group_css()
         assert "border-radius:" in css
 
-    def test_css_includes_followup_button_wrapper(self):
-        """CSS should include follow-up button wrapper styling."""
+    def test_css_includes_alternating_background(self):
+        """CSS should include alternating background for visual distinction."""
         css = get_message_group_css()
-        assert "followup-button-wrapper" in css
+        assert "nth-of-type(even)" in css
+        assert "0.06" in css  # Slightly darker alternating background
 
 
 class TestGroupHasDataResults:
