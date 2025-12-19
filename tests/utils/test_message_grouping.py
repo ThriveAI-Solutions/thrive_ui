@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from utils.chat_bot_helper import group_messages_by_id, get_message_group_css
+from utils.chat_bot_helper import group_messages_by_id, get_message_group_css, is_followup_command
 
 
 class MockMessage:
@@ -135,3 +135,49 @@ class TestGetMessageGroupCSS:
         """CSS should include border radius for rounded corners."""
         css = get_message_group_css()
         assert "border-radius:" in css
+
+
+class TestIsFollowupCommand:
+    """Tests for the is_followup_command function."""
+
+    def test_followup_command_lowercase(self):
+        """Lowercase /followup should be detected."""
+        assert is_followup_command("/followup describe") is True
+
+    def test_followup_command_uppercase(self):
+        """Uppercase /FOLLOWUP should be detected."""
+        assert is_followup_command("/FOLLOWUP describe") is True
+
+    def test_followup_command_mixed_case(self):
+        """Mixed case /FollowUp should be detected."""
+        assert is_followup_command("/FollowUp describe") is True
+
+    def test_followup_command_with_whitespace(self):
+        """Command with leading whitespace should be detected."""
+        assert is_followup_command("  /followup describe") is True
+
+    def test_followup_without_args(self):
+        """Bare /followup should be detected (even if invalid command)."""
+        assert is_followup_command("/followup") is True
+
+    def test_non_followup_command(self):
+        """Other commands should not be detected as followup."""
+        assert is_followup_command("/help") is False
+        assert is_followup_command("/describe table") is False
+        assert is_followup_command("/tables") is False
+
+    def test_regular_question(self):
+        """Regular questions should not be detected as followup."""
+        assert is_followup_command("What is the average age?") is False
+
+    def test_empty_string(self):
+        """Empty string should return False."""
+        assert is_followup_command("") is False
+
+    def test_none_input(self):
+        """None input should return False."""
+        assert is_followup_command(None) is False
+
+    def test_followup_in_middle_of_text(self):
+        """Text containing /followup but not at start should return False."""
+        assert is_followup_command("Please run /followup describe") is False
