@@ -599,24 +599,42 @@ def get_message_group_css() -> str:
     """
 
 
-def get_followup_command_suggestions() -> list:
-    """Get a curated list of follow-up command suggestions.
+def get_followup_command_suggestions() -> dict:
+    """Get a categorized dictionary of follow-up command suggestions.
 
-    Returns a list of tuples: (command, label, description)
-    These are the most commonly useful follow-up commands.
+    Returns a dict with category names as keys and lists of (command, label, description) tuples as values.
+    These are the most commonly useful follow-up commands organized by category.
     """
-    return [
-        ("describe", "Describe", "Get descriptive statistics"),
-        ("profile", "Profile", "Comprehensive data profiling"),
-        ("heatmap", "Heatmap", "Correlation heatmap"),
-        ("missing", "Missing", "Analyze missing data"),
-        ("duplicates", "Duplicates", "Find duplicate rows"),
-        ("head 10", "Head 10", "View first 10 rows"),
-    ]
+    return {
+        "📊 Data Exploration": [
+            ("describe", "Describe", "Descriptive statistics"),
+            ("profile", "Profile", "Comprehensive profiling"),
+            ("datatypes", "Data Types", "Column type analysis"),
+            ("head 10", "Head 10", "First 10 rows"),
+            ("tail 10", "Tail 10", "Last 10 rows"),
+        ],
+        "🔍 Data Quality": [
+            ("missing", "Missing", "Missing data analysis"),
+            ("duplicates", "Duplicates", "Find duplicate rows"),
+        ],
+        "📈 Visualizations": [
+            ("heatmap", "Heatmap", "Correlation heatmap"),
+            ("wordcloud", "Word Cloud", "Text visualization"),
+        ],
+        "🤖 Machine Learning": [
+            ("clusters", "Clusters", "K-means clustering"),
+            ("pca", "PCA", "Principal components"),
+        ],
+        "📋 Reports": [
+            ("report", "Full Report", "Comprehensive analysis"),
+            ("summary", "Summary", "Executive summary"),
+            ("suggestions", "Suggestions", "Analysis suggestions"),
+        ],
+    }
 
 
 def render_followup_button(group_id: str):
-    """Render a follow-up button with a popover showing available commands.
+    """Render a follow-up button with a popover showing available commands in a grid.
 
     Args:
         group_id: The group ID to associate with follow-up commands
@@ -631,16 +649,22 @@ def render_followup_button(group_id: str):
             st.markdown("**Quick Analysis Commands**")
             st.caption("Click to run on your query results")
 
-            commands = get_followup_command_suggestions()
-            for cmd, label, description in commands:
-                if st.button(
-                    f"{label}",
-                    key=f"{button_key}_{cmd}",
-                    help=description,
-                    use_container_width=True,
-                ):
-                    # Execute the follow-up command
-                    set_question(f"/followup {cmd}")
+            categories = get_followup_command_suggestions()
+            for category, commands in categories.items():
+                st.markdown(f"**{category}**")
+                # Create a 3-column grid for commands
+                cols = st.columns(3)
+                for i, (cmd, label, description) in enumerate(commands):
+                    col_idx = i % 3
+                    with cols[col_idx]:
+                        if st.button(
+                            label,
+                            key=f"{button_key}_{cmd.replace(' ', '_')}",
+                            help=description,
+                            use_container_width=True,
+                        ):
+                            # Execute the follow-up command
+                            set_question(f"/followup {cmd}")
 
             st.divider()
             st.caption("Type `/followuphelp` for all commands")
