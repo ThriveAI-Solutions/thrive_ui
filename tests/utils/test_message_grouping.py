@@ -3,15 +3,22 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from utils.chat_bot_helper import group_messages_by_id, get_message_group_css
+from utils.chat_bot_helper import (
+    group_messages_by_id,
+    get_message_group_css,
+    group_has_data_results,
+    get_followup_command_suggestions,
+)
+from utils.enums import MessageType
 
 
 class MockMessage:
     """Simple mock for Message objects."""
 
-    def __init__(self, content: str, group_id: str = None):
+    def __init__(self, content: str, group_id: str = None, msg_type: str = None):
         self.content = content
         self.group_id = group_id
+        self.type = msg_type
 
 
 class TestGroupMessagesByID:
@@ -135,3 +142,80 @@ class TestGetMessageGroupCSS:
         """CSS should include border radius for rounded corners."""
         css = get_message_group_css()
         assert "border-radius:" in css
+
+    def test_css_includes_followup_button_wrapper(self):
+        """CSS should include follow-up button wrapper styling."""
+        css = get_message_group_css()
+        assert "followup-button-wrapper" in css
+
+
+class TestGroupHasDataResults:
+    """Tests for the group_has_data_results function."""
+
+    def test_empty_messages_returns_false(self):
+        """Empty input should return False."""
+        result = group_has_data_results([])
+        assert result is False
+
+    def test_messages_without_data_returns_false(self):
+        """Messages without DATAFRAME or SUMMARY type return False."""
+        msg1 = MockMessage("Hello", msg_type=MessageType.TEXT.value)
+        msg2 = MockMessage("SQL", msg_type=MessageType.SQL.value)
+        result = group_has_data_results([msg1, msg2])
+        assert result is False
+
+    def test_messages_with_dataframe_returns_true(self):
+        """Messages containing DATAFRAME type return True."""
+        msg1 = MockMessage("Question", msg_type=MessageType.TEXT.value)
+        msg2 = MockMessage("Data", msg_type=MessageType.DATAFRAME.value)
+        result = group_has_data_results([msg1, msg2])
+        assert result is True
+
+    def test_messages_with_summary_returns_true(self):
+        """Messages containing SUMMARY type return True."""
+        msg1 = MockMessage("Question", msg_type=MessageType.TEXT.value)
+        msg2 = MockMessage("Summary", msg_type=MessageType.SUMMARY.value)
+        result = group_has_data_results([msg1, msg2])
+        assert result is True
+
+    def test_messages_with_both_data_types_returns_true(self):
+        """Messages containing both DATAFRAME and SUMMARY return True."""
+        msg1 = MockMessage("Data", msg_type=MessageType.DATAFRAME.value)
+        msg2 = MockMessage("Summary", msg_type=MessageType.SUMMARY.value)
+        result = group_has_data_results([msg1, msg2])
+        assert result is True
+
+    def test_error_messages_return_false(self):
+        """Error messages should not trigger follow-up button."""
+        msg1 = MockMessage("Error", msg_type=MessageType.ERROR.value)
+        result = group_has_data_results([msg1])
+        assert result is False
+
+
+class TestGetFollowupCommandSuggestions:
+    """Tests for the get_followup_command_suggestions function."""
+
+    def test_returns_list_of_tuples(self):
+        """Should return a list of tuples."""
+        suggestions = get_followup_command_suggestions()
+        assert isinstance(suggestions, list)
+        assert len(suggestions) > 0
+        for item in suggestions:
+            assert isinstance(item, tuple)
+            assert len(item) == 3  # (command, label, description)
+
+    def test_includes_common_commands(self):
+        """Should include commonly useful follow-up commands."""
+        suggestions = get_followup_command_suggestions()
+        commands = [s[0] for s in suggestions]
+        # Check for some expected commands
+        assert "describe" in commands
+        assert "heatmap" in commands
+
+    def test_each_suggestion_has_required_fields(self):
+        """Each suggestion should have command, label, and description."""
+        suggestions = get_followup_command_suggestions()
+        for cmd, label, description in suggestions:
+            assert isinstance(cmd, str) and len(cmd) > 0
+            assert isinstance(label, str) and len(label) > 0
+            assert isinstance(description, str) and len(description) > 0
