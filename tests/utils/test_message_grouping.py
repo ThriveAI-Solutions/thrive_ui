@@ -195,27 +195,51 @@ class TestGroupHasDataResults:
 class TestGetFollowupCommandSuggestions:
     """Tests for the get_followup_command_suggestions function."""
 
-    def test_returns_list_of_tuples(self):
-        """Should return a list of tuples."""
+    def test_returns_dict_with_categories(self):
+        """Should return a dict with category names as keys."""
         suggestions = get_followup_command_suggestions()
-        assert isinstance(suggestions, list)
+        assert isinstance(suggestions, dict)
         assert len(suggestions) > 0
-        for item in suggestions:
-            assert isinstance(item, tuple)
-            assert len(item) == 3  # (command, label, description)
+        # Check that all keys are strings (category names)
+        for key in suggestions.keys():
+            assert isinstance(key, str)
+
+    def test_each_category_has_commands(self):
+        """Each category should have a list of command tuples."""
+        suggestions = get_followup_command_suggestions()
+        for category, commands in suggestions.items():
+            assert isinstance(commands, list)
+            assert len(commands) > 0
+            for item in commands:
+                assert isinstance(item, tuple)
+                assert len(item) == 3  # (command, label, description)
 
     def test_includes_common_commands(self):
         """Should include commonly useful follow-up commands."""
         suggestions = get_followup_command_suggestions()
-        commands = [s[0] for s in suggestions]
+        # Flatten all commands from all categories
+        all_commands = []
+        for commands in suggestions.values():
+            all_commands.extend([cmd[0] for cmd in commands])
         # Check for some expected commands
-        assert "describe" in commands
-        assert "heatmap" in commands
+        assert "describe" in all_commands
+        assert "heatmap" in all_commands
+        assert "profile" in all_commands
 
     def test_each_suggestion_has_required_fields(self):
         """Each suggestion should have command, label, and description."""
         suggestions = get_followup_command_suggestions()
-        for cmd, label, description in suggestions:
-            assert isinstance(cmd, str) and len(cmd) > 0
-            assert isinstance(label, str) and len(label) > 0
-            assert isinstance(description, str) and len(description) > 0
+        for category, commands in suggestions.items():
+            for cmd, label, description in commands:
+                assert isinstance(cmd, str) and len(cmd) > 0
+                assert isinstance(label, str) and len(label) > 0
+                assert isinstance(description, str) and len(description) > 0
+
+    def test_has_expected_categories(self):
+        """Should have the expected category structure."""
+        suggestions = get_followup_command_suggestions()
+        # Check for at least some expected categories (partial match due to emojis)
+        category_names = list(suggestions.keys())
+        assert any("Data Exploration" in cat for cat in category_names)
+        assert any("Data Quality" in cat for cat in category_names)
+        assert any("Visualizations" in cat for cat in category_names)
