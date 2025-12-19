@@ -291,3 +291,63 @@ class TestIsFollowupCommand:
     def test_followup_in_middle_of_text(self):
         """Text containing /followup but not at start should return False."""
         assert is_followup_command("Please run /followup describe") is False
+
+
+class TestRenderFollowupButtonWithAIQuestions:
+    """Tests for the render_followup_button function with AI Questions support (issue #22)."""
+
+    def test_render_followup_button_accepts_messages_parameter(self):
+        """render_followup_button should accept optional messages parameter."""
+        from utils.chat_bot_helper import render_followup_button
+        import inspect
+        sig = inspect.signature(render_followup_button)
+        params = list(sig.parameters.keys())
+        assert "group_id" in params
+        assert "messages" in params
+
+    def test_render_followup_button_messages_default_is_none(self):
+        """render_followup_button messages parameter should default to None."""
+        from utils.chat_bot_helper import render_followup_button
+        import inspect
+        sig = inspect.signature(render_followup_button)
+        messages_param = sig.parameters.get("messages")
+        assert messages_param is not None
+        assert messages_param.default is None
+
+
+class TestRenderSummaryActionsPopover:
+    """Tests for the _render_summary_actions_popover function (issue #22)."""
+
+    def test_actions_popover_does_not_have_followup_questions_button(self):
+        """Actions popover should not contain 'Follow-up Questions' button (moved to Follow Up)."""
+        from utils.chat_bot_helper import _render_summary_actions_popover
+        import inspect
+        # Get the source code of the function
+        source = inspect.getsource(_render_summary_actions_popover)
+        # Verify it doesn't have a st.button call with "Follow-up Questions"
+        # (the comment is ok, but there should be no actual button creation)
+        assert 'st.button(\n            "Follow-up Questions"' not in source
+        assert "st.button('Follow-up Questions'" not in source
+        assert 'key=f"follow_up_questions_{message.id}"' not in source
+
+
+class TestRenderSummaryIsLastGroupContext:
+    """Tests for the _render_summary function's is_last_group context (issue #22)."""
+
+    def test_render_summary_uses_is_last_group_from_session_state(self):
+        """_render_summary should read _render_is_last_group from session state."""
+        from utils.chat_bot_helper import _render_summary
+        import inspect
+        # Get the source code of the function
+        source = inspect.getsource(_render_summary)
+        # Verify it reads the is_last_group context
+        assert "_render_is_last_group" in source
+
+    def test_render_message_group_sets_is_last_group_context(self):
+        """render_message_group should set _render_is_last_group in session state."""
+        from utils.chat_bot_helper import render_message_group
+        import inspect
+        # Get the source code of the function
+        source = inspect.getsource(render_message_group)
+        # Verify it sets the is_last_group context
+        assert "_render_is_last_group" in source

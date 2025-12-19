@@ -402,7 +402,15 @@ class TestRenderMessage:
         mock_set_question,
         mock_generate_guid,
     ):
-        mock_st.session_state.get.return_value = True  # show_elapsed_time
+        # Mock session_state.get to handle different keys
+        def session_state_get_side_effect(key, default=None):
+            if key == "show_elapsed_time":
+                return True
+            elif key == "_render_is_last_group":
+                return True  # Required for Actions popover to render (issue #22)
+            return default
+
+        mock_st.session_state.get.side_effect = session_state_get_side_effect
         summary_content = "This is a summary."
         sql_query = "SELECT * FROM summary_table;"
         question_text = "What is the summary?"
@@ -442,7 +450,9 @@ class TestRenderMessage:
         # Set up columns mock to return different layouts based on parameters
         def columns_side_effect(spec):
             if spec == [0.1, 0.1, 0.6]:
-                return mock_cols  # For feedback buttons
+                return mock_cols  # For feedback buttons (when is_last_group=True)
+            elif spec == [0.1, 0.1, 0.8]:
+                return mock_cols  # For feedback buttons (when is_last_group=False)
             elif spec == (1, 1, 1, 1, 1):
                 return mock_chart_cols  # For chart buttons
             else:
@@ -482,23 +492,23 @@ class TestRenderMessage:
 
         # Check buttons within popover (order might vary, use assert_any_call or check call_args_list)
         # Button keys depend on message id assigned at save; match by label prefix instead
+        # Note: "Follow-up Questions" button was moved to the Follow Up popover in issue #22
         speak_call = next((c for c in mock_st.button.call_args_list if c[0][0] == "Speak Summary"), None)
         assert speak_call is not None, "Speak Summary button not called as expected"
-        follow_up_call = next((c for c in mock_st.button.call_args_list if c[0][0] == "Follow-up Questions"), None)
-        assert follow_up_call is not None, "Follow-up Questions button not called as expected"
         generate_table_call = next((c for c in mock_st.button.call_args_list if c[0][0] == "Generate Table"), None)
         assert generate_table_call is not None, "Generate Table button not called as expected"
-        generate_graph_call = next((c for c in mock_st.button.call_args_list if c[0][0] == "Generate Plotly"), None)
-        assert generate_graph_call is not None, "Generate Plotly button not called as expected"
+        generate_graph_call = next((c for c in mock_st.button.call_args_list if c[0][0] == "AI Generate Plotly"), None)
+        assert generate_graph_call is not None, "AI Generate Plotly button not called as expected"
+
+        # Verify "Follow-up Questions" button was removed from Actions popover (issue #22)
+        follow_up_call = next((c for c in mock_st.button.call_args_list if c[0][0] == "Follow-up Questions"), None)
+        assert follow_up_call is None, "Follow-up Questions button should NOT be in Actions popover (moved to Follow Up)"
 
         # Brittle check for button calls, assumes order. A more robust check would inspect call_args_list.
         # This part needs careful checking of exact lambda behavior or restructuring for easier testing if lambdas are complex.
         # For now, checking they are called:
         assert any(c == speak_call for c in mock_st.button.call_args_list), (
             "Speak Summary button not called as expected"
-        )
-        assert any(c == follow_up_call for c in mock_st.button.call_args_list), (
-            "Follow-up Questions button not called as expected"
         )
         assert any(c == generate_table_call for c in mock_st.button.call_args_list), (
             "Generate Table button not called as expected"
