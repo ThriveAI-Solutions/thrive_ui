@@ -49,9 +49,37 @@ This creates redundancy:
 
 ## Acceptance Criteria
 
-- [ ] Follow Up popover has "AI Questions" category with "Generate" button
-- [ ] Clicking "Generate" calls AI to generate follow-up questions
-- [ ] Actions popover no longer has "Follow-up Questions" button
-- [ ] Actions popover only appears on the last message group
-- [ ] All existing Actions functionality still works (Speak, Table, Charts, SQL)
-- [ ] Follow Up button behavior unchanged (only on last group with data)
+- [x] Follow Up popover has "AI Questions" category with "Generate" button
+- [x] Clicking "Generate" calls AI to generate follow-up questions
+- [x] Actions popover no longer has "Follow-up Questions" button
+- [x] Actions popover only appears on the last message group
+- [x] All existing Actions functionality still works (Speak, Table, Charts, SQL)
+- [x] Follow Up button behavior unchanged (only on last group with data)
+
+## Implementation Summary
+
+### Changes Made
+
+1. **`render_followup_button()`** - Added `messages` parameter to pass group context
+   - Finds SUMMARY message in the group to get question/SQL/DataFrame context
+   - Added "💡 AI Questions" section with "Generate" button
+   - Button calls `get_followup_questions()` with the stored context
+
+2. **`_render_summary_actions_popover()`** - Removed "Follow-up Questions" button
+   - Added comment explaining the button was moved to Follow Up popover
+
+3. **`_render_summary()`** - Added conditional rendering based on `is_last_group`
+   - Reads `_render_is_last_group` from session state
+   - Only renders Actions popover when `is_last_group=True`
+   - Adjusts column layout based on whether Actions is shown
+
+4. **`render_message_group()`** - Sets context for child renderers
+   - Sets `st.session_state["_render_is_last_group"]` before rendering messages
+   - Passes `messages` list to `render_followup_button()` for AI Questions
+
+### Tests Added
+
+- `TestRenderFollowupButtonWithAIQuestions` - Verifies new `messages` parameter
+- `TestRenderSummaryActionsPopover` - Verifies Follow-up Questions button removed
+- `TestRenderSummaryIsLastGroupContext` - Verifies is_last_group context passing
+- Updated `test_render_summary_message` to mock `_render_is_last_group`
