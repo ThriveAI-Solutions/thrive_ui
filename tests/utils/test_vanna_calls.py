@@ -794,3 +794,224 @@ class TestVannaServiceSecurity:
 
         user_context = UserContext(user_id="test", user_role=RoleTypeEnum.PATIENT.value)
         assert user_context.user_role == RoleTypeEnum.PATIENT.value
+
+
+@pytest.mark.usefixtures("mock_streamlit_secrets")
+class TestTrainEnhancedSchema:
+    """Tests for the train_enhanced_schema function."""
+
+    @patch("utils.vanna_calls.psycopg2.connect")
+    @patch("utils.vanna_calls.VannaService.from_streamlit_session")
+    @patch("utils.vanna_calls.read_forbidden_from_json")
+    @patch("utils.vanna_calls.get_configured_schema")
+    @patch("utils.vanna_calls.st.toast")
+    @patch("utils.vanna_calls.st.success")
+    def test_train_enhanced_schema_basic(
+        self,
+        mock_success,
+        mock_toast,
+        mock_get_schema,
+        mock_read_forbidden,
+        mock_vanna_service,
+        mock_psycopg2_connect,
+    ):
+        """Test basic train_enhanced_schema execution."""
+        from utils.vanna_calls import train_enhanced_schema
+
+        # Setup mocks
+        mock_get_schema.return_value = "public"
+        mock_read_forbidden.return_value = (["forbidden_table"], ["password"], "'forbidden_table'")
+
+        # Mock VannaService
+        mock_service = MagicMock()
+        mock_vanna_service.return_value = mock_service
+
+        # Mock database connection
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+        mock_psycopg2_connect.return_value = mock_conn
+
+        # Mock schema enricher methods via the cursor
+        # get_allowed_tables query result
+        mock_cursor.fetchall.side_effect = [
+            [("test_table",)],  # get_allowed_tables
+            [],  # discover_explicit_relationships
+            [],  # discover_implicit_relationships (id columns)
+            [],  # extract_view_definitions
+        ]
+
+        # Run with minimal options to reduce complexity
+        with patch("utils.schema_enrichment.SchemaEnricher") as MockEnricher:
+            mock_enricher_instance = MagicMock()
+            MockEnricher.return_value = mock_enricher_instance
+
+            mock_enricher_instance.get_allowed_tables.return_value = ["test_table"]
+            mock_enricher_instance.collect_column_statistics.return_value = []
+            mock_enricher_instance.discover_explicit_relationships.return_value = []
+            mock_enricher_instance.discover_implicit_relationships.return_value = []
+            mock_enricher_instance.extract_view_definitions.return_value = []
+            mock_enricher_instance.schema_graph.get_table_centrality.return_value = {}
+
+            result = train_enhanced_schema(
+                include_statistics=False,
+                include_relationships=False,
+                include_view_definitions=False,
+            )
+
+        assert result["success"] is True
+        mock_conn.close.assert_called_once()
+
+    @patch("utils.vanna_calls.VannaService.from_streamlit_session")
+    @patch("utils.vanna_calls.st.error")
+    def test_train_enhanced_schema_no_vanna_service(self, mock_error, mock_vanna_service):
+        """Test train_enhanced_schema handles missing VannaService."""
+        from utils.vanna_calls import train_enhanced_schema
+
+        mock_vanna_service.return_value = None
+
+        with patch("utils.vanna_calls.st.toast"):
+            result = train_enhanced_schema()
+
+        assert result["success"] is False
+        assert "VannaService not initialized" in result["error"]
+
+    @patch("utils.vanna_calls.psycopg2.connect")
+    @patch("utils.vanna_calls.VannaService.from_streamlit_session")
+    @patch("utils.vanna_calls.read_forbidden_from_json")
+    @patch("utils.vanna_calls.get_configured_schema")
+    @patch("utils.vanna_calls.st.toast")
+    @patch("utils.vanna_calls.st.success")
+    def test_train_enhanced_schema_with_statistics(
+        self,
+        mock_success,
+        mock_toast,
+        mock_get_schema,
+        mock_read_forbidden,
+        mock_vanna_service,
+        mock_psycopg2_connect,
+    ):
+        """Test train_enhanced_schema collects and trains statistics."""
+        from utils.schema_enrichment import ColumnStatistics
+        from utils.vanna_calls import train_enhanced_schema
+
+        # Setup mocks
+        mock_get_schema.return_value = "public"
+        mock_read_forbidden.return_value = ([], [], "")
+
+        # Mock VannaService
+        mock_service = MagicMock()
+        mock_vanna_service.return_value = mock_service
+
+        # Mock database connection
+        mock_conn = MagicMock()
+        mock_psycopg2_connect.return_value = mock_conn
+
+        # Create sample column statistics
+        sample_stats = ColumnStatistics(
+            table_name="users",
+            column_name="email",
+            data_type="varchar",
+            semantic_type="email",
+            total_count=100,
+            distinct_count=100,
+        )
+
+        with patch("utils.schema_enrichment.SchemaEnricher") as MockEnricher:
+            mock_enricher_instance = MagicMock()
+            MockEnricher.return_value = mock_enricher_instance
+
+            mock_enricher_instance.get_allowed_tables.return_value = ["users"]
+            mock_enricher_instance.collect_column_statistics.return_value = [sample_stats]
+            mock_enricher_instance.discover_explicit_relationships.return_value = []
+            mock_enricher_instance.discover_implicit_relationships.return_value = []
+            mock_enricher_instance.extract_view_definitions.return_value = []
+            mock_enricher_instance.schema_graph.get_table_centrality.return_value = {}
+
+            result = train_enhanced_schema(
+                include_statistics=True,
+                include_relationships=False,
+                include_view_definitions=False,
+            )
+
+        assert result["success"] is True
+        assert result["tables_processed"] == 1
+        assert result["statistics_trained"] == 1
+
+        # Verify training was called with documentation
+        mock_service.train.assert_called()
+        call_args = mock_service.train.call_args_list
+        assert any("documentation" in str(call) for call in call_args)
+
+    @patch("utils.vanna_calls.psycopg2.connect")
+    @patch("utils.vanna_calls.VannaService.from_streamlit_session")
+    @patch("utils.vanna_calls.read_forbidden_from_json")
+    @patch("utils.vanna_calls.get_configured_schema")
+    @patch("utils.vanna_calls.st.toast")
+    @patch("utils.vanna_calls.st.success")
+    def test_train_enhanced_schema_with_relationships(
+        self,
+        mock_success,
+        mock_toast,
+        mock_get_schema,
+        mock_read_forbidden,
+        mock_vanna_service,
+        mock_psycopg2_connect,
+    ):
+        """Test train_enhanced_schema discovers and trains relationships."""
+        from utils.schema_enrichment import TableRelationship
+        from utils.vanna_calls import train_enhanced_schema
+
+        # Setup mocks
+        mock_get_schema.return_value = "public"
+        mock_read_forbidden.return_value = ([], [], "")
+
+        # Mock VannaService
+        mock_service = MagicMock()
+        mock_vanna_service.return_value = mock_service
+
+        # Mock database connection
+        mock_conn = MagicMock()
+        mock_psycopg2_connect.return_value = mock_conn
+
+        # Create sample relationships
+        explicit_rel = TableRelationship(
+            source_table="orders",
+            source_column="user_id",
+            target_table="users",
+            target_column="id",
+            relationship_type="foreign_key",
+        )
+        implicit_rel = TableRelationship(
+            source_table="products",
+            source_column="category_id",
+            target_table="category",
+            target_column="id",
+            relationship_type="implicit",
+            confidence=0.8,
+        )
+
+        with patch("utils.schema_enrichment.SchemaEnricher") as MockEnricher:
+            mock_enricher_instance = MagicMock()
+            MockEnricher.return_value = mock_enricher_instance
+
+            mock_enricher_instance.get_allowed_tables.return_value = []
+            mock_enricher_instance.discover_explicit_relationships.return_value = [explicit_rel]
+            mock_enricher_instance.discover_implicit_relationships.return_value = [implicit_rel]
+            mock_enricher_instance.extract_view_definitions.return_value = []
+            mock_enricher_instance.schema_graph.get_table_centrality.return_value = {}
+
+            result = train_enhanced_schema(
+                include_statistics=False,
+                include_relationships=True,
+                include_view_definitions=False,
+            )
+
+        assert result["success"] is True
+        assert result["explicit_relationships"] == 1
+        assert result["implicit_relationships"] == 1
+        assert result["documentation_trained"] == 2
+
+        # Verify training was called for each relationship
+        assert mock_service.train.call_count >= 2

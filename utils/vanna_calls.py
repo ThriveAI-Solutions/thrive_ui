@@ -2440,6 +2440,180 @@ def train_file():
         logger.exception("%s", e)
 
 
+def train_enhanced_schema(
+    include_statistics: bool = True,
+    include_relationships: bool = True,
+    include_view_definitions: bool = True,
+    sample_limit: int = 1000,
+) -> dict:
+    """
+    Enhanced schema training using automatic enrichment.
+
+    This function uses the SchemaEnricher to automatically extract:
+    - Column statistics (min/max/distinct/null ratios)
+    - Table relationships (explicit FK + implicit naming patterns)
+    - Semantic column classifications
+    - View definitions
+
+    Args:
+        include_statistics: Whether to collect column statistics (default: True)
+        include_relationships: Whether to discover relationships (default: True)
+        include_view_definitions: Whether to extract view definitions (default: True)
+        sample_limit: Maximum rows to sample per column for statistics (default: 1000)
+
+    Returns:
+        dict: Results with counts of trained items
+    """
+    conn = None
+    try:
+        st.toast("🚀 Starting enhanced schema training...")
+        logger.info("Starting enhanced schema training with SchemaEnricher")
+
+        vanna_service = VannaService.from_streamlit_session()
+        if not vanna_service:
+            st.error("Failed to initialize VannaService")
+            return {"success": False, "error": "VannaService not initialized"}
+
+        # Get forbidden tables and columns
+        try:
+            forbidden_tables, forbidden_columns, _ = read_forbidden_from_json()
+            logger.info(f"Loaded {len(forbidden_tables)} forbidden tables, {len(forbidden_columns)} forbidden columns")
+        except Exception as e:
+            logger.warning(f"Error reading forbidden references: {e}")
+            forbidden_tables = []
+            forbidden_columns = []
+
+        # Get schema configuration
+        schema_name = get_configured_schema()
+        logger.info(f"Using schema: {schema_name}")
+
+        # Establish database connection
+        st.toast("📡 Connecting to database...")
+        conn = psycopg2.connect(
+            host=st.secrets["postgres"]["host"],
+            port=st.secrets["postgres"]["port"],
+            database=st.secrets["postgres"]["database"],
+            user=st.secrets["postgres"]["user"],
+            password=st.secrets["postgres"]["password"],
+        )
+
+        # Import and initialize SchemaEnricher
+        from utils.schema_enrichment import SchemaEnricher
+
+        enricher = SchemaEnricher(
+            connection=conn,
+            forbidden_tables=forbidden_tables,
+            forbidden_columns=forbidden_columns,
+        )
+
+        results = {
+            "success": True,
+            "tables_processed": 0,
+            "columns_analyzed": 0,
+            "explicit_relationships": 0,
+            "implicit_relationships": 0,
+            "documentation_trained": 0,
+            "statistics_trained": 0,
+            "views_documented": 0,
+        }
+
+        # Get allowed tables
+        tables = enricher.get_allowed_tables(schema_name)
+        total_tables = len(tables)
+        logger.info(f"Found {total_tables} allowed tables in schema '{schema_name}'")
+
+        if include_statistics:
+            st.toast(f"📊 Collecting statistics for {total_tables} tables...")
+            for idx, table in enumerate(tables):
+                st.toast(f"📊 Analyzing table {idx + 1}/{total_tables}: {table}")
+
+                try:
+                    stats_list = enricher.collect_column_statistics(table, schema_name, sample_limit)
+
+                    # Train documentation for each column
+                    for stats in stats_list:
+                        doc = stats.to_documentation()
+                        vanna_service.train(documentation=doc)
+                        results["statistics_trained"] += 1
+
+                    results["columns_analyzed"] += len(stats_list)
+                    results["tables_processed"] += 1
+
+                except Exception as e:
+                    logger.warning(f"Error collecting statistics for table {table}: {e}")
+
+        if include_relationships:
+            st.toast("🔗 Discovering table relationships...")
+
+            # Discover explicit FK relationships
+            explicit_rels = enricher.discover_explicit_relationships(schema_name)
+            results["explicit_relationships"] = len(explicit_rels)
+
+            # Train FK documentation
+            for rel in explicit_rels:
+                doc = rel.to_documentation()
+                vanna_service.train(documentation=doc)
+                results["documentation_trained"] += 1
+
+            # Discover implicit relationships
+            implicit_rels = enricher.discover_implicit_relationships(schema_name)
+            results["implicit_relationships"] = len(implicit_rels)
+
+            # Train implicit relationship documentation
+            for rel in implicit_rels:
+                doc = rel.to_documentation()
+                vanna_service.train(documentation=doc)
+                results["documentation_trained"] += 1
+
+            # Generate JOIN path documentation for central tables
+            centrality = enricher.schema_graph.get_table_centrality()
+            central_tables = [t for t, c in centrality.items() if c > 2]
+            if central_tables:
+                central_doc = (
+                    f"Central tables with many relationships: {', '.join(central_tables)}. "
+                    "These tables are commonly used in JOIN operations for combining data."
+                )
+                vanna_service.train(documentation=central_doc)
+                results["documentation_trained"] += 1
+
+        if include_view_definitions:
+            st.toast("📋 Documenting view definitions...")
+            views = enricher.extract_view_definitions(schema_name)
+
+            for view_info in views:
+                view_name = view_info["view_name"]
+                definition = view_info["definition"]
+
+                if definition:
+                    # Train view documentation
+                    view_doc = f"View '{view_name}' is defined as: {definition[:500]}{'...' if len(definition) > 500 else ''}"
+                    vanna_service.train(documentation=view_doc)
+                    results["views_documented"] += 1
+
+        # Final summary
+        st.success(f"""
+        🎉 Enhanced schema training completed!
+        📊 Tables processed: {results['tables_processed']}
+        📈 Columns analyzed: {results['columns_analyzed']}
+        🔗 FK relationships: {results['explicit_relationships']}
+        🔍 Implicit relationships: {results['implicit_relationships']}
+        📝 Statistics trained: {results['statistics_trained']}
+        📋 Views documented: {results['views_documented']}
+        """)
+
+        logger.info(f"Enhanced schema training completed: {results}")
+        return results
+
+    except Exception as e:
+        error_msg = f"Error in enhanced schema training: {e}"
+        st.error(error_msg)
+        logger.exception("Enhanced schema training error: %s", e)
+        return {"success": False, "error": str(e)}
+    finally:
+        if conn:
+            conn.close()
+
+
 def is_table_token(token):
     try:
         # Check if the token is an Identifier and not a Keyword or DML
