@@ -664,14 +664,23 @@ def get_followup_command_suggestions() -> dict:
     }
 
 
-def render_followup_button(group_id: str):
+def render_followup_button(group_id: str, messages: list = None):
     """Render a follow-up button with a popover showing available commands in a grid.
 
     Args:
         group_id: The group ID to associate with follow-up commands
+        messages: List of messages in the group (used to find context for AI questions)
     """
     # Create a unique key based on group_id
     button_key = f"followup_popover_{group_id}"
+
+    # Find the summary message in the group to get context for AI questions
+    summary_message = None
+    if messages:
+        for msg in messages:
+            if getattr(msg, "type", None) == MessageType.SUMMARY.value:
+                summary_message = msg
+                break
 
     # Center the button using columns
     col1, col2, col3 = st.columns([1, 1, 1])
@@ -697,6 +706,23 @@ def render_followup_button(group_id: str):
                             # Execute the follow-up command
                             set_question(f"/followup {cmd}")
 
+            # Add AI Questions section if we have context
+            if summary_message:
+                st.markdown("**💡 AI Questions**")
+                if st.button(
+                    "Generate",
+                    key=f"{button_key}_ai_questions",
+                    help="AI-generated follow-up questions",
+                    use_container_width=True,
+                ):
+                    # Parse the DataFrame from the summary message
+                    my_df = (
+                        pd.read_json(StringIO(summary_message.dataframe), orient="records")
+                        if summary_message.dataframe
+                        else pd.DataFrame()
+                    )
+                    get_followup_questions(summary_message.question, summary_message.query, my_df)
+
             st.divider()
             st.caption("Type `/followuphelp` for all commands")
 
@@ -708,10 +734,13 @@ def render_message_group(messages: list, group_index: int, start_index: int, is_
         messages: List of messages in this group
         group_index: Index of the group for CSS styling
         start_index: Starting index for individual message rendering
-        is_last_group: Whether this is the last message group (shows follow-up button)
+        is_last_group: Whether this is the last message group (shows follow-up and actions buttons)
     """
     # Only apply grouping if there's a valid group_id (indicating it's part of a Q&A flow)
     has_group_id = messages and getattr(messages[0], "group_id", None) is not None
+
+    # Set context for child renderers (e.g., _render_summary uses this to show Actions popover)
+    st.session_state["_render_is_last_group"] = is_last_group
 
     if has_group_id and len(messages) > 0:
         # Use Streamlit's native container with border=True
@@ -725,7 +754,7 @@ def render_message_group(messages: list, group_index: int, start_index: int, is_
         if is_last_group and group_has_data_results(messages):
             group_id = getattr(messages[0], "group_id", None)
             if group_id:
-                render_followup_button(group_id)
+                render_followup_button(group_id, messages)
     else:
         # No grouping - render messages individually
         for i, message in enumerate(messages):
@@ -831,13 +860,9 @@ def _render_dataframe(message: Message, index: int):
 
 def _render_summary_actions_popover(message: Message, index: int, my_df: pd.DataFrame):
     # Helper for the popover content within summary messages
+    # Note: "Follow-up Questions" has been moved to the Follow Up popover (render_followup_button)
     with st.popover("Actions", use_container_width=True):
         st.button("Speak Summary", key=f"speak_summary_{message.id}", on_click=lambda: speak(message.content))
-        st.button(
-            "Follow-up Questions",
-            key=f"follow_up_questions_{message.id}",
-            on_click=lambda: get_followup_questions(message.question, message.query, my_df),
-        )
         if st.button("Generate Table", key=f"table_{message.id}"):
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
             df_json_content = my_df.to_json(date_format="iso")
@@ -921,9 +946,15 @@ def _render_summary(message: Message, index: int):
         st.write(f"Elapsed Time: {message.elapsed_time}")
     st.markdown(message.content)
 
-    cols = st.columns(
-        [0.1, 0.1, 0.6]
-    )  # Note: Original was [0.1, 0.1, 0.6]. If popover is wider, might need adjustment.
+    # Check if this is the last group (context set by render_message_group)
+    is_last_group = st.session_state.get("_render_is_last_group", False)
+
+    # Determine column layout based on whether we show actions popover
+    if is_last_group:
+        cols = st.columns([0.1, 0.1, 0.6])
+    else:
+        cols = st.columns([0.1, 0.1, 0.8])
+
     with cols[0]:
         st.button(
             "👍",
@@ -940,10 +971,12 @@ def _render_summary(message: Message, index: int):
             on_click=set_feedback,
             args=(index, "down"),
         )
-    with cols[2]:
-        # message.dataframe is expected to be a JSON string from the Message object.
-        my_df = pd.read_json(StringIO(message.dataframe), orient="records") if message.dataframe else pd.DataFrame()
-        _render_summary_actions_popover(message, index, my_df)
+    # Only show Actions popover on the last message group
+    if is_last_group:
+        with cols[2]:
+            # message.dataframe is expected to be a JSON string from the Message object.
+            my_df = pd.read_json(StringIO(message.dataframe), orient="records") if message.dataframe else pd.DataFrame()
+            _render_summary_actions_popover(message, index, my_df)
 
 
 def _render_followup(message: Message, index: int):
