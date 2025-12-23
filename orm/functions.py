@@ -88,6 +88,8 @@ def set_user_preferences_in_session_state():
         st.session_state.min_message_id = user.min_message_id
         st.session_state.user_role = user.role.role.value
         st.session_state.user_theme = user.theme
+        st.session_state.selected_llm_provider = user.selected_llm_provider
+        st.session_state.selected_llm_model = user.selected_llm_model
         st.session_state.loaded = True  # dont call after initial load
         st.session_state.username = f"{user.first_name} {user.last_name}"
 
@@ -122,6 +124,8 @@ def save_user_settings():
             setattr(user, "show_elapsed_time", st.session_state.show_elapsed_time)
             setattr(user, "llm_fallback", st.session_state.llm_fallback)
             setattr(user, "min_message_id", st.session_state.min_message_id)
+            setattr(user, "selected_llm_provider", st.session_state.get("selected_llm_provider"))
+            setattr(user, "selected_llm_model", st.session_state.get("selected_llm_model"))
 
             # Commit the changes to the database
             session.commit()
@@ -140,14 +144,14 @@ def save_user_settings():
 def create_user(username: str, password: str, first_name: str, last_name: str, role_id: int, theme: str = None) -> bool:
     """
     Create a new user with the specified details.
-    
+
     Args:
         username: The username for the new user
         password: The password (will be hashed)
         first_name: User's first name
         last_name: User's last name
         role_id: The ID of the user role
-    
+
     Returns:
         bool: True if user was created successfully, False otherwise
     """
@@ -157,10 +161,10 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
             existing_user = session.query(User).filter(func.lower(User.username) == username.lower()).first()
             if existing_user:
                 return False
-            
+
             # Hash the password using SHA-256 (matching existing pattern)
             hashed_password = hashlib.sha256(password.encode()).hexdigest()
-            
+
             # Create new user
             new_user = User(
                 username=username,
@@ -181,13 +185,13 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
                 show_elapsed_time=True,
                 llm_fallback=False,
                 min_message_id=0,
-                theme=theme
+                theme=theme,
             )
-            
+
             session.add(new_user)
             session.commit()
             return True
-            
+
     except Exception as e:
         logger.error(f"Error creating user: {e}")
         return False
@@ -211,40 +215,49 @@ def get_all_users():
             users = session.query(User).options(joinedload(User.role)).all()
             user_list = []
             for user in users:
-                user_list.append({
-                    'id': user.id,
-                    'username': user.username,
-                    'first_name': user.first_name,
-                    'last_name': user.last_name,
-                    'role_id': user.user_role_id,
-                    'role_name': user.role.role_name if user.role else 'No Role',
-                    'theme': user.theme,
-                    'created_at': user.created_at
-                })
+                user_list.append(
+                    {
+                        "id": user.id,
+                        "username": user.username,
+                        "first_name": user.first_name,
+                        "last_name": user.last_name,
+                        "role_id": user.user_role_id,
+                        "role_name": user.role.role_name if user.role else "No Role",
+                        "theme": user.theme,
+                        "created_at": user.created_at,
+                    }
+                )
             return user_list
     except Exception as e:
         logger.error(f"Error fetching users: {e}")
         return []
 
 
-def update_user(user_id: int, username: str = None, first_name: str = None, 
-                last_name: str = None, role_id: int = None, theme: str = None) -> bool:
+def update_user(
+    user_id: int,
+    username: str = None,
+    first_name: str = None,
+    last_name: str = None,
+    role_id: int = None,
+    theme: str = None,
+) -> bool:
     """Update user details."""
     try:
         with SessionLocal() as session:
             user = session.query(User).filter(User.id == user_id).first()
             if not user:
                 return False
-            
+
             # Check if new username is taken (if changing username)
             if username and username != user.username:
-                existing = session.query(User).filter(
-                    func.lower(User.username) == username.lower(),
-                    User.id != user_id
-                ).first()
+                existing = (
+                    session.query(User)
+                    .filter(func.lower(User.username) == username.lower(), User.id != user_id)
+                    .first()
+                )
                 if existing:
                     return False
-            
+
             # Update fields if provided
             if username:
                 user.username = username
@@ -256,10 +269,10 @@ def update_user(user_id: int, username: str = None, first_name: str = None,
                 user.user_role_id = role_id
             if theme:
                 user.theme = theme
-            
+
             session.commit()
             return True
-            
+
     except Exception as e:
         logger.error(f"Error updating user: {e}")
         return False
@@ -272,15 +285,15 @@ def delete_user(user_id: int) -> bool:
             user = session.query(User).filter(User.id == user_id).first()
             if not user:
                 return False
-            
+
             # Delete associated messages first
             session.query(Message).filter(Message.user_id == user_id).delete()
-            
+
             # Delete the user
             session.delete(user)
             session.commit()
             return True
-            
+
     except Exception as e:
         logger.error(f"Error deleting user: {e}")
         return False
@@ -362,6 +375,8 @@ def update_user_preferences(user_id: int, **preferences) -> bool:
                 "show_elapsed_time",
                 "llm_fallback",
                 "min_message_id",
+                "selected_llm_provider",
+                "selected_llm_model",
             }
             for key, value in preferences.items():
                 if key in allowed_fields:
@@ -456,10 +471,10 @@ def get_user_daily_stats(user_id: int, days: int = 7):
 
         with SessionLocal() as session:
             # SQLite strftime('%Y-%m-%d', created_at) groups by date; works also in Postgres with date_trunc but we use generic
-            date_expr = func.strftime('%Y-%m-%d', Message.created_at)
+            date_expr = func.strftime("%Y-%m-%d", Message.created_at)
             rows = (
                 session.query(
-                    date_expr.label('d'),
+                    date_expr.label("d"),
                     func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
                     func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
                     func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
@@ -467,29 +482,32 @@ def get_user_daily_stats(user_id: int, days: int = 7):
                     func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
                 )
                 .filter(Message.user_id == user_id)
-                .group_by('d')
-                .order_by('d')
+                .group_by("d")
+                .order_by("d")
                 .all()
             )
 
         # Build a dense sequence of dates over the requested window, default missing to zeros
         import datetime as _dt
+
         today = _dt.date.today()
         start = today - _dt.timedelta(days=days - 1)
         by_date = {r.d: r for r in rows}
         output = []
         for i in range(days):
             d = start + _dt.timedelta(days=i)
-            key = d.strftime('%Y-%m-%d')
+            key = d.strftime("%Y-%m-%d")
             r = by_date.get(key)
-            output.append({
-                'date': key,
-                'questions': int((r.questions if r else 0) or 0),
-                'charts': int((r.charts if r else 0) or 0),
-                'errors': int((r.errors if r else 0) or 0),
-                'dataframes': int((r.dataframes if r else 0) or 0),
-                'summaries': int((r.summaries if r else 0) or 0),
-            })
+            output.append(
+                {
+                    "date": key,
+                    "questions": int((r.questions if r else 0) or 0),
+                    "charts": int((r.charts if r else 0) or 0),
+                    "errors": int((r.errors if r else 0) or 0),
+                    "dataframes": int((r.dataframes if r else 0) or 0),
+                    "summaries": int((r.summaries if r else 0) or 0),
+                }
+            )
         return output
     except Exception as e:
         logger.error(f"Error fetching user daily stats: {e}")
@@ -502,23 +520,17 @@ def get_user_recent_questions(user_id: int, limit: int = 200):
     """
     try:
         with SessionLocal() as session:
-            user_q = (
-                session.query(Message.content.label("q"), Message.created_at.label("ts"))
-                .filter(
-                    Message.user_id == user_id,
-                    Message.role == RoleType.USER.value,
-                    Message.content.isnot(None),
-                    func.length(Message.content) > 0,
-                )
+            user_q = session.query(Message.content.label("q"), Message.created_at.label("ts")).filter(
+                Message.user_id == user_id,
+                Message.role == RoleType.USER.value,
+                Message.content.isnot(None),
+                func.length(Message.content) > 0,
             )
-            asst_q = (
-                session.query(Message.question.label("q"), Message.created_at.label("ts"))
-                .filter(
-                    Message.user_id == user_id,
-                    Message.role == RoleType.ASSISTANT.value,
-                    Message.question.isnot(None),
-                    func.length(Message.question) > 0,
-                )
+            asst_q = session.query(Message.question.label("q"), Message.created_at.label("ts")).filter(
+                Message.user_id == user_id,
+                Message.role == RoleType.ASSISTANT.value,
+                Message.question.isnot(None),
+                func.length(Message.question) > 0,
             )
 
             union_q = user_q.union_all(asst_q).subquery()
@@ -543,23 +555,17 @@ def get_user_questions_page(user_id: int, page: int = 1, page_size: int = 50):
     try:
         with SessionLocal() as session:
             # Combine user content and assistant question, then dedupe by text keeping most recent timestamp
-            user_q = (
-                session.query(Message.content.label("q"), Message.created_at.label("ts"))
-                .filter(
-                    Message.user_id == user_id,
-                    Message.role == RoleType.USER.value,
-                    Message.content.isnot(None),
-                    func.length(Message.content) > 0,
-                )
+            user_q = session.query(Message.content.label("q"), Message.created_at.label("ts")).filter(
+                Message.user_id == user_id,
+                Message.role == RoleType.USER.value,
+                Message.content.isnot(None),
+                func.length(Message.content) > 0,
             )
-            asst_q = (
-                session.query(Message.question.label("q"), Message.created_at.label("ts"))
-                .filter(
-                    Message.user_id == user_id,
-                    Message.role == RoleType.ASSISTANT.value,
-                    Message.question.isnot(None),
-                    func.length(Message.question) > 0,
-                )
+            asst_q = session.query(Message.question.label("q"), Message.created_at.label("ts")).filter(
+                Message.user_id == user_id,
+                Message.role == RoleType.ASSISTANT.value,
+                Message.question.isnot(None),
+                func.length(Message.question) > 0,
             )
             union_q = user_q.union_all(asst_q).subquery()
             grouped_sub = (
@@ -601,7 +607,7 @@ def get_user_questions_page(user_id: int, page: int = 1, page_size: int = 50):
                     func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
                     func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
                     func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
-                    func.sum(func.coalesce(Message.elapsed_time, 0)).label("elapsed")
+                    func.sum(func.coalesce(Message.elapsed_time, 0)).label("elapsed"),
                 )
                 .filter(
                     Message.user_id == user_id,
@@ -623,12 +629,14 @@ def get_user_questions_page(user_id: int, page: int = 1, page_size: int = 50):
                 errors = int(getattr(m, "errors", 0) or 0) if m else 0
                 elapsed = float(getattr(m, "elapsed", 0) or 0.0) if m else 0.0
                 success = (charts + dataframes + summaries) > 0 and errors == 0
-                items.append({
-                    "question": q,
-                    "created_at": created_at.isoformat() if hasattr(created_at, 'isoformat') else str(created_at),
-                    "status": "Success" if success else ("Error" if errors > 0 else "Unknown"),
-                    "elapsed_seconds": round(elapsed, 6),
-                })
+                items.append(
+                    {
+                        "question": q,
+                        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+                        "status": "Success" if success else ("Error" if errors > 0 else "Unknown"),
+                        "elapsed_seconds": round(elapsed, 6),
+                    }
+                )
 
             return {"items": items, "total": int(total)}
     except Exception as e:

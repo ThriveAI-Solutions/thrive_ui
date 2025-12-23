@@ -26,6 +26,7 @@ def _read_metrics(days: int = 30):
         MessageType.ST_SCATTER_CHART.value,
     ]
     import datetime as _dt
+
     since = _dt.datetime.now() - _dt.timedelta(days=days)
 
     with SessionLocal() as session:
@@ -38,27 +39,27 @@ def _read_metrics(days: int = 30):
         )
 
         # Over-time counts
-        date_expr = func.strftime('%Y-%m-%d', Message.created_at)
+        date_expr = func.strftime("%Y-%m-%d", Message.created_at)
         over_time = (
             session.query(
-                date_expr.label('d'),
-                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label('questions'),
-                func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label('charts'),
-                func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label('summaries'),
-                func.sum(case((Message.type == MessageType.SQL.value, 1), else_=0)).label('sql'),
-                func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label('errors'),
+                date_expr.label("d"),
+                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
+                func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                func.sum(case((Message.type == MessageType.SQL.value, 1), else_=0)).label("sql"),
+                func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
             )
             .filter(Message.created_at >= since)
-            .group_by('d')
-            .order_by('d')
+            .group_by("d")
+            .order_by("d")
             .all()
         )
 
         # Over-time conversion: results (charts+dataframes+summaries) / questions
         result_over_time = (
             session.query(
-                date_expr.label('d'),
-                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label('questions'),
+                date_expr.label("d"),
+                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
                 func.sum(
                     case(
                         (
@@ -67,11 +68,11 @@ def _read_metrics(days: int = 30):
                         ),
                         else_=0,
                     )
-                ).label('results'),
+                ).label("results"),
             )
             .filter(Message.created_at >= since)
-            .group_by('d')
-            .order_by('d')
+            .group_by("d")
+            .order_by("d")
             .all()
         )
 
@@ -79,6 +80,7 @@ def _read_metrics(days: int = 30):
         # Pull raw elapsed times and compute stats in Python for SQLite compatibility
         def _compute_stats_for_query(q):
             import numpy as np
+
             vals = [float(v or 0.0) for (v,) in q if v is not None]
             n = len(vals)
             if n == 0:
@@ -131,29 +133,32 @@ def _read_metrics(days: int = 30):
 
 def _to_dense_days(rows, days: int):
     import datetime as _dt
+
     today = _dt.date.today()
     start = today - _dt.timedelta(days=days - 1)
     by_date = {r.d: r for r in rows}
     out = []
     for i in range(days):
         d = start + _dt.timedelta(days=i)
-        k = d.strftime('%Y-%m-%d')
+        k = d.strftime("%Y-%m-%d")
         r = by_date.get(k)
-        out.append({
-            'date': k,
-            'questions': int((r.questions if r else 0) or 0),
-            'charts': int((r.charts if r else 0) or 0),
-            'summaries': int((r.summaries if r else 0) or 0),
-            'sql': int((r.sql if r else 0) or 0),
-            'errors': int((r.errors if r else 0) or 0),
-        })
+        out.append(
+            {
+                "date": k,
+                "questions": int((r.questions if r else 0) or 0),
+                "charts": int((r.charts if r else 0) or 0),
+                "summaries": int((r.summaries if r else 0) or 0),
+                "sql": int((r.sql if r else 0) or 0),
+                "errors": int((r.errors if r else 0) or 0),
+            }
+        )
     return pd.DataFrame(out)
 
 
 def _guard_admin():
     from orm.models import RoleTypeEnum
 
-    if st.session_state.get('user_role') != RoleTypeEnum.ADMIN.value:
+    if st.session_state.get("user_role") != RoleTypeEnum.ADMIN.value:
         st.error("You don't have permission to view this page.")
         st.stop()
 
@@ -194,25 +199,32 @@ def main():
     # Over time chart
     if not df.empty:
         import plotly.express as px
-        mdf = df.melt(id_vars=["date"], value_vars=["questions", "sql", "summaries", "charts", "errors"], var_name="metric", value_name="count")
-        mdf["date"] = pd.to_datetime(mdf["date"]) 
+
+        mdf = df.melt(
+            id_vars=["date"],
+            value_vars=["questions", "sql", "summaries", "charts", "errors"],
+            var_name="metric",
+            value_name="count",
+        )
+        mdf["date"] = pd.to_datetime(mdf["date"])
         fig = px.line(mdf, x="date", y="count", color="metric", markers=True)
         fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), legend_title_text="")
         st.plotly_chart(fig, use_container_width=True)
 
         # Conversion over time: build dense frame for questions/results
         import datetime as _dt
+
         start = (pd.Timestamp.today().normalize() - pd.Timedelta(days=days_int - 1)).date()
         by_date = {r.d: {"questions": int(r.questions or 0), "results": int(r.results or 0)} for r in result_over_time}
         conv_rows = []
         for i in range(days_int):
-            d = (pd.Timestamp(start) + pd.Timedelta(days=i)).strftime('%Y-%m-%d')
+            d = (pd.Timestamp(start) + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
             vals = by_date.get(d, {"questions": 0, "results": 0})
             q = vals["questions"]
             res = vals["results"]
             conv_rows.append({"date": d, "questions": q, "results": res, "conversion": (res / q) if q else 0})
         conv_df = pd.DataFrame(conv_rows)
-        conv_df["date"] = pd.to_datetime(conv_df["date"]) 
+        conv_df["date"] = pd.to_datetime(conv_df["date"])
         cfig = px.line(conv_df, x="date", y="conversion", title="Conversion (results/questions) over time")
         cfig.update_layout(margin=dict(l=0, r=0, t=30, b=0))
         st.plotly_chart(cfig, use_container_width=True)
@@ -241,24 +253,59 @@ def main():
 
     # Per-type stats (SQL, Summary, Chart)
     st.subheader("Performance by Output Type")
-    pt_df = pd.DataFrame([
-        {"Type": "SQL", "Avg (s)": perf_types["sql"]["avg"], "Min (s)": perf_types["sql"]["min"], "Max (s)": perf_types["sql"]["max"], "Std Dev (s)": perf_types["sql"]["stddev"], "Median (s)": perf_types["sql"]["median"], "Samples": perf_types["sql"]["n"]},
-        {"Type": "Summary", "Avg (s)": perf_types["summary"]["avg"], "Min (s)": perf_types["summary"]["min"], "Max (s)": perf_types["summary"]["max"], "Std Dev (s)": perf_types["summary"]["stddev"], "Median (s)": perf_types["summary"]["median"], "Samples": perf_types["summary"]["n"]},
-        {"Type": "Chart", "Avg (s)": perf_types["chart"]["avg"], "Min (s)": perf_types["chart"]["min"], "Max (s)": perf_types["chart"]["max"], "Std Dev (s)": perf_types["chart"]["stddev"], "Median (s)": perf_types["chart"]["median"], "Samples": perf_types["chart"]["n"]},
-        {"Type": "DataFrame", "Avg (s)": perf_types["dataframe"]["avg"], "Min (s)": perf_types["dataframe"]["min"], "Max (s)": perf_types["dataframe"]["max"], "Std Dev (s)": perf_types["dataframe"]["stddev"], "Median (s)": perf_types["dataframe"]["median"], "Samples": perf_types["dataframe"]["n"]},
-    ])
+    pt_df = pd.DataFrame(
+        [
+            {
+                "Type": "SQL",
+                "Avg (s)": perf_types["sql"]["avg"],
+                "Min (s)": perf_types["sql"]["min"],
+                "Max (s)": perf_types["sql"]["max"],
+                "Std Dev (s)": perf_types["sql"]["stddev"],
+                "Median (s)": perf_types["sql"]["median"],
+                "Samples": perf_types["sql"]["n"],
+            },
+            {
+                "Type": "Summary",
+                "Avg (s)": perf_types["summary"]["avg"],
+                "Min (s)": perf_types["summary"]["min"],
+                "Max (s)": perf_types["summary"]["max"],
+                "Std Dev (s)": perf_types["summary"]["stddev"],
+                "Median (s)": perf_types["summary"]["median"],
+                "Samples": perf_types["summary"]["n"],
+            },
+            {
+                "Type": "Chart",
+                "Avg (s)": perf_types["chart"]["avg"],
+                "Min (s)": perf_types["chart"]["min"],
+                "Max (s)": perf_types["chart"]["max"],
+                "Std Dev (s)": perf_types["chart"]["stddev"],
+                "Median (s)": perf_types["chart"]["median"],
+                "Samples": perf_types["chart"]["n"],
+            },
+            {
+                "Type": "DataFrame",
+                "Avg (s)": perf_types["dataframe"]["avg"],
+                "Min (s)": perf_types["dataframe"]["min"],
+                "Max (s)": perf_types["dataframe"]["max"],
+                "Std Dev (s)": perf_types["dataframe"]["stddev"],
+                "Median (s)": perf_types["dataframe"]["median"],
+                "Samples": perf_types["dataframe"]["n"],
+            },
+        ]
+    )
     st.dataframe(pt_df, use_container_width=True, hide_index=True)
 
     # Distribution
     with SessionLocal() as session:
         dist = (
-            session.query(func.coalesce(Message.elapsed_time, 0).label('elapsed'))
+            session.query(func.coalesce(Message.elapsed_time, 0).label("elapsed"))
             .filter(Message.role == RoleType.ASSISTANT.value)
             .all()
         )
     if dist:
         import numpy as np
         import plotly.express as px
+
         arr = np.array([float(r.elapsed or 0) for r in dist])
         hist = pd.DataFrame({"elapsed": arr})
         fig2 = px.histogram(hist, x="elapsed", nbins=40, title="Elapsed time distribution (s)")
@@ -272,10 +319,11 @@ def main():
     import datetime as _dt
 
     import plotly.express as px
+
     since = _dt.datetime.now() - _dt.timedelta(days=days_int)
     with SessionLocal() as session:
         top_rows = (
-            session.query(User.username, func.count().label('questions'))
+            session.query(User.username, func.count().label("questions"))
             .join(Message, Message.user_id == User.id)
             .filter(Message.role == RoleType.USER.value, Message.created_at >= since)
             .group_by(User.username)
@@ -297,9 +345,9 @@ def main():
     with SessionLocal() as session:
         base = (
             session.query(
-                Message.content.label('question'),
-                Message.created_at.label('asked_at'),
-                User.username.label('username'),
+                Message.content.label("question"),
+                Message.created_at.label("asked_at"),
+                User.username.label("username"),
             )
             .join(User, User.id == Message.user_id)
             .filter(Message.role == RoleType.USER.value)
@@ -319,12 +367,12 @@ def main():
         if questions:
             agg = (
                 session.query(
-                    Message.question.label('q'),
-                    func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label('charts'),
-                    func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label('dataframes'),
-                    func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label('summaries'),
-                    func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label('errors'),
-                    func.sum(func.coalesce(Message.elapsed_time, 0)).label('elapsed'),
+                    Message.question.label("q"),
+                    func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                    func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
+                    func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                    func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
+                    func.sum(func.coalesce(Message.elapsed_time, 0)).label("elapsed"),
                 )
                 .filter(
                     Message.role == RoleType.ASSISTANT.value,
@@ -338,15 +386,21 @@ def main():
     latest_rows = []
     for question, asked_at, username in base:
         m = metrics.get(question)
-        errors = int(getattr(m, 'errors', 0) or 0) if m else 0
-        success = (int(getattr(m, 'charts', 0) or 0) + int(getattr(m, 'dataframes', 0) or 0) + int(getattr(m, 'summaries', 0) or 0)) > 0 and errors == 0
-        latest_rows.append({
-            'User': username,
-            'Question': question,
-            'Asked At': asked_at,
-            'Status': 'Success' if success else ('Error' if errors > 0 else 'Unknown'),
-            'Elapsed (s)': round(float(getattr(m, 'elapsed', 0) or 0.0), 3) if m else 0.0,
-        })
+        errors = int(getattr(m, "errors", 0) or 0) if m else 0
+        success = (
+            int(getattr(m, "charts", 0) or 0)
+            + int(getattr(m, "dataframes", 0) or 0)
+            + int(getattr(m, "summaries", 0) or 0)
+        ) > 0 and errors == 0
+        latest_rows.append(
+            {
+                "User": username,
+                "Question": question,
+                "Asked At": asked_at,
+                "Status": "Success" if success else ("Error" if errors > 0 else "Unknown"),
+                "Elapsed (s)": round(float(getattr(m, "elapsed", 0) or 0.0), 3) if m else 0.0,
+            }
+        )
     if latest_rows:
         ldf = pd.DataFrame(latest_rows)
         st.dataframe(ldf, use_container_width=True, hide_index=True)
@@ -359,11 +413,11 @@ def main():
         rows = (
             session.query(
                 User.username,
-                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label('questions'),
-                func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label('dataframes'),
-                func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label('summaries'),
-                func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label('charts'),
-                func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label('errors'),
+                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
+                func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
+                func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
             )
             .join(Message, Message.user_id == User.id, isouter=True)
             .group_by(User.username)
@@ -371,10 +425,12 @@ def main():
         )
     if rows:
         audf = pd.DataFrame(rows, columns=["User", "Questions", "DataFrames", "Summaries", "Charts", "Errors"])
-        st.dataframe(audf.sort_values(["Questions", "Errors"], ascending=[False, True]), use_container_width=True, hide_index=True)
+        st.dataframe(
+            audf.sort_values(["Questions", "Errors"], ascending=[False, True]),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 if __name__ == "__main__":
     main()
-
-
