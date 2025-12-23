@@ -17,7 +17,14 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
 from orm.models import Message, SessionLocal
-from utils.chat_bot_helper import add_message, set_question, get_vn, normal_message_flow, add_acknowledgement, get_current_group_id
+from utils.chat_bot_helper import (
+    add_message,
+    set_question,
+    get_vn,
+    normal_message_flow,
+    add_acknowledgement,
+    get_current_group_id,
+)
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import (
     read_forbidden_from_json,
@@ -445,20 +452,41 @@ def is_magic_do_magic(question, previous_df=None):
             for key, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
                 match = re.match(key, question.strip())
                 if match:
-                    add_message(Message(RoleType.ASSISTANT, "Sounds like followup magic!", MessageType.TEXT, group_id=get_current_group_id()))
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            "Sounds like followup magic!",
+                            MessageType.TEXT,
+                            group_id=get_current_group_id(),
+                        )
+                    )
                     meta["func"](question, match.groupdict(), previous_df)
                     return True
         else:
             for key, meta in MAGIC_RENDERERS.items():
-                match = re.match(key, question)# .strip()
+                match = re.match(key, question)  # .strip()
                 if match:
                     if meta["func"] != _followup and meta["func"] != _history_search:
-                        add_message(Message(RoleType.ASSISTANT, "Sounds like magic!", MessageType.TEXT, group_id=get_current_group_id()))
+                        add_message(
+                            Message(
+                                RoleType.ASSISTANT,
+                                "Sounds like magic!",
+                                MessageType.TEXT,
+                                group_id=get_current_group_id(),
+                            )
+                        )
                     meta["func"](question, match.groupdict(), None)
                     return True
         return False
     except Exception as e:
-        add_message(Message(RoleType.ASSISTANT, f"Error processing magic command: {str(e)}", MessageType.ERROR, group_id=get_current_group_id()))
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                f"Error processing magic command: {str(e)}",
+                MessageType.ERROR,
+                group_id=get_current_group_id(),
+            )
+        )
         return False
 
 
@@ -627,48 +655,53 @@ def _followup_help(question, tuple, previous_df):
 
 def _history_search(question, match_dict, previous_df):
     """Find the most recent thumbs-up summary and recreate all messages from that group in chronological order."""
-    try:    
+    try:
         # Get the search sentence from the question
         search_text = match_dict.get("search_text", "").strip().lower()
-        
+
         if not search_text:
             add_message(Message(RoleType.ASSISTANT, "Please provide a search term after /h", MessageType.ERROR))
             return
-        
+
         # Get current user ID from session
         user_id_str = st.session_state.cookies.get("user_id")
         if not user_id_str:
             add_message(Message(RoleType.ASSISTANT, "User not authenticated", MessageType.ERROR))
             return
-        
+
         try:
             user_id = int(user_id_str)
         except (ValueError, TypeError):
             add_message(Message(RoleType.ASSISTANT, "Invalid user ID", MessageType.ERROR))
             return
-        
+
         # Query the database for thumbs-up summaries and find best match using fuzzy matching
         with SessionLocal() as session:
             from orm.models import Message as DBMessage
-            
+
             # Get all thumbs-up summaries from this user
-            all_thumbs_up_summaries = session.query(DBMessage).filter(
-                DBMessage.user_id == user_id,
-                DBMessage.role == 'assistant',
-                DBMessage.type == 'summary',
-                DBMessage.feedback == 'up',
-                DBMessage.group_id.isnot(None)  # Must have a group_id
-            ).order_by(DBMessage.created_at.desc()).all()
-            
+            all_thumbs_up_summaries = (
+                session.query(DBMessage)
+                .filter(
+                    DBMessage.user_id == user_id,
+                    DBMessage.role == "assistant",
+                    DBMessage.type == "summary",
+                    DBMessage.feedback == "up",
+                    DBMessage.group_id.isnot(None),  # Must have a group_id
+                )
+                .order_by(DBMessage.created_at.desc())
+                .all()
+            )
+
             if not all_thumbs_up_summaries:
                 # add_message(Message(
-                #     RoleType.ASSISTANT, 
-                #     "No thumbs-up summaries found in your history", 
+                #     RoleType.ASSISTANT,
+                #     "No thumbs-up summaries found in your history",
                 #     MessageType.TEXT
                 # ))
                 normal_message_flow(search_text)
                 return
-            
+
             # Use fuzzy matching to find the best matching summary (90% threshold)
             matched_summaries = []
             for summary in all_thumbs_up_summaries:
@@ -678,66 +711,71 @@ def _history_search(question, match_dict, previous_df):
                     question_similarity = difflib.SequenceMatcher(None, search_text, question_lower).ratio()
                     if question_similarity >= 0.9:
                         matched_summaries.append((summary, question_similarity))
-                        
+
                 # Check similarity against the summary content
                 if summary.content:
                     content_lower = summary.content.lower()
                     content_similarity = difflib.SequenceMatcher(None, search_text, content_lower).ratio()
                     if content_similarity >= 0.9:
                         matched_summaries.append((summary, content_similarity))
-                
+
                 # Check similarity against the SQL query (if available)
                 if summary.query:
                     query_lower = summary.query.lower()
                     query_similarity = difflib.SequenceMatcher(None, search_text, query_lower).ratio()
                     if query_similarity >= 0.9:
                         matched_summaries.append((summary, query_similarity))
-            
+
             if not matched_summaries:
                 # add_message(Message(
-                #     RoleType.ASSISTANT, 
-                #     f"No thumbs-up summaries found matching '{search_text}' with ≥90% similarity", 
+                #     RoleType.ASSISTANT,
+                #     f"No thumbs-up summaries found matching '{search_text}' with ≥90% similarity",
                 #     MessageType.TEXT
                 # ))
                 normal_message_flow(search_text)
                 return
-            
+
             # Sort by similarity score (highest first) and get the best match
             matched_summaries.sort(key=lambda x: x[1], reverse=True)
             latest_summary, similarity_score = matched_summaries[0]
-            
+
             # Get all messages from the same group_id, ordered by creation date ascending
-            group_messages = session.query(DBMessage).filter(
-                DBMessage.group_id == latest_summary.group_id,
-                DBMessage.role == 'assistant'
-            ).order_by(DBMessage.created_at.asc()).all()
-            
+            group_messages = (
+                session.query(DBMessage)
+                .filter(DBMessage.group_id == latest_summary.group_id, DBMessage.role == "assistant")
+                .order_by(DBMessage.created_at.asc())
+                .all()
+            )
+
             if not group_messages:
                 # add_message(Message(
-                #     RoleType.ASSISTANT, 
-                #     "No messages found for the latest thumbs-up group", 
+                #     RoleType.ASSISTANT,
+                #     "No messages found for the latest thumbs-up group",
                 #     MessageType.TEXT
                 # ))
                 normal_message_flow(search_text)
                 return
-            
+
             # Notify user what we're recreating
             original_question = None
             for msg in group_messages:
-                if msg.role == 'user':
+                if msg.role == "user":
                     original_question = msg.content
                     break
-            
-            add_message(Message(
-                RoleType.ASSISTANT,
-                f"Recreating thumbs-up conversation ({similarity_score*100:.1f}% match){': ' + original_question if original_question else ''}...",
-                MessageType.TEXT
-            )) #TODO: comment this out when we are happy with the result
-            
+
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Recreating thumbs-up conversation ({similarity_score * 100:.1f}% match){': ' + original_question if original_question else ''}...",
+                    MessageType.TEXT,
+                )
+            )  # TODO: comment this out when we are happy with the result
+
             # Create a new group for the recreated messages
             from utils.chat_bot_helper import start_new_group
+
             new_group_id = start_new_group()
-            
+
             add_acknowledgement()
 
             # Recreate each message in chronological order with random delays
@@ -745,30 +783,30 @@ def _history_search(question, match_dict, previous_df):
                 # Random delay between 1-3 seconds
                 delay_time = random.uniform(1.0, 3.0)
                 time.sleep(delay_time)
-                
+
                 # Create new message with same content but new group_id and randomized timing
                 try:
                     # Convert string role back to enum
-                    role_enum = RoleType.USER if original_msg.role.lower() == 'user' else RoleType.ASSISTANT
-                    
+                    role_enum = RoleType.USER if original_msg.role.lower() == "user" else RoleType.ASSISTANT
+
                     # Convert string type back to enum
                     type_mapping = {
-                        'text': MessageType.TEXT,
-                        'sql': MessageType.SQL,
-                        'dataframe': MessageType.DATAFRAME,
-                        'summary': MessageType.SUMMARY,
-                        'error': MessageType.ERROR,
-                        'python': MessageType.PYTHON,
-                        'plotly_chart': MessageType.PLOTLY_CHART,
-                        'followup': MessageType.FOLLOWUP,
-                        'st_line_chart': MessageType.ST_LINE_CHART,
-                        'st_bar_chart': MessageType.ST_BAR_CHART,
-                        'st_area_chart': MessageType.ST_AREA_CHART,
-                        'st_scatter_chart': MessageType.ST_SCATTER_CHART,
+                        "text": MessageType.TEXT,
+                        "sql": MessageType.SQL,
+                        "dataframe": MessageType.DATAFRAME,
+                        "summary": MessageType.SUMMARY,
+                        "error": MessageType.ERROR,
+                        "python": MessageType.PYTHON,
+                        "plotly_chart": MessageType.PLOTLY_CHART,
+                        "followup": MessageType.FOLLOWUP,
+                        "st_line_chart": MessageType.ST_LINE_CHART,
+                        "st_bar_chart": MessageType.ST_BAR_CHART,
+                        "st_area_chart": MessageType.ST_AREA_CHART,
+                        "st_scatter_chart": MessageType.ST_SCATTER_CHART,
                     }
-                    
+
                     message_type = type_mapping.get(original_msg.type.lower(), MessageType.TEXT)
-                    
+
                     # Parse content based on message type
                     if message_type == MessageType.DATAFRAME and original_msg.dataframe:
                         # Use the stored dataframe JSON
@@ -779,7 +817,7 @@ def _history_search(question, match_dict, previous_df):
                     else:
                         # For text, SQL, summary, etc., use content
                         content = original_msg.content
-                    
+
                     # Create and add the new message
                     new_message = Message(
                         role=role_enum,
@@ -789,33 +827,31 @@ def _history_search(question, match_dict, previous_df):
                         question=original_msg.question,
                         dataframe=original_msg.dataframe,
                         elapsed_time=delay_time,  # Use randomized delay as elapsed time
-                        group_id=new_group_id
+                        group_id=new_group_id,
                     )
-                    
+
                     add_message(new_message)
-                    
+
                 except Exception as e:
                     # If there's an error recreating a specific message, log it but continue
-                    add_message(Message(
-                        RoleType.ASSISTANT,
-                        f"Error recreating message (type: {original_msg.type}): {str(e)}",
-                        MessageType.ERROR,
-                        group_id=new_group_id
-                    ))
-            
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            f"Error recreating message (type: {original_msg.type}): {str(e)}",
+                            MessageType.ERROR,
+                            group_id=new_group_id,
+                        )
+                    )
+
             # Clear the question to prevent re-execution of the magic command on rerun
-            if hasattr(st.session_state, 'my_question'):
+            if hasattr(st.session_state, "my_question"):
                 st.session_state.my_question = None
-                
+
             # Force Streamlit to rerun to properly register new widget event handlers
             st.rerun()
-                
+
     except Exception as e:
-        add_message(Message(
-            RoleType.ASSISTANT,
-            f"Error searching history: {str(e)}",
-            MessageType.ERROR
-        ))
+        add_message(Message(RoleType.ASSISTANT, f"Error searching history: {str(e)}", MessageType.ERROR))
 
 
 def _tables(question, tuple, previous_df):
@@ -927,7 +963,12 @@ def _followup(question, tuple, previous_df):
 
         if last_assistant_msg is None:
             add_message(
-                Message(RoleType.ASSISTANT, "No previous assistant message found to follow up on.", MessageType.ERROR, group_id=get_current_group_id())
+                Message(
+                    RoleType.ASSISTANT,
+                    "No previous assistant message found to follow up on.",
+                    MessageType.ERROR,
+                    group_id=get_current_group_id(),
+                )
             )
             return
 
@@ -954,9 +995,20 @@ def _followup(question, tuple, previous_df):
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
 
-        add_message(Message(RoleType.ASSISTANT, response, type, None, command, df, elapsed_time, group_id=get_current_group_id()))
+        add_message(
+            Message(
+                RoleType.ASSISTANT, response, type, None, command, df, elapsed_time, group_id=get_current_group_id()
+            )
+        )
     except Exception as e:
-        add_message(Message(RoleType.ASSISTANT, f"Error generating follow up message: {str(e)}", MessageType.ERROR, group_id=get_current_group_id()))
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                f"Error generating follow up message: {str(e)}",
+                MessageType.ERROR,
+                group_id=get_current_group_id(),
+            )
+        )
 
 
 def _followup_llm(command, last_content, previous_df):
@@ -967,7 +1019,14 @@ def _followup_llm(command, last_content, previous_df):
         add_message(Message(RoleType.ASSISTANT, "Asking LLM!", MessageType.TEXT, group_id=get_current_group_id()))
 
         if previous_df is None or previous_df.empty:
-            add_message(Message(RoleType.ASSISTANT, "No previous data available for LLM analysis.", MessageType.ERROR, group_id=get_current_group_id()))
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "No previous data available for LLM analysis.",
+                    MessageType.ERROR,
+                    group_id=get_current_group_id(),
+                )
+            )
             return
 
         if not command.strip():
@@ -1041,7 +1100,14 @@ Please analyze this data and provide insights based on the user's question. Be s
         return vn.submit_prompt(enhanced_prompt, "Data analysis request")
 
     except Exception as e:
-        add_message(Message(RoleType.ASSISTANT, f"Error in LLM followup: {str(e)}", MessageType.ERROR, group_id=get_current_group_id()))
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                f"Error in LLM followup: {str(e)}",
+                MessageType.ERROR,
+                group_id=get_current_group_id(),
+            )
+        )
 
 
 def _get_data_context(df):
@@ -5027,29 +5093,25 @@ def _loop_questions(question, tuple, previous_df):
         predefined_questions = [
             "How many records are there for people that survived the titanic?",
             "How many passengers survived and did not survive?",
-            "How many people have diabetes and break it out by gender"
+            "How many people have diabetes and break it out by gender",
         ]
-        
+
         # add_message(Message(
         #     RoleType.ASSISTANT,
         #     f"🔄 Starting loop through {len(predefined_questions)} pre-determined health questions...",
         #     MessageType.TEXT
         # ))
-        
+
         # Loop through each question
         for i, search_question in enumerate(predefined_questions, 1):
-            add_message(Message(
-                RoleType.ASSISTANT,
-                f"{search_question}",
-                MessageType.TEXT
-            ))
-            
+            add_message(Message(RoleType.ASSISTANT, f"{search_question}", MessageType.TEXT))
+
             # Create a mock match_dict for _history_search
             mock_match_dict = {"search_text": search_question}
-            
+
             # Call _history_search with the current question
             _history_search(search_question, mock_match_dict, previous_df)
-            
+
             # Add delay between calls (random between 2-4 seconds)
             if i < len(predefined_questions):  # Don't delay after the last question
                 delay_time = random.uniform(2.0, 2.0)
@@ -5059,19 +5121,15 @@ def _loop_questions(question, tuple, previous_df):
                 #     MessageType.TEXT
                 # ))
                 time.sleep(delay_time)
-        
+
         # add_message(Message(
         #     RoleType.ASSISTANT,
         #     f"✅ Completed loop through all {len(predefined_questions)} questions!",
         #     MessageType.TEXT
         # ))
-        
+
     except Exception as e:
-        add_message(Message(
-            RoleType.ASSISTANT,
-            f"Error in loop questions: {str(e)}",
-            MessageType.ERROR
-        ))
+        add_message(Message(RoleType.ASSISTANT, f"Error in loop questions: {str(e)}", MessageType.ERROR))
 
 
 FOLLOW_UP_MAGIC_RENDERERS = {

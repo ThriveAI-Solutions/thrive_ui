@@ -7,6 +7,7 @@ import pytest
 
 def _fake_st():
     st = types.SimpleNamespace()
+
     # Minimal session_state required by chat flow
     # Provide a dict-like object that supports get()
     class _State(dict):
@@ -15,32 +16,42 @@ def _fake_st():
                 return self[k]
             except KeyError:
                 raise AttributeError(k)
+
         def __setattr__(self, k, v):
             self[k] = v
+
     st.session_state = _State()
-    st.session_state.update({
-        "messages": [],
-        "show_sql": True,
-        "show_table": True,
-        "show_chart": False,
-        "show_summary": True,
-        "speak_summary": False,
-    })
+    st.session_state.update(
+        {
+            "messages": [],
+            "show_sql": True,
+            "show_table": True,
+            "show_chart": False,
+            "show_summary": True,
+            "speak_summary": False,
+        }
+    )
 
     # UI no-ops
     st.chat_message = lambda *_args, **_kwargs: nullcontext()
+
     # Create a placeholder-like object with markdown and empty methods
     class _Placeholder:
         def markdown(self, *args, **kwargs):
             pass
+
         def empty(self):
             pass
+
     st.empty = lambda: _Placeholder()
+
     class _Ctx:
         def __enter__(self):
             return self
+
         def __exit__(self, exc_type, exc, tb):
             return False
+
     st.columns = lambda sizes: [_Ctx() for _ in sizes]
     st.button = lambda *a, **k: False
     st.write = lambda *a, **k: None
@@ -159,7 +170,9 @@ def test_message_ordering_thinking_and_summary(monkeypatch, has_thinking):
     else:
         must_prefix = ["text", "sql", "dataframe", "summary"]
 
-    assert full_seq[pos:pos+len(must_prefix)] == must_prefix, f"Got seq from pos: {full_seq[pos:pos+len(must_prefix)]} full={full_seq}"
+    assert full_seq[pos : pos + len(must_prefix)] == must_prefix, (
+        f"Got seq from pos: {full_seq[pos : pos + len(must_prefix)]} full={full_seq}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -201,6 +214,6 @@ def test_two_questions_ordering(monkeypatch, first_thinking, second_thinking):
     else:
         must_prefix = ["text", "sql", "dataframe", "summary"]
 
-    assert full_seq[last_pos:last_pos+len(must_prefix)] == must_prefix, (
-        f"Second question sequence wrong. Got {full_seq[last_pos:last_pos+len(must_prefix)]}, full={full_seq}"
+    assert full_seq[last_pos : last_pos + len(must_prefix)] == must_prefix, (
+        f"Second question sequence wrong. Got {full_seq[last_pos : last_pos + len(must_prefix)]}, full={full_seq}"
     )

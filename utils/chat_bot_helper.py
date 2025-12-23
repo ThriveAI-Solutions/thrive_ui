@@ -43,6 +43,7 @@ def is_non_recoverable_error(error_message: str | None) -> bool:
             return True
     return False
 
+
 # Expose a module-level symbol `vn` for tests that patch utils.chat_bot_helper.vn
 # It lazily resolves the VannaService instance on first use via get_vn()
 vn = None
@@ -611,12 +612,15 @@ def get_message_group_css() -> str:
     """
     border_color = "#0b5258"  # Primary theme color
 
-    return """
+    return (
+        """
         <style>
             /* Only style innermost bordered containers - exclude parents that have nested bordered containers */
             div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]):not(:has(div[data-testid="stVerticalBlock"]:has([data-testid="stChatMessage"]))) {
                 border: none !important;
-                border-left: 4px solid """ + border_color + """ !important;
+                border-left: 4px solid """
+        + border_color
+        + """ !important;
                 border-radius: 0 8px 8px 0 !important;
                 background-color: rgba(11, 82, 88, 0.03) !important;
                 padding-left: 1rem !important;
@@ -628,6 +632,7 @@ def get_message_group_css() -> str:
             }
         </style>
     """
+    )
 
 
 def get_followup_command_suggestions() -> dict:
@@ -1179,9 +1184,7 @@ def normal_message_flow(my_question: str):
                     # Phase 1: Graceful transition - show completion indicator
                     if thinking_text and thinking_text.strip():
                         # Show "Done thinking" state for a brief moment
-                        thinking_placeholder.markdown(
-                            "✅ **Done thinking**\n\n" + "".join(thinking_chunks)
-                        )
+                        thinking_placeholder.markdown("✅ **Done thinking**\n\n" + "".join(thinking_chunks))
                         # Brief delay for visual continuity (1.5 seconds)
                         time.sleep(1.5)
 
@@ -1403,10 +1406,12 @@ def normal_message_flow(my_question: str):
                             event_stream = get_summary_event_stream(my_question, _df_for_summary, think=False)
                             # Prefer Streamlit write_stream when available for typewriter effect
                             if hasattr(st, "write_stream"):
+
                                 def _content_only():
                                     for kind, text in event_stream:
                                         if kind == "content":
                                             yield text
+
                                 st.write_stream(_content_only())
                             else:
                                 # Fallback to manual placeholder loop when write_stream is unavailable (tests)
@@ -1421,10 +1426,12 @@ def normal_message_flow(my_question: str):
                         # No status context available; fallback to manual rendering
                         event_stream = get_summary_event_stream(my_question, _df_for_summary, think=False)
                         if hasattr(st, "write_stream"):
+
                             def _content_only2():
                                 for kind, text in event_stream:
                                     if kind == "content":
                                         yield text
+
                             st.write_stream(_content_only2())
                         else:
                             summary_placeholder = st.empty()

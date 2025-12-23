@@ -41,5 +41,3 @@ def test_recent_questions_for_known_user_kr():
         row = items[0]
         assert "question" in row and "created_at" in row
         assert "status" in row and "elapsed_seconds" in row
-
-

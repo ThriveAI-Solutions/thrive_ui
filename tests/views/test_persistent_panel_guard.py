@@ -11,6 +11,7 @@ def _fake_st():
                 return self[k]
             except KeyError:
                 raise AttributeError(k)
+
         def __setattr__(self, k, v):
             self[k] = v
 
@@ -51,15 +52,9 @@ def test_panel_shows_only_when_real_error(monkeypatch):
     page.messages_container = nullcontext()
     # calling the module-level code flow is complex; invoke just the guard condition
     assert not (
-        fake_st.session_state.get("pending_sql_error", False)
-        and fake_st.session_state.get("last_run_sql_error")
+        fake_st.session_state.get("pending_sql_error", False) and fake_st.session_state.get("last_run_sql_error")
     )
 
     # Case 2: flag true and error present -> condition holds
     fake_st.session_state["last_run_sql_error"] = "boom"
-    assert (
-        fake_st.session_state.get("pending_sql_error", False)
-        and fake_st.session_state.get("last_run_sql_error")
-    )
-
-
+    assert fake_st.session_state.get("pending_sql_error", False) and fake_st.session_state.get("last_run_sql_error")
