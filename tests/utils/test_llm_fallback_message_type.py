@@ -18,4 +18,3 @@ def test_call_llm_uses_text_message_type():
         args, kwargs = mock_add.call_args
         message_obj = args[0]
         assert message_obj.type == MessageType.TEXT.value
-

@@ -13,13 +13,15 @@ def test_thriveai_ollama_uses_temperature_in_options(monkeypatch):
             self.timeout = timeout
 
         def chat(self, model, messages, stream, options, keep_alive):
-            calls["chats"].append({
-                "model": model,
-                "messages": messages,
-                "stream": stream,
-                "options": options,
-                "keep_alive": keep_alive,
-            })
+            calls["chats"].append(
+                {
+                    "model": model,
+                    "messages": messages,
+                    "stream": stream,
+                    "options": options,
+                    "keep_alive": keep_alive,
+                }
+            )
             return {"message": {"content": "ok"}}
 
     class FakeOllamaModule:
@@ -31,12 +33,10 @@ def test_thriveai_ollama_uses_temperature_in_options(monkeypatch):
     from utils.thriveai_ollama import ThriveAI_Ollama
 
     # Act: instantiate with temperature in options and call submit_prompt
-    inst = ThriveAI_Ollama(config={
-        "model": "llama3",
-        "ollama_host": "http://localhost:11434",
-        "options": {"temperature": 0.5}
-    })
-    prompt = [inst.system_message("sys"), inst.user_message("hello")] 
+    inst = ThriveAI_Ollama(
+        config={"model": "llama3", "ollama_host": "http://localhost:11434", "options": {"temperature": 0.5}}
+    )
+    prompt = [inst.system_message("sys"), inst.user_message("hello")]
     inst.submit_prompt(prompt)
 
     # Assert: the options passed to chat contain the temperature
@@ -89,5 +89,3 @@ def test_vanna_calls_injects_temperature_from_secrets(monkeypatch):
     _ = MyVannaOllamaMilvus(user_role=0, config={})
     assert captured["config"] is not None
     assert captured["config"].get("options", {}).get("temperature") == 0.7
-
-

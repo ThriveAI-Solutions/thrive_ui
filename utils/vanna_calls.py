@@ -430,7 +430,7 @@ class MyVannaOpenAIMilvus(ThriveAI_Milvus, OpenAI_Chat):
             if not hasattr(self, "language"):
                 self.language = None
         except Exception as e:
-            logger.exception("Error Configuring MyVannaOllamaMilvus: %s", e)
+            logger.exception("Error Configuring MyVannaOpenAIMilvus: %s", e)
             raise
 
     def log(self, message: str, title: str = "Info"):
@@ -588,26 +588,22 @@ class VannaService:
     def _setup_vanna(self):
         """Setup Vanna with appropriate configuration."""
         try:
+            # Check for per-user LLM selection first (NEW)
+            user_provider = st.session_state.get("selected_llm_provider")
+            user_model = st.session_state.get("selected_llm_model")
+
+            if user_provider and user_model:
+                # User has explicit preference - use it
+                logger.info(f"Using user-selected LLM: {user_provider}/{user_model}")
+                self._setup_user_selected_llm(user_provider, user_model)
+                return
+
+            # Fall back to existing secrets-based logic
             chroma_config = (
                 {"path": self.config["rag_model"]["chroma_path"]} if "chroma_path" in self.config["rag_model"] else None
             )
             # Milvus Lite configuration from secrets
-            milvus_config = None
-            rag_model_conf = self.config.get("rag_model", {})
-            milvus_section = rag_model_conf.get("milvus")
-            if milvus_section is not None:
-                # Streamlit secrets nested tables are _Secrets; coerce to plain dict
-                try:
-                    milvus_config = dict(milvus_section)
-                except Exception:
-                    milvus_config = None
-            elif rag_model_conf.get("milvus_mode"):
-                milvus_config = {
-                    "mode": rag_model_conf.get("milvus_mode", "lite"),
-                    "text_dim": rag_model_conf.get("milvus_text_dim", 768),
-                    "collection_prefix": rag_model_conf.get("milvus_collection_prefix", "thrive"),
-                    "uri": rag_model_conf.get("milvus_uri"),
-                }
+            milvus_config = self._get_milvus_config()
 
             if milvus_config is not None:
                 # Prefer Ollama+Milvus when ollama configured; otherwise Gemini+Milvus
@@ -666,6 +662,81 @@ class VannaService:
             logger.exception("%s", e)
             raise
 
+    def _get_milvus_config(self) -> dict | None:
+        """Extract Milvus config from secrets (refactored from _setup_vanna)."""
+        rag_model_conf = self.config.get("rag_model", {})
+        milvus_section = rag_model_conf.get("milvus")
+        if milvus_section is not None:
+            try:
+                return dict(milvus_section)
+            except Exception:
+                return None
+        elif rag_model_conf.get("milvus_mode"):
+            return {
+                "mode": rag_model_conf.get("milvus_mode", "lite"),
+                "text_dim": rag_model_conf.get("milvus_text_dim", 768),
+                "collection_prefix": rag_model_conf.get("milvus_collection_prefix", "thrive"),
+                "uri": rag_model_conf.get("milvus_uri"),
+            }
+        return None
+
+    def _setup_user_selected_llm(self, provider_id: str, model_id: str):
+        """Setup Vanna with user-selected provider and model."""
+        # Determine vector store (ChromaDB or Milvus)
+        chroma_config = (
+            {"path": self.config["rag_model"]["chroma_path"]} if "chroma_path" in self.config["rag_model"] else None
+        )
+        milvus_config = self._get_milvus_config()
+
+        # Temporarily override model in config for this instance
+        if provider_id == "ollama":
+            self.config["ai_keys"]["ollama_model"] = model_id
+            if milvus_config:
+                self.vn = MyVannaOllamaMilvus(user_role=self.user_context.user_role, config=milvus_config)
+            elif chroma_config:
+                self.vn = MyVannaOllamaChromaDB(user_role=self.user_context.user_role, config=chroma_config)
+            else:
+                raise ValueError("No vector store configured (ChromaDB or Milvus required)")
+
+        elif provider_id == "openai":
+            # Validate OpenAI API key exists before attempting to use it
+            if "openai_api" not in self.config["ai_keys"]:
+                raise ValueError(
+                    "OpenAI API key not found in secrets.toml. Please add 'openai_api' to [ai_keys] section."
+                )
+            self.config["ai_keys"]["openai_model"] = model_id
+            if milvus_config:
+                self.vn = MyVannaOpenAIMilvus(user_role=self.user_context.user_role, config=milvus_config)
+            else:
+                # OpenAI + ChromaDB not implemented yet, suggest Milvus
+                raise ValueError(
+                    "OpenAI currently requires Milvus vector store. Please configure Milvus in secrets.toml."
+                )
+
+        else:
+            raise ValueError(f"Unknown provider: {provider_id}")
+
+        # Connect to PostgreSQL
+        self.vn.connect_to_postgres(
+            host=self.config["postgres"]["host"],
+            dbname=self.config["postgres"]["database"],
+            user=self.config["postgres"]["user"],
+            password=self.config["postgres"]["password"],
+            port=self.config["postgres"]["port"],
+        )
+
+    @classmethod
+    def invalidate_cache_for_user(cls, user_id: str, user_role: int):
+        """Invalidate cached VannaService instance for a user.
+
+        This should be called when a user changes their LLM preferences
+        to ensure the new selection takes effect immediately.
+        """
+        cache_key = f"vanna_service_{user_id}_{user_role}"
+        if cache_key in cls._instances:
+            del cls._instances[cache_key]
+            logger.info(f"Invalidated VannaService cache for {cache_key}")
+
     @property
     def user_id(self) -> str:
         """Get the user ID."""
@@ -695,7 +766,7 @@ class VannaService:
             return f"Google {model}"
         elif vn_class_name == "VannaDefault":
             model = self.config.get("ai_keys", {}).get("vanna_model", "Vanna Cloud")
-            return f"Vanna Cloud (GPT)"
+            return "Vanna Cloud (GPT)"
         elif "OpenAI" in vn_class_name:
             model = self.config.get("ai_keys", {}).get("openai_model", None)
             return f"OpenAI {model}"
@@ -984,7 +1055,7 @@ class VannaService:
                 ddl_list=ddl_list,
                 doc_list=doc_list,
             )
-        except Exception as e:
+        except Exception:
             # Fallback: minimal prompt
             prompt = [
                 _self.vn.system_message("You are a SQL expert. Return only SQL."),

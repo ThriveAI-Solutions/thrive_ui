@@ -1,4 +1,3 @@
-import io
 import logging
 import time
 
@@ -12,12 +11,11 @@ from utils.chat_bot_helper import (
     get_vn,
     group_messages_by_id,
     normal_message_flow,
-    render_message,
     render_message_group,
     set_question,
 )
-from utils.communicate import listen, speak
-from utils.enums import MessageType, RoleType, ThemeType
+from utils.communicate import listen
+from utils.enums import RoleType, ThemeType
 from utils.magic_functions import is_magic_do_magic
 
 
@@ -33,12 +31,12 @@ def load_community_questions(csv_file):
         df = pd.read_csv(csv_file)
 
         # Validate the CSV has a 'question' column
-        if 'question' not in df.columns:
+        if "question" not in df.columns:
             st.error("CSV must have a 'question' column")
             return
 
         # Get the list of questions
-        questions = df['question'].dropna().tolist()
+        questions = df["question"].dropna().tolist()
 
         if not questions:
             st.error("No questions found in CSV")
@@ -103,12 +101,109 @@ def save_settings_on_click():
 
 st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
 
-# Display current LLM
+# LLM Selection UI
+with st.sidebar.expander("🤖 LLM Selection", expanded=False):
+    from utils.llm_registry.registry import get_registry
+    import json
+
+    registry = get_registry()
+    secrets = {
+        "ai_keys": dict(st.secrets["ai_keys"]),
+        "rag_model": dict(st.secrets["rag_model"]),
+    }
+
+    # Get available providers
+    providers = registry.get_available_providers(secrets)
+    enabled_providers = [p for p in providers if p.enabled]
+
+    if not enabled_providers:
+        st.error("No LLM providers configured. Check secrets.toml")
+        st.caption("Configure at least one provider in `.streamlit/secrets.toml`")
+    else:
+        # Provider selection
+        provider_options = {p.provider_id: p.display_name for p in enabled_providers}
+        current_provider = st.session_state.get("selected_llm_provider")
+
+        # Find index of current provider, default to 0
+        provider_index = 0
+        if current_provider and current_provider in provider_options:
+            provider_index = list(provider_options.keys()).index(current_provider)
+
+        selected_provider_id = st.selectbox(
+            "Provider",
+            options=list(provider_options.keys()),
+            format_func=lambda x: provider_options[x],
+            index=provider_index,
+            key="temp_llm_provider",
+        )
+
+        # Model selection (dynamic based on provider)
+        models = registry.get_models_for_provider(selected_provider_id, secrets)
+
+        if not models:
+            st.warning(f"No models available for {provider_options[selected_provider_id]}")
+            st.caption(f"Check your {selected_provider_id} configuration")
+        else:
+            model_options = {m.model_id: m.display_name for m in models}
+            current_model = st.session_state.get("selected_llm_model")
+
+            # Find default model index
+            default_idx = 0
+            if current_model and current_model in model_options:
+                default_idx = list(model_options.keys()).index(current_model)
+            else:
+                # Use provider's default from secrets if available
+                provider = registry.get_provider(selected_provider_id)
+                if provider:
+                    default_model = provider.get_default_model(secrets)
+                    if default_model and default_model in model_options:
+                        default_idx = list(model_options.keys()).index(default_model)
+
+            selected_model_id = st.selectbox(
+                "Model",
+                options=list(model_options.keys()),
+                format_func=lambda x: model_options[x],
+                index=default_idx,
+                key="temp_llm_model",
+            )
+
+            # Apply button
+            if st.button("Apply LLM Selection", type="primary", use_container_width=True):
+                # Update session state
+                st.session_state.selected_llm_provider = selected_provider_id
+                st.session_state.selected_llm_model = selected_model_id
+
+                # Save to database
+                from orm.functions import save_user_settings
+
+                save_user_settings()
+
+                # Invalidate VannaService cache
+                from utils.vanna_calls import VannaService
+                import logging
+
+                logger = logging.getLogger(__name__)
+                user_id = st.session_state.cookies.get("user_id")
+                user_role = st.session_state.get("user_role")
+                if user_id and user_role is not None:
+                    user_id = str(json.loads(user_id))
+                    VannaService.invalidate_cache_for_user(user_id, user_role)
+                else:
+                    logger.warning(f"Could not invalidate cache: user_id={user_id}, user_role={user_role}")
+
+                # Clear session state vanna instance
+                if "_vn_instance" in st.session_state:
+                    st.session_state._vn_instance = None
+
+                st.success(f"✅ LLM changed to {model_options[selected_model_id]}")
+                st.rerun()
+
+# Display current LLM (read-only info)
 try:
     vn_instance = get_vn()
     if vn_instance:
         llm_name = vn_instance.get_llm_name()
-        st.sidebar.info(f"🤖 **Current LLM:** {llm_name}")
+        st.sidebar.info(f"**Active LLM:** {llm_name}")
 except Exception:
     pass
 
@@ -145,9 +240,9 @@ with st.sidebar.popover("📊 Community Engagement", use_container_width=True):
 
     uploaded_file = st.file_uploader(
         "Choose a CSV file",
-        type=['csv'],
+        type=["csv"],
         key="community_csv_uploader",
-        help="Upload a CSV file with a 'question' column"
+        help="Upload a CSV file with a 'question' column",
     )
 
     if uploaded_file is not None:
@@ -157,10 +252,13 @@ with st.sidebar.popover("📊 Community Engagement", use_container_width=True):
 
     # Show sample format
     with st.expander("View Sample Format"):
-        st.code("""question
+        st.code(
+            """question
 What is the average patient age?
 How many patients visited last month?
-What are the top diagnoses?""", language="csv")
+What are the top diagnoses?""",
+            language="csv",
+        )
 
 # Display Community Questions in sidebar
 if st.session_state.get("community_questions"):
@@ -169,7 +267,9 @@ if st.session_state.get("community_questions"):
         community_questions = st.session_state.get("community_questions", [])
 
         # Add "Ask All Questions" button at the top
-        if st.button("🚀 Ask All Questions", use_container_width=True, type="primary", key="ask_all_community_questions"):
+        if st.button(
+            "🚀 Ask All Questions", use_container_width=True, type="primary", key="ask_all_community_questions"
+        ):
             st.session_state.processing_community_questions = True
             st.session_state.community_question_index = 0
             set_question(community_questions[0], False)
@@ -267,11 +367,7 @@ my_question = st.session_state.get("my_question", None)
 
 # If we have a pending SQL error from a prior run, render a persistent retry panel
 # Gate on an actual stored error message to avoid showing stale panels
-if (
-    not my_question
-    and st.session_state.get("pending_sql_error", False)
-    and st.session_state.get("last_run_sql_error")
-):
+if not my_question and st.session_state.get("pending_sql_error", False) and st.session_state.get("last_run_sql_error"):
     pending_question = st.session_state.get("pending_question")
     error_msg = st.session_state.get("last_run_sql_error")
     failed_sql = st.session_state.get("last_failed_sql")
