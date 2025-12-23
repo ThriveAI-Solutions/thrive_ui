@@ -13,6 +13,7 @@ def _fake_st():
                 return self[k]
             except KeyError:
                 raise AttributeError(k)
+
         def __setattr__(self, k, v):
             self[k] = v
 
@@ -35,6 +36,7 @@ def _fake_st():
     class _Ctx:
         def __enter__(self):
             return self
+
         def __exit__(self, exc_type, exc, tb):
             return False
 
@@ -111,5 +113,3 @@ def test_failed_summary_does_not_cache(monkeypatch):
     key2 = cbh.create_summary_cache_key("Q summary success", pd.DataFrame({"c": [1]}))
     assert key2 in fake_st.session_state.manual_summary_cache
     assert fake_st.session_state.manual_summary_cache[key2][0].strip() != ""
-
-

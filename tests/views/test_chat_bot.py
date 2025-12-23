@@ -502,7 +502,9 @@ class TestRenderMessage:
 
         # Verify "Follow-up Questions" button was removed from Actions popover (issue #22)
         follow_up_call = next((c for c in mock_st.button.call_args_list if c[0][0] == "Follow-up Questions"), None)
-        assert follow_up_call is None, "Follow-up Questions button should NOT be in Actions popover (moved to Follow Up)"
+        assert follow_up_call is None, (
+            "Follow-up Questions button should NOT be in Actions popover (moved to Follow Up)"
+        )
 
         # Brittle check for button calls, assumes order. A more robust check would inspect call_args_list.
         # This part needs careful checking of exact lambda behavior or restructuring for easier testing if lambdas are complex.

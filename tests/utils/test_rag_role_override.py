@@ -79,5 +79,3 @@ class TestMilvusRoleOverride:
 
             assert len(df) == 3
             assert set(df["training_data_type"]) == {"sql", "ddl", "documentation"}
-
-
