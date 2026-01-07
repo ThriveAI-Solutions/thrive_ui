@@ -65,11 +65,12 @@ class TestSetFeedbackWithComment:
         mock_st.session_state.cookies = MagicMock()
         mock_st.session_state.cookies.get.return_value = "User"
 
-        # Even if comment is passed, thumbs up shouldn't need it
+        # Even if comment is passed, thumbs up should ignore it
         set_feedback(0, "up", "This should be ignored")
 
         assert mock_message.feedback == "up"
-        assert mock_message.feedback_comment == "This should be ignored"  # Currently it sets it anyway
+        # feedback_comment should NOT be set for thumbs up
+        assert mock_message.feedback_comment is None
         mock_message.save.assert_called_once()
 
     @patch("utils.chat_bot_helper.remove_from_file_training")
@@ -116,6 +117,13 @@ class TestFeedbackCategories:
         ]
         for category in expected_categories:
             assert category in FEEDBACK_CATEGORIES, f"Missing category: {category}"
+
+    def test_category_placeholder_exists(self):
+        """Test that placeholder is defined and not in actual categories."""
+        from utils.chat_bot_helper import FEEDBACK_CATEGORIES, _CATEGORY_PLACEHOLDER
+
+        assert _CATEGORY_PLACEHOLDER == "Select a category..."
+        assert _CATEGORY_PLACEHOLDER not in FEEDBACK_CATEGORIES
 
 
 class TestRenderThumbsDownFeedback:

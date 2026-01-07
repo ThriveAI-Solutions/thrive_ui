@@ -476,7 +476,8 @@ def get_unique_messages():
 def set_feedback(index: int, value: str, feedback_comment: str = None):
     message = st.session_state.messages[index]
     message.feedback = value
-    if feedback_comment:
+    # Only set feedback_comment for negative feedback (thumbs down)
+    if feedback_comment and value == "down":
         message.feedback_comment = feedback_comment
     message.save()
     new_entry = {
@@ -958,6 +959,9 @@ FEEDBACK_CATEGORIES = [
     "Other",
 ]
 
+# Placeholder for category selection (not a valid submission)
+_CATEGORY_PLACEHOLDER = "Select a category..."
+
 
 def _render_thumbs_down_feedback(message: Message, index: int):
     """Render thumbs down button with feedback popover."""
@@ -969,9 +973,11 @@ def _render_thumbs_down_feedback(message: Message, index: int):
             st.info(f"Previous feedback: {message.feedback_comment}")
 
         st.markdown("**What went wrong?**")
+        # Include placeholder as first option to require explicit selection
+        category_options = [_CATEGORY_PLACEHOLDER] + FEEDBACK_CATEGORIES
         category = st.radio(
             "Select a category",
-            FEEDBACK_CATEGORIES,
+            category_options,
             key=f"feedback_category_{message.id}",
             label_visibility="collapsed",
         )
@@ -985,7 +991,15 @@ def _render_thumbs_down_feedback(message: Message, index: int):
 
         btn_cols = st.columns(2)
         with btn_cols[0]:
-            if st.button("Submit", key=f"submit_feedback_{message.id}", type="primary", use_container_width=True):
+            # Disable submit if no category selected
+            category_selected = category != _CATEGORY_PLACEHOLDER
+            if st.button(
+                "Submit",
+                key=f"submit_feedback_{message.id}",
+                type="primary",
+                use_container_width=True,
+                disabled=not category_selected,
+            ):
                 # Combine category and comment
                 full_comment = f"{category}: {comment}" if comment.strip() else category
                 set_feedback(index, "down", full_comment)
