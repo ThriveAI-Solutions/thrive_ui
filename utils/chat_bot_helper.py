@@ -473,9 +473,11 @@ def get_unique_messages():
     return unique_messages
 
 
-def set_feedback(index: int, value: str):
+def set_feedback(index: int, value: str, feedback_comment: str = None):
     message = st.session_state.messages[index]
     message.feedback = value
+    if feedback_comment:
+        message.feedback_comment = feedback_comment
     message.save()
     new_entry = {
         "question": st.session_state.messages[index].question,
@@ -946,6 +948,54 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             st.code(message.query, language="sql", line_numbers=True)
 
 
+# Feedback categories for thumbs down
+FEEDBACK_CATEGORIES = [
+    "Incorrect SQL generated",
+    "Wrong data returned",
+    "Summary doesn't match data",
+    "Response too slow",
+    "Didn't understand my question",
+    "Other",
+]
+
+
+def _render_thumbs_down_feedback(message: Message, index: int):
+    """Render thumbs down button with feedback popover."""
+    # Show different icon if feedback was already submitted
+    icon = "👎" if message.feedback != "down" else "👎✓"
+
+    with st.popover(icon, use_container_width=False):
+        if message.feedback == "down" and message.feedback_comment:
+            st.info(f"Previous feedback: {message.feedback_comment}")
+
+        st.markdown("**What went wrong?**")
+        category = st.radio(
+            "Select a category",
+            FEEDBACK_CATEGORIES,
+            key=f"feedback_category_{message.id}",
+            label_visibility="collapsed",
+        )
+
+        comment = st.text_area(
+            "Additional details (optional)",
+            max_chars=500,
+            key=f"feedback_comment_{message.id}",
+            height=80,
+        )
+
+        btn_cols = st.columns(2)
+        with btn_cols[0]:
+            if st.button("Submit", key=f"submit_feedback_{message.id}", type="primary", use_container_width=True):
+                # Combine category and comment
+                full_comment = f"{category}: {comment}" if comment.strip() else category
+                set_feedback(index, "down", full_comment)
+                st.rerun()
+        with btn_cols[1]:
+            if st.button("Skip", key=f"skip_feedback_{message.id}", use_container_width=True):
+                set_feedback(index, "down")
+                st.rerun()
+
+
 def _render_summary(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
@@ -969,13 +1019,7 @@ def _render_summary(message: Message, index: int):
             args=(index, "up"),
         )
     with cols[1]:
-        st.button(
-            "👎",
-            key=f"thumbs_down_{message.id}",
-            type="primary" if message.feedback == "down" else "secondary",
-            on_click=set_feedback,
-            args=(index, "down"),
-        )
+        _render_thumbs_down_feedback(message, index)
     # Only show Actions popover on the last message group
     if is_last_group:
         with cols[2]:
