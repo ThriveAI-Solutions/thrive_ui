@@ -1227,8 +1227,10 @@ def normal_message_flow(my_question: str):
         st.session_state["use_retry_context"] = False
         last_failed_sql = st.session_state.get("retry_failed_sql")
         last_error_msg = st.session_state.get("retry_error_msg")
+        user_feedback = st.session_state.get("retry_user_feedback")
         st.session_state["retry_failed_sql"] = None
         st.session_state["retry_error_msg"] = None
+        st.session_state["retry_user_feedback"] = None
         # For manual retry, generate with context from attempt 2
         if sql is None:
             sql, elapsed_time = get_vn().generate_sql_retry(
@@ -1236,6 +1238,7 @@ def normal_message_flow(my_question: str):
                 failed_sql=last_failed_sql,
                 error_message=last_error_msg,
                 attempt_number=2,
+                user_feedback=user_feedback,
             )
 
     # Auto-retry loop for SQL generation and execution
@@ -1522,6 +1525,20 @@ def normal_message_flow(my_question: str):
                     )
                 )
 
+        # Store context in session state for use after page rerun
+        st.session_state["pending_sql_error"] = True
+        st.session_state["pending_question"] = my_question
+        st.session_state["retry_failed_sql"] = failed_sql
+        st.session_state["retry_error_msg"] = error_msg
+
+        def handle_inline_retry_click():
+            """Callback to handle inline retry button click - sets up retry context."""
+            user_feedback = st.session_state.get("retry_feedback_inline", "")
+            st.session_state["use_retry_context"] = True
+            st.session_state["retry_user_feedback"] = user_feedback if user_feedback else None
+            st.session_state["my_question"] = st.session_state.get("pending_question")
+            st.session_state["pending_sql_error"] = False
+
         with st.chat_message(RoleType.ASSISTANT.value):
             # Use warning with collapsible details for less intrusive error display
             if attempt > 1:
@@ -1535,26 +1552,18 @@ def normal_message_flow(my_question: str):
                 if failed_sql:
                     st.markdown("**Failed SQL:**")
                     st.code(failed_sql, language="sql", line_numbers=True)
-            # Action buttons remain outside expander for easy access
+            # Feedback input for user hints
+            st.text_input(
+                "Optional feedback to help improve the query",
+                key="retry_feedback_inline",
+                placeholder="e.g., 'try using patient_id instead of id' or 'use a LEFT JOIN'",
+            )
+            # Action button with on_click callback - more reliable than checking return value
             cols = st.columns([0.2, 0.8])
             with cols[0]:
-                retry_clicked = st.button("Retry", type="primary", key="retry_inline")
+                st.button("Retry", type="primary", key="retry_inline", on_click=handle_inline_retry_click)
 
-        if retry_clicked:
-            # Persist retry intent and context, then rerun so it flows through normal pipeline
-            st.session_state["use_retry_context"] = True
-            st.session_state["retry_failed_sql"] = failed_sql
-            st.session_state["retry_error_msg"] = error_msg
-            # Set a persistent flag so the panel can be re-rendered if needed
-            st.session_state["pending_sql_error"] = False
-            st.session_state["pending_question"] = my_question
-            st.session_state["my_question"] = my_question
-            st.rerun()
-        else:
-            # Mark pending error so a persistent panel can be shown if page reruns without action
-            st.session_state["pending_sql_error"] = True
-            st.session_state["pending_question"] = my_question
-            st.stop()
+        st.stop()
     else:
         add_message(
             Message(
