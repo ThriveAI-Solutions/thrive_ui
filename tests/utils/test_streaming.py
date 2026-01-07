@@ -143,7 +143,9 @@ def test_stream_summary_wrap_persists_cache(monkeypatch):
             underlying = self.vn
             prompt = [underlying.system_message("s"), underlying.user_message("u")]
             start = []
-            for ev in underlying.ollama_client.chat(model="m", messages=prompt, stream=True, options={}, keep_alive=None, think=False):
+            for ev in underlying.ollama_client.chat(
+                model="m", messages=prompt, stream=True, options={}, keep_alive=None, think=False
+            ):
                 msg = ev.get("message", {})
                 c = msg.get("content")
                 if c:

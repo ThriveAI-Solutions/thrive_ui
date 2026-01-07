@@ -300,6 +300,7 @@ class TestRenderFollowupButtonWithAIQuestions:
         """render_followup_button should accept optional messages parameter."""
         from utils.chat_bot_helper import render_followup_button
         import inspect
+
         sig = inspect.signature(render_followup_button)
         params = list(sig.parameters.keys())
         assert "group_id" in params
@@ -309,6 +310,7 @@ class TestRenderFollowupButtonWithAIQuestions:
         """render_followup_button messages parameter should default to None."""
         from utils.chat_bot_helper import render_followup_button
         import inspect
+
         sig = inspect.signature(render_followup_button)
         messages_param = sig.parameters.get("messages")
         assert messages_param is not None
@@ -322,6 +324,7 @@ class TestRenderSummaryActionsPopover:
         """Actions popover should not contain 'Follow-up Questions' button (moved to Follow Up)."""
         from utils.chat_bot_helper import _render_summary_actions_popover
         import inspect
+
         # Get the source code of the function
         source = inspect.getsource(_render_summary_actions_popover)
         # Verify it doesn't have a st.button call with "Follow-up Questions"
@@ -338,6 +341,7 @@ class TestRenderSummaryIsLastGroupContext:
         """_render_summary should read _render_is_last_group from session state."""
         from utils.chat_bot_helper import _render_summary
         import inspect
+
         # Get the source code of the function
         source = inspect.getsource(_render_summary)
         # Verify it reads the is_last_group context
@@ -347,6 +351,7 @@ class TestRenderSummaryIsLastGroupContext:
         """render_message_group should set _render_is_last_group in session state."""
         from utils.chat_bot_helper import render_message_group
         import inspect
+
         # Get the source code of the function
         source = inspect.getsource(render_message_group)
         # Verify it sets the is_last_group context
