@@ -199,5 +199,6 @@ milvus_demo.db
 *.sqlite3
 *.sqlite3.*
 
+/documentation/*
 # Auto Claude data directory
 .auto-claude/
