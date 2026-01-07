@@ -82,6 +82,7 @@ def _get_feedback_messages(
                 Message.question,
                 Message.query.label("sql_query"),
                 Message.content.label("summary_content"),
+                Message.dataframe.label("dataframe_json"),
                 Message.feedback,
                 Message.feedback_comment,
                 Message.training_status,
@@ -341,6 +342,17 @@ def main():
                     st.markdown("**AI Response:**")
                     st.success(item.summary_content)
 
+                # Data Results
+                if item.dataframe_json:
+                    st.markdown("**Data Results:**")
+                    try:
+                        from io import StringIO
+
+                        df = pd.read_json(StringIO(item.dataframe_json), orient="records")
+                        st.dataframe(df, use_container_width=True)
+                    except Exception:
+                        st.caption("Unable to display dataframe")
+
                 # SQL Query (collapsible for less clutter)
                 if item.sql_query:
                     with st.expander("View SQL Query", expanded=False):
@@ -357,9 +369,9 @@ def main():
 
                 # Action buttons (only for pending items)
                 if item.training_status == "pending":
-                    action_cols = st.columns([1, 1, 3])
+                    action_cols = st.columns([1, 1, 2])
                     with action_cols[0]:
-                        if st.button("Approve Training Data", key=f"approve_{item.id}", type="primary"):
+                        if st.button("Approve and Add to Training Data", key=f"approve_{item.id}", type="primary"):
                             if _approve_for_training(item.id, reviewer_id):
                                 st.success("Approved and added to training data!")
                                 st.rerun()
