@@ -130,6 +130,7 @@ class Message(Base):
     content = Column(String, nullable=False)
     type = Column(String(50), nullable=False)
     feedback = Column(String(50))
+    feedback_comment = Column(String(500))  # Optional user feedback comment when thumbs down
     query = Column(String)
     question = Column(String(1000))
     dataframe = Column(String)

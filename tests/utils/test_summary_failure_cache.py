@@ -40,7 +40,7 @@ def _fake_st():
         def __exit__(self, exc_type, exc, tb):
             return False
 
-    st.columns = lambda sizes: [_Ctx() for _ in sizes]
+    st.columns = lambda sizes: [_Ctx() for _ in (range(sizes) if isinstance(sizes, int) else sizes)]
     st.button = lambda *a, **k: False
     st.write = lambda *a, **k: None
     st.markdown = lambda *a, **k: None
@@ -56,6 +56,8 @@ def _fake_st():
     st.popover = lambda *a, **k: nullcontext()
     st.text = lambda *a, **k: None
     st.rerun = lambda: None
+    st.radio = lambda *a, **k: k.get("options", ["Option1"])[0] if "options" in k else "Option1"
+    st.text_area = lambda *a, **k: ""
     return st
 
 
