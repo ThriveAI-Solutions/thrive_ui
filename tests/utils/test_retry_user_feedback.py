@@ -1,6 +1,6 @@
 """Tests for the user feedback feature in SQL retry functionality."""
 
-import pytest
+from unittest.mock import MagicMock, patch
 
 
 class TestGenerateSqlRetryUserFeedback:
@@ -199,3 +199,101 @@ class TestRetrySessionStateFlags:
         assert session_state["use_retry_context"] is True
         assert session_state["retry_feedback_persist"] == ""
         assert session_state["retry_feedback_inline"] == ""
+
+
+class TestVannaServiceGenerateSqlRetryIntegration:
+    """Integration tests that call VannaService.generate_sql_retry() with mocked generate_sql."""
+
+    @patch("utils.vanna_calls.st")
+    def test_generate_sql_retry_passes_user_feedback_to_generate_sql(self, mock_st):
+        """Test that VannaService.generate_sql_retry passes user feedback to generate_sql."""
+        from utils.vanna_calls import VannaService
+
+        # Track what question was passed to generate_sql
+        captured_question = None
+
+        def capture_generate_sql(question):
+            nonlocal captured_question
+            captured_question = question
+            return ("SELECT 1", 0.01)
+
+        # Create VannaService instance with minimal setup
+        service = VannaService.__new__(VannaService)
+        service.vn = MagicMock()
+
+        # Replace generate_sql with our capturing version
+        service.generate_sql = capture_generate_sql
+
+        # Call generate_sql_retry directly (bypassing cache decorator)
+        VannaService.generate_sql_retry.__wrapped__(
+            service,
+            question="How many patients are there?",
+            failed_sql="SELECT count(*) FROM patiants",
+            error_message='relation "patiants" does not exist',
+            attempt_number=2,
+            user_feedback="The table name is 'patients' not 'patiants'",
+        )
+
+        # Verify the augmented question contains user feedback
+        assert captured_question is not None
+        assert "User feedback: The table name is 'patients' not 'patiants'" in captured_question
+        assert "Original question: How many patients are there?" in captured_question
+        assert "Failed SQL:" in captured_question
+        assert "Database error:" in captured_question
+
+    @patch("utils.vanna_calls.st")
+    def test_generate_sql_retry_omits_feedback_when_none(self, mock_st):
+        """Test that VannaService.generate_sql_retry omits feedback section when None."""
+        from utils.vanna_calls import VannaService
+
+        captured_question = None
+
+        def capture_generate_sql(question):
+            nonlocal captured_question
+            captured_question = question
+            return ("SELECT 1", 0.01)
+
+        service = VannaService.__new__(VannaService)
+        service.vn = MagicMock()
+        service.generate_sql = capture_generate_sql
+
+        VannaService.generate_sql_retry.__wrapped__(
+            service,
+            question="How many patients are there?",
+            failed_sql="SELECT count(*) FROM patiants",
+            error_message='relation "patiants" does not exist',
+            attempt_number=2,
+            user_feedback=None,
+        )
+
+        assert captured_question is not None
+        assert "User feedback:" not in captured_question
+        assert "Original question: How many patients are there?" in captured_question
+
+    @patch("utils.vanna_calls.st")
+    def test_generate_sql_retry_omits_feedback_when_empty_string(self, mock_st):
+        """Test that VannaService.generate_sql_retry omits feedback section when empty string."""
+        from utils.vanna_calls import VannaService
+
+        captured_question = None
+
+        def capture_generate_sql(question):
+            nonlocal captured_question
+            captured_question = question
+            return ("SELECT 1", 0.01)
+
+        service = VannaService.__new__(VannaService)
+        service.vn = MagicMock()
+        service.generate_sql = capture_generate_sql
+
+        VannaService.generate_sql_retry.__wrapped__(
+            service,
+            question="How many patients are there?",
+            failed_sql="SELECT count(*) FROM patiants",
+            error_message='relation "patiants" does not exist',
+            attempt_number=2,
+            user_feedback="",
+        )
+
+        assert captured_question is not None
+        assert "User feedback:" not in captured_question
