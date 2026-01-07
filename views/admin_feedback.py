@@ -81,6 +81,7 @@ def _get_feedback_messages(
                 Message.id,
                 Message.question,
                 Message.query.label("sql_query"),
+                Message.content.label("summary_content"),
                 Message.feedback,
                 Message.feedback_comment,
                 Message.training_status,
@@ -335,10 +336,15 @@ def main():
                 st.markdown("**Question:**")
                 st.info(item.question or "No question recorded")
 
-                # SQL Query
+                # AI Summary/Result
+                if item.summary_content:
+                    st.markdown("**AI Response:**")
+                    st.success(item.summary_content)
+
+                # SQL Query (collapsible for less clutter)
                 if item.sql_query:
-                    st.markdown("**SQL Query:**")
-                    st.code(item.sql_query, language="sql")
+                    with st.expander("View SQL Query", expanded=False):
+                        st.code(item.sql_query, language="sql")
 
                 # Feedback comment (for thumbs down)
                 if item.feedback_comment:
@@ -353,9 +359,9 @@ def main():
                 if item.training_status == "pending":
                     action_cols = st.columns([1, 1, 3])
                     with action_cols[0]:
-                        if st.button("Approve", key=f"approve_{item.id}", type="primary"):
+                        if st.button("Approve Training Data", key=f"approve_{item.id}", type="primary"):
                             if _approve_for_training(item.id, reviewer_id):
-                                st.success("Approved and trained!")
+                                st.success("Approved and added to training data!")
                                 st.rerun()
                             else:
                                 st.error("Failed to approve")
