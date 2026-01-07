@@ -1,4 +1,8 @@
 import datetime as dt
+import json
+import logging
+from enum import Enum
+from io import StringIO
 
 import pandas as pd
 import streamlit as st
@@ -8,6 +12,16 @@ from orm.models import Message, RoleTypeEnum, SessionLocal, User
 from utils.enums import MessageType
 from utils.vanna_calls import write_to_file_and_training
 
+logger = logging.getLogger(__name__)
+
+
+class TrainingStatus(str, Enum):
+    """Training status values for feedback messages."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
 
 def _guard_admin():
     """Ensure only admin users can access this page."""
@@ -16,7 +30,7 @@ def _guard_admin():
         st.stop()
 
 
-def _get_feedback_stats(days: int = 30):
+def _get_feedback_stats(days: int = 30) -> dict[str, int]:
     """Get feedback statistics for the dashboard."""
     since = dt.datetime.now() - dt.timedelta(days=days)
 
@@ -36,24 +50,25 @@ def _get_feedback_stats(days: int = 30):
             .scalar()
             or 0
         )
+        # Pending shows ALL pending items regardless of date (intentional - always show work queue)
         pending_approvals = (
             session.query(func.count())
             .select_from(Message)
-            .filter(Message.training_status == "pending")
+            .filter(Message.training_status == TrainingStatus.PENDING.value)
             .scalar()
             or 0
         )
         approved_count = (
             session.query(func.count())
             .select_from(Message)
-            .filter(Message.training_status == "approved", Message.created_at >= since)
+            .filter(Message.training_status == TrainingStatus.APPROVED.value, Message.created_at >= since)
             .scalar()
             or 0
         )
         rejected_count = (
             session.query(func.count())
             .select_from(Message)
-            .filter(Message.training_status == "rejected", Message.created_at >= since)
+            .filter(Message.training_status == TrainingStatus.REJECTED.value, Message.created_at >= since)
             .scalar()
             or 0
         )
@@ -107,11 +122,11 @@ def _get_feedback_messages(
 
         # Apply status filter
         if status_filter == "Pending Review":
-            query = query.filter(Message.training_status == "pending")
+            query = query.filter(Message.training_status == TrainingStatus.PENDING.value)
         elif status_filter == "Approved":
-            query = query.filter(Message.training_status == "approved")
+            query = query.filter(Message.training_status == TrainingStatus.APPROVED.value)
         elif status_filter == "Rejected":
-            query = query.filter(Message.training_status == "rejected")
+            query = query.filter(Message.training_status == TrainingStatus.REJECTED.value)
         elif status_filter == "Auto-Approved (Admin)":
             query = query.filter(
                 Message.feedback == "up",
@@ -134,31 +149,47 @@ def _get_feedback_messages(
     return results, total_count
 
 
-def _approve_for_training(message_id: int, reviewer_id: int):
-    """Approve a message for training."""
+def _approve_for_training(message_id: int, reviewer_id: int) -> bool:
+    """Approve a message for training.
+
+    Updates the message status and triggers training. If training fails,
+    the status is reverted to pending.
+    """
     with SessionLocal() as session:
         message = session.query(Message).filter(Message.id == message_id).first()
-        if message:
-            message.training_status = "approved"
-            message.reviewed_by = reviewer_id
-            message.reviewed_at = func.now()
-            session.commit()
+        if not message:
+            return False
 
-            # Trigger training
-            if message.question and message.query:
-                new_entry = {"question": message.question, "query": message.query}
+        # Store original status in case we need to revert
+        original_status = message.training_status
+
+        message.training_status = TrainingStatus.APPROVED.value
+        message.reviewed_by = reviewer_id
+        message.reviewed_at = func.now()
+
+        # Trigger training before commit - if it fails, don't commit
+        if message.question and message.query:
+            new_entry = {"question": message.question, "query": message.query}
+            try:
                 write_to_file_and_training(new_entry)
+            except Exception:
+                # Revert status and log error
+                message.training_status = original_status
+                message.reviewed_by = None
+                message.reviewed_at = None
+                logger.exception("Failed to add message %s to training data", message_id)
+                return False
 
-            return True
-    return False
+        session.commit()
+        return True
 
 
-def _reject_feedback(message_id: int, reviewer_id: int):
+def _reject_feedback(message_id: int, reviewer_id: int) -> bool:
     """Reject a message (mark as reviewed but not used for training)."""
     with SessionLocal() as session:
         message = session.query(Message).filter(Message.id == message_id).first()
         if message:
-            message.training_status = "rejected"
+            message.training_status = TrainingStatus.REJECTED.value
             message.reviewed_by = reviewer_id
             message.reviewed_at = func.now()
             session.commit()
@@ -166,7 +197,7 @@ def _reject_feedback(message_id: int, reviewer_id: int):
     return False
 
 
-def _bulk_approve(message_ids: list, reviewer_id: int):
+def _bulk_approve(message_ids: list[int], reviewer_id: int) -> int:
     """Approve multiple messages for training."""
     success_count = 0
     for msg_id in message_ids:
@@ -175,7 +206,7 @@ def _bulk_approve(message_ids: list, reviewer_id: int):
     return success_count
 
 
-def _bulk_reject(message_ids: list, reviewer_id: int):
+def _bulk_reject(message_ids: list[int], reviewer_id: int) -> int:
     """Reject multiple messages."""
     success_count = 0
     for msg_id in message_ids:
@@ -184,7 +215,7 @@ def _bulk_reject(message_ids: list, reviewer_id: int):
     return success_count
 
 
-def _kpi_card(label: str, value, help_text: str | None = None):
+def _kpi_card(label: str, value: int, help_text: str | None = None) -> None:
     """Render a KPI card."""
     c = st.container(border=True)
     with c:
@@ -194,18 +225,13 @@ def _kpi_card(label: str, value, help_text: str | None = None):
             st.caption(help_text)
 
 
-def _get_feedback_icon(feedback: str) -> str:
-    """Get icon for feedback type."""
-    return "thumbs-up" if feedback == "up" else "thumbs-down"
-
-
 def _get_status_badge(status: str | None, feedback: str) -> str:
-    """Get status badge HTML."""
-    if status == "pending":
+    """Get status badge markdown."""
+    if status == TrainingStatus.PENDING.value:
         return ":orange[Pending Review]"
-    elif status == "approved":
+    elif status == TrainingStatus.APPROVED.value:
         return ":green[Approved]"
-    elif status == "rejected":
+    elif status == TrainingStatus.REJECTED.value:
         return ":red[Rejected]"
     elif feedback == "up":
         return ":blue[Auto-Approved]"
@@ -213,7 +239,7 @@ def _get_status_badge(status: str | None, feedback: str) -> str:
         return ""
 
 
-def main():
+def main() -> None:
     _guard_admin()
 
     st.title("Feedback Dashboard")
@@ -224,11 +250,9 @@ def main():
     try:
         user_id_str = st.session_state.cookies.get("user_id")
         if user_id_str:
-            import json
-
             reviewer_id = json.loads(user_id_str)
-    except Exception:
-        pass
+    except (json.JSONDecodeError, TypeError, AttributeError) as e:
+        logger.warning("Failed to parse user_id from cookies: %s", e)
 
     # Date range selector
     days_options = {"7 days": 7, "30 days": 30, "90 days": 90, "All time": None}
@@ -300,7 +324,7 @@ def main():
         st.session_state.selected_messages = set()
 
     # Bulk action buttons (only show if pending items exist in view)
-    pending_items = [item for item in feedback_items if item.training_status == "pending"]
+    pending_items = [item for item in feedback_items if item.training_status == TrainingStatus.PENDING.value]
     if pending_items:
         bulk_cols = st.columns([1, 1, 3])
         with bulk_cols[0]:
@@ -346,11 +370,10 @@ def main():
                 if item.dataframe_json:
                     st.markdown("**Data Results:**")
                     try:
-                        from io import StringIO
-
                         df = pd.read_json(StringIO(item.dataframe_json), orient="records")
                         st.dataframe(df, use_container_width=True)
-                    except Exception:
+                    except (ValueError, TypeError) as e:
+                        logger.debug("Unable to parse dataframe JSON for message %s: %s", item.id, e)
                         st.caption("Unable to display dataframe")
 
                 # SQL Query (collapsible for less clutter)
@@ -368,7 +391,7 @@ def main():
                     st.caption(f"Reviewed at: {item.reviewed_at}")
 
                 # Action buttons (only for pending items)
-                if item.training_status == "pending":
+                if item.training_status == TrainingStatus.PENDING.value:
                     action_cols = st.columns([1, 1, 2])
                     with action_cols[0]:
                         if st.button("Approve and Add to Training Data", key=f"approve_{item.id}", type="primary"):
