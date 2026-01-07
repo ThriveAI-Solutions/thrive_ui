@@ -563,7 +563,7 @@ class SchemaEnricher:
                 stats.avg_value = float(row[2]) if row[2] is not None else None
 
         # Get top N values (for categorical columns)
-        if stats.distinct_count < 100:  # Only for low-cardinality columns
+        if stats.distinct_count < 100 and stats.total_count > 0:  # Only for non-empty, low-cardinality columns
             top_query = psycopg2_sql.SQL(
                 "SELECT {}, COUNT(*) as cnt FROM {} WHERE {} IS NOT NULL "
                 "GROUP BY {} ORDER BY cnt DESC LIMIT 10"
