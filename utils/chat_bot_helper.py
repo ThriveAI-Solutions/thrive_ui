@@ -1245,9 +1245,13 @@ def normal_message_flow(my_question: str):
             if attempt == 1:
                 sql, elapsed_time = get_vn().generate_sql(question=my_question)
             else:
-                # Show retry status to user
+                # Show retry status to user with strategy-specific message
                 with st.chat_message(RoleType.ASSISTANT.value):
-                    st.info(f"Attempt {attempt}/{max_retries + 1}: Trying a different approach...")
+                    if attempt == 2:
+                        strategy = "Trying alternative JOINs, subqueries, or column selections..."
+                    else:
+                        strategy = "Simplifying the query - removing complex JOINs, using essential columns..."
+                    st.info(f"Attempt {attempt}/{max_retries + 1}: {strategy}")
                 logger.info(
                     f"SQL retry attempt {attempt}/{max_retries + 1} for question: {my_question}. "
                     f"Previous error: {last_error_msg}"
