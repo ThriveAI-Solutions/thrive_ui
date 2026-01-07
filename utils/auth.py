@@ -3,7 +3,6 @@ from datetime import datetime, timedelta
 
 import streamlit as st
 
-import utils.chat_bot_helper as chat_helper  # need to do this even though its not used,  so that the class is initialized before its used.
 from orm.functions import set_user_preferences_in_session_state, verify_user_credentials
 
 logger = logging.getLogger(__name__)
@@ -17,6 +16,17 @@ def check_authenticate():
             expiry_date = datetime.fromisoformat(expiry_date_str)
             user = set_user_preferences_in_session_state()
 
+            # Ensure VannaService instance is cleared when switching users
+            # This prevents the previous user's LLM selection from being displayed
+            if "_vn_instance" in st.session_state and st.session_state._vn_instance is not None:
+                # Check if the cached instance is for a different user
+                import json
+
+                cached_user_id = getattr(st.session_state._vn_instance, "user_id", None)
+                current_user_id = str(json.loads(user_id))
+                if cached_user_id != current_user_id:
+                    st.session_state._vn_instance = None
+
             if datetime.now() < expiry_date:
                 cols = st.sidebar.columns([0.7, 0.3], vertical_alignment="bottom")
                 with cols[0]:
@@ -24,14 +34,30 @@ def check_authenticate():
                 with cols[1]:
                     logout = st.button("Log Out")
                     if logout:
+                        # Invalidate VannaService cache for this user
+                        from utils.vanna_calls import VannaService
+                        import json
+
+                        user_id_for_cache = json.loads(st.session_state.cookies.get("user_id"))
+                        user_role = st.session_state.get("user_role")
+                        if user_id_for_cache and user_role is not None:
+                            VannaService.invalidate_cache_for_user(str(user_id_for_cache), user_role)
+
+                        # Clear cookies
                         st.session_state.cookies["user_id"] = ""
                         st.session_state.cookies["expiry_date"] = ""
                         # TODO: This doesnt work, how to delete cookies?
                         # del st.session_state.cookies["user_id"]
                         # del st.session_state.cookies["expiry_date"]
                         st.session_state.cookies.save()
-                        # reset session state
+
+                        # Clear session state (including LLM preferences and VannaService instance)
                         st.session_state.messages = []
+                        st.session_state.selected_llm_provider = None
+                        st.session_state.selected_llm_model = None
+                        if "_vn_instance" in st.session_state:
+                            st.session_state._vn_instance = None
+
                         st.rerun()
             else:
                 show_login()

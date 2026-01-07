@@ -84,6 +84,8 @@ class User(Base):
     llm_fallback = Column(Boolean, default=False)
     min_message_id = Column(Integer, default=0)
     theme = Column(String(50), default=ThemeType.HEALTHELINK.value)
+    selected_llm_provider = Column(String(50), default=None)
+    selected_llm_model = Column(String(100), default=None)
 
     role = relationship("UserRole", back_populates="users")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
@@ -109,6 +111,8 @@ class User(Base):
             "llm_fallback": self.llm_fallback,
             "min_message_id": self.min_message_id,
             "theme": self.theme,
+            "selected_llm_provider": self.selected_llm_provider,
+            "selected_llm_model": self.selected_llm_model,
         }
 
 

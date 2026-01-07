@@ -28,10 +28,21 @@ dependencies = [
     "pymilvus>=2.6.0; sys_platform == 'linux' or sys_platform == 'darwin'",
     "milvus-lite>=2.5.1; sys_platform == 'linux' or sys_platform == 'darwin'",
     "openpyxl>=3.1.0",
+    "pydantic-ai>=1.0.8",
+    "docling>=2.65.0",
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+    "pydantic-settings>=2.0.0",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.3.5", "pytest-cov>=6.2.1", "ruff>=0.11.9", "watchdog>=6.0.0"]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.2.1",
+    "ruff>=0.11.9",
+    "ty>=0.0.4",
+    "watchdog>=6.0.0",
+]
 
 [tool.ruff]
 # Allow lines to be as long as 120.

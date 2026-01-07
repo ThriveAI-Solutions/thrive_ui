@@ -13,6 +13,7 @@ def _fake_st():
                 return self[k]
             except KeyError:
                 raise AttributeError(k)
+
         def __setattr__(self, k, v):
             self[k] = v
 
@@ -29,17 +30,21 @@ def _fake_st():
     )
 
     st.chat_message = lambda *_args, **_kwargs: nullcontext()
+
     # Create a placeholder-like object with markdown and empty methods
     class _Placeholder:
         def markdown(self, *args, **kwargs):
             pass
+
         def empty(self):
             pass
+
     st.empty = lambda: _Placeholder()
 
     class _Ctx:
         def __enter__(self):
             return self
+
         def __exit__(self, exc_type, exc, tb):
             return False
 
@@ -52,12 +57,16 @@ def _fake_st():
     st.warning = lambda *a, **k: None
     st.caption = lambda *a, **k: None
     st.info = lambda *a, **k: None
+
     # st.stop() in real Streamlit raises StopException to halt execution
     class StopException(Exception):
         pass
+
     st.StopException = StopException
+
     def _stop():
         raise StopException()
+
     st.stop = _stop
     st.expander = lambda *_a, **_k: nullcontext()
     st.dataframe = lambda *a, **k: None
@@ -139,13 +148,15 @@ def test_invalid_sql_does_not_call_llm(monkeypatch):
     import utils.chat_bot_helper as cbh
 
     fake_st = _fake_st()
-    fake_st.session_state.update({
-        "show_sql": True,
-        "show_table": False,
-        "show_chart": False,
-        "show_summary": False,
-        "speak_summary": False,
-    })
+    fake_st.session_state.update(
+        {
+            "show_sql": True,
+            "show_table": False,
+            "show_chart": False,
+            "show_summary": False,
+            "speak_summary": False,
+        }
+    )
 
     called_llm = {"called": False}
     monkeypatch.setattr(cbh, "st", fake_st)
@@ -156,8 +167,10 @@ def test_invalid_sql_does_not_call_llm(monkeypatch):
     class _VNInvalid:
         def is_sql_valid(self, sql: str) -> bool:
             return False
+
         def generate_sql(self, question: str):
             return ("SELECT oops", 0.01)
+
         def generate_sql_retry(self, question: str, failed_sql=None, error_message=None, attempt_number=2):
             return ("SELECT oops /* retry */", 0.01)
 
@@ -179,13 +192,15 @@ def test_no_summary_added_when_sql_error(monkeypatch):
 
     fake_st = _fake_st()
     # Ensure UI toggles would normally allow summary generation
-    fake_st.session_state.update({
-        "show_sql": True,
-        "show_table": False,
-        "show_chart": False,
-        "show_summary": True,
-        "speak_summary": False,
-    })
+    fake_st.session_state.update(
+        {
+            "show_sql": True,
+            "show_table": False,
+            "show_chart": False,
+            "show_summary": True,
+            "speak_summary": False,
+        }
+    )
 
     monkeypatch.setattr(cbh, "st", fake_st)
     monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
@@ -219,5 +234,3 @@ def test_no_summary_added_when_sql_error(monkeypatch):
     # Verify that an error is pending and no SUMMARY message exists in messages
     assert fake_st.session_state.get("pending_sql_error", False) is True
     assert all(getattr(m, "type", None) != "summary" for m in fake_st.session_state.get("messages", []))
-
-
