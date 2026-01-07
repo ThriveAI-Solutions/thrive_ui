@@ -88,7 +88,9 @@ class User(Base):
     selected_llm_model = Column(String(100), default=None)
 
     role = relationship("UserRole", back_populates="users")
-    messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
+    messages = relationship(
+        "Message", back_populates="user", cascade="all, delete-orphan", foreign_keys="[Message.user_id]"
+    )
 
     def to_dict(self):
         return {
@@ -122,6 +124,8 @@ class Message(Base):
         Index("ix_thrive_message_user_id", "user_id"),
         Index("ix_thrive_message_created_at", "created_at"),
         Index("ix_thrive_message_type", "type"),
+        Index("ix_thrive_message_feedback", "feedback"),
+        Index("ix_thrive_message_training_status", "training_status"),
     )
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("thrive_user.id"))
@@ -131,6 +135,9 @@ class Message(Base):
     type = Column(String(50), nullable=False)
     feedback = Column(String(50))
     feedback_comment = Column(String(500))  # Optional user feedback comment when thumbs down
+    training_status = Column(String(20))  # 'pending', 'approved', 'rejected', or None (auto-approved for admin)
+    reviewed_by = Column(Integer, ForeignKey("thrive_user.id"))  # Admin who reviewed
+    reviewed_at = Column(TIMESTAMP)  # When the review happened
     query = Column(String)
     question = Column(String(1000))
     dataframe = Column(String)
@@ -139,7 +146,9 @@ class Message(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     # ORM relationship back to user
-    user = relationship("User", back_populates="messages")
+    user = relationship("User", back_populates="messages", foreign_keys=[user_id])
+    # ORM relationship for the reviewer (admin who approved/rejected)
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
 
     def __init__(
         self,
