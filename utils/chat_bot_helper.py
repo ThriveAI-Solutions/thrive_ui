@@ -479,16 +479,29 @@ def set_feedback(index: int, value: str, feedback_comment: str = None):
     # Only set feedback_comment for negative feedback (thumbs down)
     if feedback_comment and value == "down":
         message.feedback_comment = feedback_comment
-    message.save()
+
     new_entry = {
         "question": st.session_state.messages[index].question,
         "query": st.session_state.messages[index].query,
     }
-    if st.session_state.cookies.get("role_name") == "Admin":
-        if value == "up":
+
+    is_admin = st.session_state.cookies.get("role_name") == "Admin"
+
+    if value == "up":
+        if is_admin:
+            # Admin thumbs up: auto-approve and train immediately
+            message.training_status = None  # No pending status needed
             write_to_file_and_training(new_entry)
         else:
+            # Non-admin thumbs up: mark as pending for admin review
+            message.training_status = "pending"
+    elif value == "down":
+        if is_admin:
+            # Admin thumbs down: remove from training if previously trained
             remove_from_file_training(new_entry)
+        # For non-admin thumbs down, just save the feedback (no training action needed)
+
+    message.save()
 
 
 def generate_guid():
