@@ -843,6 +843,7 @@ class VannaService:
         failed_sql: str | None = None,
         error_message: str | None = None,
         attempt_number: int = 2,
+        user_feedback: str | None = None,
     ):
         """Regenerate SQL including prior failure context so the LLM can correct mistakes.
 
@@ -851,6 +852,7 @@ class VannaService:
             failed_sql: The SQL that failed to execute
             error_message: The database error message
             attempt_number: Current attempt number (2 = first retry, 3 = second retry, etc.)
+            user_feedback: Optional user-provided hints to help improve the query
         """
         try:
             # Progressive guidance based on attempt number
@@ -876,6 +878,8 @@ class VannaService:
                 augmented_question_parts.append("Failed SQL:\n" + failed_sql)
             if error_message:
                 augmented_question_parts.append("Database error: " + error_message)
+            if user_feedback:
+                augmented_question_parts.append(f"User feedback: {user_feedback}")
             augmented_question = "\n\n".join(augmented_question_parts)
 
             return _self.generate_sql(augmented_question)

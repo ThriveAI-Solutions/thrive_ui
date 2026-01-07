@@ -57,6 +57,7 @@ def _fake_st():
     st.warning = lambda *a, **k: None
     st.caption = lambda *a, **k: None
     st.info = lambda *a, **k: None
+    st.text_input = lambda *a, **k: ""
 
     # st.stop() in real Streamlit raises StopException to halt execution
     class StopException(Exception):
@@ -90,7 +91,7 @@ class _DummyVNServiceFailThenSuccess:
     def generate_sql(self, question: str):
         return ("SELECT 1", 0.01)
 
-    def generate_sql_retry(self, question: str, failed_sql=None, error_message=None, attempt_number=2):
+    def generate_sql_retry(self, question: str, failed_sql=None, error_message=None, attempt_number=2, user_feedback=None):
         """Retry method called by auto-retry loop."""
         return ("SELECT 1 /* retry */", 0.01)
 
@@ -171,7 +172,7 @@ def test_invalid_sql_does_not_call_llm(monkeypatch):
         def generate_sql(self, question: str):
             return ("SELECT oops", 0.01)
 
-        def generate_sql_retry(self, question: str, failed_sql=None, error_message=None, attempt_number=2):
+        def generate_sql_retry(self, question: str, failed_sql=None, error_message=None, attempt_number=2, user_feedback=None):
             return ("SELECT oops /* retry */", 0.01)
 
     monkeypatch.setattr(cbh, "get_vn", lambda: _VNInvalid())
@@ -213,7 +214,7 @@ def test_no_summary_added_when_sql_error(monkeypatch):
         def generate_sql(self, question: str):
             return ("SELECT 1", 0.01)
 
-        def generate_sql_retry(self, question: str, failed_sql=None, error_message=None, attempt_number=2):
+        def generate_sql_retry(self, question: str, failed_sql=None, error_message=None, attempt_number=2, user_feedback=None):
             """Retry method called by auto-retry loop."""
             return ("SELECT 1 /* retry */", 0.01)
 
