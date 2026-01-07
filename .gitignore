@@ -199,5 +199,7 @@ milvus_demo.db
 *.sqlite3
 *.sqlite3.*
 
+# documentation folder for context7 and firecrawl knowledge
+documentation/
 # Auto Claude data directory
 .auto-claude/
