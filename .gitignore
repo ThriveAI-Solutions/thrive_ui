@@ -203,3 +203,7 @@ milvus_demo.db
 documentation/
 # Auto Claude data directory
 .auto-claude/
+
+# Issue tracking (bd) and scratchpads
+.beads/
+scratchpads/
