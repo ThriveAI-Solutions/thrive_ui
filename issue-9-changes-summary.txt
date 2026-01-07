@@ -1,0 +1,257 @@
+================================================================================
+ISSUE #9: AUTOMATIC RAG ENHANCEMENT FOR SQL GENERATION ACCURACY
+================================================================================
+GitHub Issue: https://github.com/ThriveAI-Solutions/thrive_ui/issues/9
+Branch: feature/issue-9-automatic-rag-enhancement
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This implementation adds Phase 1: Schema Enrichment - automatic extraction of
+rich metadata from PostgreSQL databases to improve RAG-based SQL generation.
+
+================================================================================
+NEW FILES CREATED
+================================================================================
+
+1. utils/schema_enrichment.py (860 lines)
+   ----------------------------------------
+   Core schema enrichment module with:
+
+   - ColumnStatistics dataclass (lines 20-90)
+     * Captures: table_name, column_name, data_type, nullable
+     * Statistics: distinct_count, null_count, total_count, min/max/avg values
+     * top_values list for categorical columns
+     * semantic_type classification
+     * Methods: null_ratio, distinct_ratio, is_likely_primary_key(),
+       is_likely_categorical(), to_documentation()
+
+   - TableRelationship dataclass (lines 92-130)
+     * Tracks: source_table, source_column, target_table, target_column
+     * relationship_type: "foreign_key" or "implicit"
+     * confidence score (1.0 for FK, <1.0 for inferred)
+     * to_documentation() generates JOIN pattern suggestions
+
+   - SchemaGraph class (lines 132-205)
+     * Graph-based table relationship tracking
+     * add_table(), add_relationship() methods
+     * get_related_tables() - find directly connected tables
+     * find_join_path() - BFS-based path finding between tables
+     * get_table_centrality() - identify most connected tables
+     * generate_join_documentation() - create training docs
+
+   - SemanticClassifier class (lines 207-400)
+     * PATTERNS dict with 15+ semantic types:
+       boolean, identifier, name, email, phone, temporal, monetary,
+       quantity, status, location, url, code, percentage
+     * VALUE_PATTERNS for data-driven classification:
+       boolean_yn (Y/N), boolean_tf (true/false), boolean_01 (0/1),
+       gender, email, phone_us, zip_us, date_iso, uuid, state_us
+     * classify_by_name() - pattern matching on column names
+     * classify_by_values() - regex matching on sample values
+     * classify() - combined name + value analysis
+
+   - SchemaEnricher class (lines 402-860)
+     * Main orchestrator for all enrichment
+     * __init__(connection, forbidden_tables, forbidden_columns)
+     * get_allowed_tables() - respects forbidden list
+     * get_allowed_views() - respects forbidden list
+     * collect_column_statistics() - comprehensive stats per column
+     * _collect_column_stats() - detailed stats (null, distinct, min/max/avg)
+     * discover_explicit_relationships() - FK from information_schema
+     * discover_implicit_relationships() - infer from *_id naming
+     * extract_index_information() - pg_indexes metadata
+     * extract_view_definitions() - view SQL from information_schema
+     * generate_training_documentation() - create training docs
+     * enrich_schema() - run full enrichment process
+
+2. tests/utils/test_schema_enrichment.py (600+ lines)
+   --------------------------------------------------
+   Comprehensive test suite with 43 tests:
+
+   - TestColumnStatistics (9 tests)
+     * Basic creation, null/distinct ratio calculations
+     * Primary key and categorical detection heuristics
+     * Documentation generation
+
+   - TestTableRelationship (3 tests)
+     * Basic creation
+     * FK and implicit relationship documentation
+
+   - TestSchemaGraph (8 tests)
+     * Adding tables and relationships
+     * Finding related tables
+     * Direct and indirect JOIN path finding
+     * Table centrality calculation
+
+   - TestSemanticClassifier (10 tests)
+     * Name-based classification for all types
+     * Value-based classification for Y/N, true/false, email
+     * Combined classification
+
+   - TestSchemaEnricher (8 tests)
+     * Initialization with forbidden references
+     * Filtering allowed tables
+     * FK and implicit relationship discovery
+     * Training documentation generation
+     * Full enrichment workflow
+
+   - TestSemanticClassifierEdgeCases (5 tests)
+     * Mixed case column names
+     * Values with nulls
+     * Insufficient pattern matches
+     * UUID and US state code detection
+
+================================================================================
+MODIFIED FILES
+================================================================================
+
+1. utils/vanna_calls.py
+   ---------------------
+   Added train_enhanced_schema() function (lines 2443-2614, ~175 lines)
+
+   Function signature:
+   ```python
+   def train_enhanced_schema(
+       include_statistics: bool = True,
+       include_relationships: bool = True,
+       include_view_definitions: bool = True,
+       sample_limit: int = 1000,
+   ) -> dict:
+   ```
+
+   Features:
+   - Connects to PostgreSQL using streamlit secrets
+   - Initializes SchemaEnricher with forbidden references
+   - Collects column statistics and trains documentation
+   - Discovers explicit FK relationships
+   - Discovers implicit relationships (by naming)
+   - Extracts view definitions
+   - Tracks central tables (high connectivity)
+   - Returns comprehensive results dict
+   - Shows progress via st.toast() and st.success()
+
+   Returns dict with:
+   - success: bool
+   - tables_processed: int
+   - columns_analyzed: int
+   - explicit_relationships: int
+   - implicit_relationships: int
+   - documentation_trained: int
+   - statistics_trained: int
+   - views_documented: int
+
+2. tests/utils/test_vanna_calls.py
+   --------------------------------
+   Added TestTrainEnhancedSchema class (lines 799-1018, ~220 lines)
+
+   4 new tests:
+   - test_train_enhanced_schema_basic
+     * Tests basic execution with mocked database
+     * Verifies connection cleanup
+
+   - test_train_enhanced_schema_no_vanna_service
+     * Tests graceful handling when VannaService unavailable
+
+   - test_train_enhanced_schema_with_statistics
+     * Tests column statistics collection and training
+     * Verifies documentation training called
+
+   - test_train_enhanced_schema_with_relationships
+     * Tests FK and implicit relationship discovery
+     * Verifies relationship documentation trained
+
+3. views/user.py
+   ---------------
+   Import added (line 29):
+   ```python
+   from utils.vanna_calls import train_ddl, train_enhanced_schema, train_file, training_plan
+   ```
+
+   New UI section added (lines 368-414, ~28 lines):
+
+   "Automatic Schema Enrichment" section with:
+   - Subheader and description
+   - Expander with configuration options:
+     * Include Column Statistics checkbox (default: True)
+     * Include Relationships checkbox (default: True)
+     * Include View Definitions checkbox (default: True)
+     * Sample Limit number input (100-10000, default: 1000)
+   - "Run Enhanced Training" primary button
+   - Divider separating from standard training options
+
+================================================================================
+COMMITS
+================================================================================
+
+1. ca04410 - feat(rag): Add schema enrichment module for automatic RAG enhancement (#9)
+   - Created utils/schema_enrichment.py
+   - Created tests/utils/test_schema_enrichment.py
+   - Created scratchpad
+
+2. d58d91c - feat(rag): Add train_enhanced_schema function for automatic schema training (#9)
+   - Added train_enhanced_schema() to utils/vanna_calls.py
+   - Added tests to tests/utils/test_vanna_calls.py
+
+3. 92ab5e3 - feat(rag): Add enhanced training UI in admin settings (#9)
+   - Updated views/user.py with new UI section
+
+4. c071fc9 - docs: Update scratchpad with Phase 1 implementation summary (#9)
+   - Updated scratchpads/issue-9-automatic-rag-enhancement.md
+
+================================================================================
+TEST RESULTS
+================================================================================
+
+All 82 tests passing for new code:
+- 43 tests in tests/utils/test_schema_enrichment.py
+- 39 tests in tests/utils/test_vanna_calls.py (including 4 new)
+
+Note: 2 pre-existing test failures in unrelated files:
+- tests/utils/test_ollama_temperature.py (abstract class issue)
+- tests/utils/test_user_questions.py (Streamlit secrets issue)
+
+================================================================================
+HOW TO USE
+================================================================================
+
+1. Log in as Admin
+2. Go to User Settings > Training Data tab
+3. Expand "Enhanced Training Options"
+4. Configure:
+   - Include Column Statistics: Extract min/max/distinct/null ratios
+   - Include Relationships: Discover FK + implicit relationships
+   - Include View Definitions: Document view SQL
+   - Sample Limit: Rows to sample per column
+5. Click "Run Enhanced Training"
+6. View progress via toast messages
+7. See final summary with counts
+
+================================================================================
+SECURITY CONSIDERATIONS
+================================================================================
+
+- All operations respect forbidden_references.json
+- Forbidden tables are excluded from statistics collection
+- Forbidden columns (e.g., "password") are never sampled
+- Sample values are limited to prevent data exposure
+- Admin-only access via role check in UI
+
+================================================================================
+FUTURE PHASES (NOT IMPLEMENTED)
+================================================================================
+
+Phase 2: Query Log Mining
+- Log successful queries with prompts
+- Pattern extraction using SQLGlot
+- Error analysis and correction learning
+
+Phase 3: External Knowledge Integration
+- Documentation extraction
+- Synthetic training data generation
+
+Phase 4: Continuous Learning Pipeline
+- Scheduled schema refresh
+- Feedback loop for query acceptance
+- Quality metrics dashboard
