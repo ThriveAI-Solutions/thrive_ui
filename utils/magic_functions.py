@@ -444,10 +444,37 @@ def find_closest_column_name_from_list(column_names, column_name):
 
 
 def is_magic_do_magic(question, previous_df=None):
+    """
+    Detect and execute magic commands with semantic recognition fallback.
+
+    Priority order:
+    1. Exact regex match (existing behavior)
+    2. Semantic classification with user confirmation
+
+    Returns:
+        True if magic command was handled, False otherwise
+    """
     try:
         if question is None or question.strip() == "":
             return False
 
+        # Check for confirmed semantic magic from dialog
+        if st.session_state.get("semantic_magic_confirmed") is True:
+            result = st.session_state.get("semantic_magic_result")
+            st.session_state["semantic_magic_confirmed"] = None
+            st.session_state["semantic_magic_result"] = None
+            if result and result.command_pattern:
+                return _execute_semantic_magic(result, question, previous_df)
+        elif st.session_state.get("semantic_magic_confirmed") == "help":
+            st.session_state["semantic_magic_confirmed"] = None
+            _help(question, {}, None)
+            return True
+        elif st.session_state.get("semantic_magic_confirmed") is False:
+            st.session_state["semantic_magic_confirmed"] = None
+            st.session_state["semantic_magic_result"] = None
+            return False  # User declined, proceed to normal flow
+
+        # STEP 1: Try exact regex matching (existing behavior - highest priority)
         if previous_df is not None:
             for key, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
                 match = re.match(key, question.strip())
@@ -477,7 +504,29 @@ def is_magic_do_magic(question, previous_df=None):
                         )
                     meta["func"](question, match.groupdict(), None)
                     return True
+
+        # STEP 2: Semantic classification for non-regex queries
+        # Skip semantic classification for follow-up context (previous_df is set)
+        # Also check feature flag
+        semantic_enabled = st.secrets.get("features", {}).get("semantic_magic_enabled", True)
+        if previous_df is None and semantic_enabled:
+            from utils.semantic_magic_service import SemanticMagicService
+
+            result = SemanticMagicService.classify(question, MAGIC_RENDERERS)
+
+            if result.command_pattern and result.confidence >= SemanticMagicService.HIGH_CONFIDENCE_THRESHOLD:
+                # High confidence - show confirmation dialog
+                show_magic_confirmation_dialog(result, question)
+                st.stop()  # Dialog blocks until user action
+
+            elif result.command_pattern and result.confidence >= SemanticMagicService.LOW_CONFIDENCE_THRESHOLD:
+                # Low confidence - show suggestion dialog
+                show_magic_suggestion_dialog(result, question)
+                st.stop()  # Dialog blocks until user action
+
+        # No match found
         return False
+
     except Exception as e:
         add_message(
             Message(
@@ -5535,3 +5584,149 @@ MAGIC_RENDERERS = {
     },
     # Add more as needed...
 }
+
+
+# ==================== SEMANTIC MAGIC RECOGNITION ====================
+
+
+def _build_command_preview(result) -> str:
+    """Build preview string of the command that will be executed."""
+    if not result.command_name:
+        return ""
+
+    # Build command with parameters
+    cmd = result.command_name
+    params = result.extracted_params
+
+    if "table" in params and "column1" in params and "column2" in params:
+        return f"{cmd} {params['table']}.{params['column1']}.{params['column2']}"
+    elif "table" in params and "column" in params:
+        return f"{cmd} {params['table']}.{params['column']}"
+    elif "table" in params:
+        return f"{cmd} {params['table']}"
+    elif "command" in params:
+        return f"{cmd} {params['command']}"
+
+    return cmd
+
+
+def _validate_and_fuzzy_match_params(params: dict) -> dict:
+    """Validate and fuzzy-match extracted parameters against actual database objects."""
+    validated = {}
+
+    for key, value in params.items():
+        if key == "table":
+            try:
+                # Use existing fuzzy matcher - returns schema.table_name
+                validated[key] = find_closest_object_name(value).split(".")[-1]
+            except Exception:
+                validated[key] = value
+        elif key in ["column", "column1", "column2", "x", "y", "color"]:
+            # Column fuzzy matching requires table context
+            table = params.get("table") or validated.get("table")
+            if table:
+                try:
+                    validated[key] = find_closest_column_name(table, value)
+                except Exception:
+                    validated[key] = value
+            else:
+                validated[key] = value
+        else:
+            validated[key] = value
+
+    return validated
+
+
+def _execute_semantic_magic(result, question: str, previous_df):
+    """Execute a confirmed semantic magic command."""
+    # Find the meta for this pattern
+    meta = MAGIC_RENDERERS.get(result.command_pattern)
+    if not meta:
+        return False
+
+    # Apply fuzzy matching to parameters
+    params = _validate_and_fuzzy_match_params(result.extracted_params)
+
+    if meta["func"] != _followup and meta["func"] != _history_search:
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                "Sounds like magic!",
+                MessageType.TEXT,
+                group_id=get_current_group_id(),
+            )
+        )
+
+    # Execute the magic command with validated parameters
+    meta["func"](question, params, previous_df)
+    return True
+
+
+@st.dialog("Confirm Magic Command")
+def show_magic_confirmation_dialog(result, question: str):
+    """
+    Show blocking confirmation dialog for detected magic command.
+
+    Uses @st.dialog decorator for modal behavior (blocks until user action).
+    """
+    st.markdown(f"**Detected Intent:** {result.command_name}")
+
+    # Show extracted parameters
+    if result.extracted_params:
+        st.markdown("**Parameters:**")
+        for key, value in result.extracted_params.items():
+            st.markdown(f"- {key}: `{value}`")
+
+    st.markdown(f"**Confidence:** {result.confidence:.0%}")
+    st.caption(result.explanation)
+
+    # Build the full command string for preview
+    command_preview = _build_command_preview(result)
+    st.code(command_preview, language=None)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Execute", type="primary", use_container_width=True):
+            st.session_state["semantic_magic_confirmed"] = True
+            st.session_state["semantic_magic_result"] = result
+            st.rerun()
+    with col2:
+        if st.button("Cancel", use_container_width=True):
+            st.session_state["semantic_magic_confirmed"] = False
+            st.session_state["semantic_magic_result"] = None
+            st.rerun()
+
+
+@st.dialog("Did you mean...?")
+def show_magic_suggestion_dialog(result, question: str):
+    """
+    Show suggestion dialog for low-confidence matches.
+    """
+    st.markdown("I'm not sure, but your question might be a magic command:")
+
+    # Primary suggestion
+    st.markdown(f"**{result.command_name}** - {result.explanation}")
+    command_preview = _build_command_preview(result)
+    st.code(command_preview, language=None)
+
+    # Alternatives
+    if result.alternatives:
+        st.markdown("**Other possibilities:**")
+        for alt_cmd, alt_conf in result.alternatives[:3]:
+            st.caption(f"- {alt_cmd} ({alt_conf:.0%})")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Yes, run it", type="primary", use_container_width=True):
+            st.session_state["semantic_magic_confirmed"] = True
+            st.session_state["semantic_magic_result"] = result
+            st.rerun()
+    with col2:
+        if st.button("No, search data", use_container_width=True):
+            st.session_state["semantic_magic_confirmed"] = False
+            st.session_state["semantic_magic_result"] = None
+            st.rerun()
+    with col3:
+        if st.button("Show /help", use_container_width=True):
+            st.session_state["semantic_magic_confirmed"] = "help"
+            st.rerun()
