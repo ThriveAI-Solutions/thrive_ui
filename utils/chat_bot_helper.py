@@ -21,10 +21,9 @@ import re
 logger = logging.getLogger(__name__)
 
 # Patterns for non-recoverable SQL errors that won't benefit from retries
+# Note: "relation/table/column does not exist" errors ARE retried because
+# the LLM may have hallucinated names and can try alternatives with error context
 NON_RECOVERABLE_ERROR_PATTERNS = [
-    r"relation.*does not exist",
-    r"table.*does not exist",
-    r"column.*does not exist",
     r"permission denied",
     r"access denied",
     r"authentication failed",
