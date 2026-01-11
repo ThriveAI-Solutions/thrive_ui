@@ -293,9 +293,7 @@ class TestNonRecoverableErrors:
     """Test that non-recoverable errors skip the retry loop."""
 
     @pytest.mark.parametrize("error_pattern", [
-        'relation "missing_table" does not exist',
-        'table "missing" does not exist',
-        'column "bad_col" does not exist',
+        # These are truly non-recoverable - no point retrying
         "permission denied for table users",
         "access denied",
         "authentication failed",
@@ -330,6 +328,42 @@ class TestNonRecoverableErrors:
         assert len(vn._retry_calls) == 0, (
             f"Non-recoverable error '{error_pattern}' should skip retries, "
             f"but got {len(vn._retry_calls)} retry calls"
+        )
+
+    @pytest.mark.parametrize("error_pattern", [
+        # These ARE recoverable - LLM may have hallucinated names and can try alternatives
+        'relation "missing_table" does not exist',
+        'table "missing" does not exist',
+        'column "bad_col" does not exist',
+    ])
+    def test_missing_object_errors_trigger_retry(self, error_pattern, monkeypatch):
+        """Test that missing table/column errors DO trigger retry (LLM can try alternatives)."""
+        import utils.chat_bot_helper as cbh
+
+        fake_st = _fake_st()
+        monkeypatch.setattr(cbh, "st", fake_st)
+        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
+        monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+
+        vn = _MockVNWithDatabaseError(
+            error_message=error_pattern,
+            fail_count=100,
+            fake_st=fake_st,
+        )
+        monkeypatch.setattr(cbh, "get_vn", lambda: vn)
+
+        cbh.set_question("Query with wrong table/column name", render=False)
+
+        try:
+            cbh.normal_message_flow("Query with wrong table/column name")
+        except fake_st.StopException:
+            pass
+
+        # Missing table/column errors SHOULD trigger retries
+        # The LLM might have hallucinated the name and can try a different one
+        assert len(vn._retry_calls) == 2, (
+            f"Error '{error_pattern}' should trigger retries (LLM can try alternatives), "
+            f"but got {len(vn._retry_calls)} retry calls instead of 2"
         )
 
 
