@@ -245,9 +245,11 @@ class ThriveAI_Milvus:
             logger.exception("Error adding DDL to Milvus: %s", e)
             raise
 
-    def add_documentation(self, documentation: str, metadata: dict[str, Any] | None = None, **kwargs) -> str:
+    def add_documentation(
+        self, documentation: str, metadata: dict[str, Any] | None = None, id: str | None = None, **kwargs
+    ) -> str:
         try:
-            doc_id = deterministic_uuid(documentation) + "-doc"
+            doc_id = id if id is not None else deterministic_uuid(documentation) + "-doc"
             self._insert(self.documentation_collection, doc_id, documentation, metadata)
             return doc_id
         except Exception as e:
