@@ -181,6 +181,22 @@ def _approve_for_training(message_id: int, reviewer_id: int) -> bool:
                 return False
 
         session.commit()
+
+        # Log admin action
+        try:
+            from orm.logging_functions import log_admin_action
+            from orm.models import AdminActionType
+
+            log_admin_action(
+                admin_id=reviewer_id,
+                action_type=AdminActionType.TRAINING_APPROVE,
+                description=f"Approved message {message_id} for training",
+                target_entity_type="message",
+                target_entity_id=str(message_id),
+            )
+        except Exception as e:
+            logger.warning("Failed to log training approval for message %s: %s", message_id, e)
+
         return True
 
 
@@ -193,6 +209,22 @@ def _reject_feedback(message_id: int, reviewer_id: int) -> bool:
             message.reviewed_by = reviewer_id
             message.reviewed_at = func.now()
             session.commit()
+
+            # Log admin action
+            try:
+                from orm.logging_functions import log_admin_action
+                from orm.models import AdminActionType
+
+                log_admin_action(
+                    admin_id=reviewer_id,
+                    action_type=AdminActionType.TRAINING_REJECT,
+                    description=f"Rejected message {message_id} for training",
+                    target_entity_type="message",
+                    target_entity_id=str(message_id),
+                )
+            except Exception as e:
+                logger.warning("Failed to log training rejection for message %s: %s", message_id, e)
+
             return True
     return False
 
@@ -203,6 +235,23 @@ def _bulk_approve(message_ids: list[int], reviewer_id: int) -> int:
     for msg_id in message_ids:
         if _approve_for_training(msg_id, reviewer_id):
             success_count += 1
+
+    # Log bulk action if any succeeded
+    if success_count > 0:
+        try:
+            from orm.logging_functions import log_admin_action
+            from orm.models import AdminActionType
+
+            log_admin_action(
+                admin_id=reviewer_id,
+                action_type=AdminActionType.TRAINING_BULK_APPROVE,
+                description=f"Bulk approved {success_count} messages for training",
+                target_entity_type="message",
+                affected_count=success_count,
+            )
+        except Exception as e:
+            logger.warning("Failed to log bulk training approval: %s", e)
+
     return success_count
 
 
@@ -212,6 +261,23 @@ def _bulk_reject(message_ids: list[int], reviewer_id: int) -> int:
     for msg_id in message_ids:
         if _reject_feedback(msg_id, reviewer_id):
             success_count += 1
+
+    # Log bulk action if any succeeded
+    if success_count > 0:
+        try:
+            from orm.logging_functions import log_admin_action
+            from orm.models import AdminActionType
+
+            log_admin_action(
+                admin_id=reviewer_id,
+                action_type=AdminActionType.TRAINING_BULK_REJECT,
+                description=f"Bulk rejected {success_count} messages",
+                target_entity_type="message",
+                affected_count=success_count,
+            )
+        except Exception as e:
+            logger.warning("Failed to log bulk training rejection: %s", e)
+
     return success_count
 
 

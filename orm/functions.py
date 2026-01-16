@@ -12,6 +12,17 @@ from utils.enums import MessageType, RoleType
 logger = logging.getLogger(__name__)
 
 
+def _get_current_user_id() -> int | None:
+    """Get the current user ID from session state cookies."""
+    try:
+        user_id_str = st.session_state.cookies.get("user_id")
+        if user_id_str:
+            return json.loads(user_id_str)
+    except Exception:
+        pass
+    return None
+
+
 def verify_user_credentials(username: str, password: str) -> bool:
     try:
         # Create a new database session
@@ -31,6 +42,22 @@ def verify_user_credentials(username: str, password: str) -> bool:
                 userRole = session.query(UserRole).filter(UserRole.id == user.user_role_id).one_or_none()
                 st.session_state.cookies["role_name"] = userRole.role_name
                 st.session_state.user_role = userRole.role.value
+
+                # Log successful login
+                try:
+                    from orm.logging_functions import log_login
+
+                    log_login(user_id=user.id, username=username, success=True)
+                except Exception as e:
+                    logger.warning("Failed to log successful login for user %s: %s", username, e)
+            else:
+                # Log failed login attempt
+                try:
+                    from orm.logging_functions import log_login
+
+                    log_login(user_id=None, username=username, success=False)
+                except Exception as e:
+                    logger.warning("Failed to log failed login attempt for user %s: %s", username, e)
 
             # Return True if the user exists, otherwise return False
             return user is not None
@@ -54,6 +81,15 @@ def change_password(user_id: int, current_password: str, new_password: str) -> b
                 # Update the user's password in the database
                 user.password = hashlib.sha256(new_password.encode()).hexdigest()
                 session.commit()
+
+                # Log password change
+                try:
+                    from orm.logging_functions import log_password_change
+
+                    log_password_change(user_id=user_id, username=user.username)
+                except Exception as e:
+                    logger.warning("Failed to log password change for user %s: %s", user_id, e)
+
                 return True
             else:
                 return False
@@ -190,6 +226,27 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
 
             session.add(new_user)
             session.commit()
+
+            # Log admin action
+            try:
+                from orm.logging_functions import log_admin_action
+                from orm.models import AdminActionType
+
+                admin_id = _get_current_user_id()
+                if admin_id:
+                    # Refresh to get the new user's ID
+                    session.refresh(new_user)
+                    log_admin_action(
+                        admin_id=admin_id,
+                        action_type=AdminActionType.USER_CREATE,
+                        description=f"Created user '{username}'",
+                        target_user_id=new_user.id,
+                        target_username=username,
+                        target_entity_type="user",
+                    )
+            except Exception as e:
+                logger.warning("Failed to log user creation for %s: %s", username, e)
+
             return True
 
     except Exception as e:
@@ -248,6 +305,15 @@ def update_user(
             if not user:
                 return False
 
+            # Capture old values for logging
+            old_values = {
+                "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "role_id": user.user_role_id,
+                "theme": user.theme,
+            }
+
             # Check if new username is taken (if changing username)
             if username and username != user.username:
                 existing = (
@@ -271,6 +337,36 @@ def update_user(
                 user.theme = theme
 
             session.commit()
+
+            # Log admin action
+            try:
+                from orm.logging_functions import log_admin_action
+                from orm.models import AdminActionType
+
+                admin_id = _get_current_user_id()
+                if admin_id:
+                    new_values = {
+                        "username": username,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "role_id": role_id,
+                        "theme": theme,
+                    }
+                    # Only include changed values
+                    changes = {k: v for k, v in new_values.items() if v is not None}
+                    log_admin_action(
+                        admin_id=admin_id,
+                        action_type=AdminActionType.USER_UPDATE,
+                        description=f"Updated user '{user.username}'",
+                        target_user_id=user_id,
+                        target_username=user.username,
+                        target_entity_type="user",
+                        old_value={k: old_values[k] for k in changes.keys()},
+                        new_value=changes,
+                    )
+            except Exception as e:
+                logger.warning("Failed to log user update for user_id %s: %s", user_id, e)
+
             return True
 
     except Exception as e:
@@ -286,12 +382,34 @@ def delete_user(user_id: int) -> bool:
             if not user:
                 return False
 
+            # Capture username before deletion for logging
+            deleted_username = user.username
+
             # Delete associated messages first
             session.query(Message).filter(Message.user_id == user_id).delete()
 
             # Delete the user
             session.delete(user)
             session.commit()
+
+            # Log admin action
+            try:
+                from orm.logging_functions import log_admin_action
+                from orm.models import AdminActionType
+
+                admin_id = _get_current_user_id()
+                if admin_id:
+                    log_admin_action(
+                        admin_id=admin_id,
+                        action_type=AdminActionType.USER_DELETE,
+                        description=f"Deleted user '{deleted_username}'",
+                        target_user_id=user_id,
+                        target_username=deleted_username,
+                        target_entity_type="user",
+                    )
+            except Exception as e:
+                logger.warning("Failed to log user deletion for %s: %s", deleted_username, e)
+
             return True
 
     except Exception as e:
@@ -398,6 +516,25 @@ def admin_change_password(user_id: int, new_password: str) -> bool:
                 return False
             user.password = hashlib.sha256(new_password.encode()).hexdigest()
             session.commit()
+
+            # Log admin action
+            try:
+                from orm.logging_functions import log_admin_action
+                from orm.models import AdminActionType
+
+                admin_id = _get_current_user_id()
+                if admin_id:
+                    log_admin_action(
+                        admin_id=admin_id,
+                        action_type=AdminActionType.USER_PASSWORD_RESET,
+                        description=f"Reset password for user '{user.username}'",
+                        target_user_id=user_id,
+                        target_username=user.username,
+                        target_entity_type="user",
+                    )
+            except Exception as e:
+                logger.warning("Failed to log admin password reset for user_id %s: %s", user_id, e)
+
             return True
     except Exception as e:
         logger.error(f"Error setting user password: {e}")
