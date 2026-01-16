@@ -160,7 +160,7 @@ def test_train_ddl_adds_to_chromadb_with_user_role(
     service.vn.add_ddl = MagicMock(wraps=original_add_ddl)
 
     try:
-        train_ddl(describe_ddl=False)  # We are not testing describe part here
+        train_ddl()  # Train DDL only (no describe)
 
         assert service.vn.add_ddl.call_count == 2  # Once for 'users', once for 'orders'
 
@@ -708,18 +708,18 @@ def test_train_ddl_shows_success_messages(
         service.vn.ddl_collection.delete(ids=existing_ids)
 
     # 2. Call the function
-    train_ddl(describe_ddl=False)
+    train_ddl()
 
     # 3. Verify success messages were shown
     # Check that starting message was shown
     mock_toast.assert_any_call("🚀 Starting DDL training...")
 
     # Check that individual table completion messages were shown
-    mock_toast.assert_any_call("✓ Trained DDL for table: users")
-    mock_toast.assert_any_call("✓ Trained DDL for table: orders")
+    mock_toast.assert_any_call("Trained DDL for table: users")
+    mock_toast.assert_any_call("Trained DDL for table: orders")
 
     # Check that final success message was shown
-    mock_success.assert_called_once_with("🎉 DDL Training completed successfully! Trained 2 table(s).")
+    mock_success.assert_called_once_with("DDL Training completed! Trained 2 table(s).")
 
     # Verify warning was not called (since we have tables)
     mock_warning.assert_not_called()
@@ -758,7 +758,7 @@ def test_train_ddl_shows_warning_when_no_tables(
     service = mock_vanna_service_with_in_memory_chroma
 
     # 2. Call the function
-    train_ddl(describe_ddl=False)
+    train_ddl()
 
     # 3. Verify appropriate messages were shown
     # Check that starting message was shown

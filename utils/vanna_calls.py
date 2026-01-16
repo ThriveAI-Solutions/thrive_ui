@@ -1373,9 +1373,26 @@ class VannaService:
             return DataFrame()
 
     def train(
-        self, question=None, sql=None, documentation=None, ddl=None, plan=None, metadata: dict[str, Any] | None = None
+        self,
+        question=None,
+        sql=None,
+        documentation=None,
+        ddl=None,
+        plan=None,
+        metadata: dict[str, Any] | None = None,
+        id: str | None = None,
     ):
-        """Train Vanna with various types of data, ensuring user_role is in metadata."""
+        """Train Vanna with various types of data, ensuring user_role is in metadata.
+
+        Args:
+            question: Question text for Q&A pairs
+            sql: SQL query for Q&A pairs
+            documentation: Free-form documentation text
+            ddl: DDL statement (CREATE TABLE)
+            plan: Training plan object
+            metadata: Additional metadata to store
+            id: Optional custom ID for documentation (allows overwriting)
+        """
         try:
             effective_metadata = metadata.copy() if metadata is not None else {}
             effective_metadata["user_role"] = self.user_role
@@ -1383,7 +1400,7 @@ class VannaService:
             if question and sql:
                 self.vn.add_question_sql(question=question, sql=sql, metadata=effective_metadata)
             elif documentation:
-                self.vn.add_documentation(documentation=documentation, metadata=effective_metadata)
+                self.vn.add_documentation(documentation=documentation, metadata=effective_metadata, id=id)
             elif ddl:
                 self.vn.add_ddl(ddl=ddl, metadata=effective_metadata)
             elif plan:
@@ -1837,13 +1854,12 @@ def training_plan():
         raise
 
 
-def train_ddl(describe_ddl: bool = False):
+def train_ddl():
     """
-    RAG-optimized DDL training function that captures comprehensive schema information
-    including constraints, indexes, triggers, and enhanced metadata for superior SQL generation.
+    Train DDL (CREATE TABLE statements) for all non-forbidden tables.
 
-    Args:
-        describe_ddl (bool): Whether to generate AI descriptions for DDL structures
+    This function trains only the schema structure (DDL) without additional
+    documentation or semantic classification.
 
     Returns:
         bool: True if training completed successfully, False otherwise
@@ -2087,11 +2103,8 @@ def train_ddl(describe_ddl: bool = False):
 
                 # Note: Index information removed to simplify query
 
-            # Generate and train enhanced DDL for each table
-            # Begin training DDL structures
+            # Generate and train DDL for each table
             tables_trained = 0
-            constraints_trained = 0
-            semantic_docs_trained = 0
 
             for table_name, table_data in tables_data.items():
                 # Generate enhanced DDL
@@ -2118,63 +2131,12 @@ def train_ddl(describe_ddl: bool = False):
                 ddl_lines.extend([",\n".join(column_definitions)])
                 ddl_lines.append(");")
 
-                # Train basic DDL
+                # Train DDL
                 enhanced_ddl = "\n".join(ddl_lines)
                 success = vanna_service.train(ddl=enhanced_ddl)
                 if success:
                     tables_trained += 1
-                st.toast(f"✓ Trained DDL for table: {table_name}")
-
-                # Train constraint documentation
-                for constraint in table_data["constraints"]:
-                    if constraint["type"] == "FOREIGN KEY":
-                        constraint_doc = f"""
-                        Table {table_name} has a foreign key constraint on {constraint["column"]} 
-                        referencing {constraint["referenced_table"]}.{constraint["referenced_column"]}.
-                        Update rule: {constraint["update_rule"]}, Delete rule: {constraint["delete_rule"]}.
-                        This enforces referential integrity between {table_name} and {constraint["referenced_table"]}.
-                        """
-                        vanna_service.train(documentation=constraint_doc)
-                        constraints_trained += 1
-                    elif constraint["type"] == "PRIMARY KEY":
-                        constraint_doc = f"""
-                        Table {table_name} has primary key constraint on {constraint["column"]}.
-                        This uniquely identifies each row in {table_name}.
-                        """
-                        vanna_service.train(documentation=constraint_doc)
-                        constraints_trained += 1
-                    elif constraint["type"] == "UNIQUE":
-                        constraint_doc = f"""
-                        Table {table_name} has unique constraint on {constraint["column"]}.
-                        This ensures no duplicate values in {constraint["column"]}.
-                        """
-                        vanna_service.train(documentation=constraint_doc)
-                        constraints_trained += 1
-
-                # Note: Index training removed to simplify implementation
-
-                # Train semantic type documentation
-                semantic_groups = {}
-                for col in table_data["columns"]:
-                    if col["semantic_type"] != "general":
-                        if col["semantic_type"] not in semantic_groups:
-                            semantic_groups[col["semantic_type"]] = []
-                        semantic_groups[col["semantic_type"]].append(col["name"])
-
-                for semantic_type, columns in semantic_groups.items():
-                    semantic_doc = f"""
-                    Table {table_name} has {semantic_type} columns: {", ".join(columns)}.
-                    These columns contain {semantic_type} data and should be handled accordingly in queries.
-                    """
-                    vanna_service.train(documentation=semantic_doc)
-                    semantic_docs_trained += 1
-
-                # Optional: Generate AI descriptions
-                if describe_ddl:
-                    try:
-                        train_ddl_describe_to_rag(table_name, [enhanced_ddl])
-                    except Exception as e:
-                        logger.warning(f"Failed to generate AI description for {table_name}: {e}")
+                st.toast(f"Trained DDL for table: {table_name}")
 
         # Ensure cursor is closed for tests that assert this behavior
         try:
@@ -2182,14 +2144,9 @@ def train_ddl(describe_ddl: bool = False):
         except Exception:
             pass
 
-        # Show comprehensive success message
-        relationship_msg = (
-            f"🔗 Documented {constraints_trained} constraint relationships\n        " if object_type == "tables" else ""
-        )
-        st.success(f"🎉 DDL Training completed successfully! Trained {tables_trained} table(s).")
-        logger.info(
-            f"Enhanced DDL training completed: {tables_trained} {object_type}, {constraints_trained} constraints, {semantic_docs_trained} semantic docs"
-        )
+        # Show success message
+        st.success(f"DDL Training completed! Trained {tables_trained} table(s).")
+        logger.info(f"DDL training completed: {tables_trained} {object_type}")
         return True
 
     except Exception as e:
@@ -2200,6 +2157,311 @@ def train_ddl(describe_ddl: bool = False):
     finally:
         # Connection is managed by context manager; avoid double close for tests
         pass
+
+
+# --- AI Documentation Generation ---
+
+AI_DOCUMENTATION_SYSTEM_PROMPT = """You are a database documentation expert. Your task is to generate clear, useful documentation for a database table that will help users write SQL queries.
+
+Generate documentation in markdown format with these sections:
+
+## Purpose
+A brief 1-2 sentence description of what the table contains and its business purpose.
+
+## Use Cases
+5-8 bullet points describing realistic query scenarios users might need.
+
+## Table Information
+A markdown table with columns: column | description | example_values
+- Include ALL columns from the DDL
+- Write clear, human-readable descriptions
+- Show 3 representative sample values for each column
+
+## Example Queries
+3-5 natural language questions with corresponding SQL queries that demonstrate useful query patterns.
+
+Focus on practical query patterns and include specific values from the sample data where relevant. The documentation should help an LLM understand the table well enough to generate accurate SQL queries."""
+
+
+def _get_single_table_ddl(conn, schema_name: str, table_name: str) -> str:
+    """Get DDL for a single table from information_schema."""
+    try:
+        cursor = conn.cursor()
+        # Use parameterized query to prevent SQL injection
+        ddl_query = """
+            SELECT
+                column_name,
+                data_type,
+                is_nullable,
+                column_default,
+                character_maximum_length,
+                numeric_precision,
+                numeric_scale
+            FROM information_schema.columns
+            WHERE table_schema = %s
+            AND table_name = %s
+            ORDER BY ordinal_position
+        """
+        cursor.execute(ddl_query, (schema_name, table_name))
+        columns = cursor.fetchall()
+        cursor.close()
+
+        if not columns:
+            return f"-- No columns found for {schema_name}.{table_name}"
+
+        # Build DDL string
+        ddl_lines = [f"CREATE TABLE {schema_name}.{table_name} ("]
+        col_defs = []
+        for col in columns:
+            col_name, data_type, nullable, default, max_len, precision, scale = col
+            type_str = data_type
+            if max_len:
+                type_str += f"({max_len})"
+            elif precision and scale:
+                type_str += f"({precision},{scale})"
+            null_str = "NULL" if nullable == "YES" else "NOT NULL"
+            default_str = f" DEFAULT {default}" if default else ""
+            col_defs.append(f"    {col_name} {type_str}{default_str} {null_str}")
+
+        ddl_lines.append(",\n".join(col_defs))
+        ddl_lines.append(");")
+        return "\n".join(ddl_lines)
+    except Exception as e:
+        logger.warning(f"Error getting DDL for {schema_name}.{table_name}: {e}")
+        return f"-- DDL for {schema_name}.{table_name} could not be retrieved"
+
+
+def _get_random_sample_data(conn, schema_name: str, table_name: str, limit: int = 25) -> pd.DataFrame:
+    """Get random sample records from a table using ORDER BY RANDOM()."""
+    try:
+        from psycopg2 import sql as psycopg2_sql
+
+        safe_schema = psycopg2_sql.Identifier(schema_name)
+        safe_table = psycopg2_sql.Identifier(table_name)
+        query = psycopg2_sql.SQL("SELECT * FROM {}.{} ORDER BY RANDOM() LIMIT %s").format(
+            safe_schema, safe_table
+        )
+        df = pd.read_sql_query(query.as_string(conn), conn, params=(limit,))
+        return df
+    except Exception as e:
+        logger.warning(f"Could not get sample data for {schema_name}.{table_name}: {e}")
+        return pd.DataFrame()
+
+
+def _build_ai_documentation_prompt(schema_name: str, table_name: str, ddl: str, sample_df: pd.DataFrame) -> str:
+    """Build the user prompt for AI documentation generation."""
+    # Format sample data summary
+    sample_preview = ""
+    if not sample_df.empty:
+        col_info = []
+        for col in sample_df.columns:
+            unique_vals = sample_df[col].dropna().unique()[:5]
+            # Format values appropriately
+            formatted_vals = []
+            for v in unique_vals:
+                if isinstance(v, str):
+                    formatted_vals.append(f"`{v}`")
+                else:
+                    formatted_vals.append(str(v))
+            sample_vals = ", ".join(formatted_vals)
+            col_info.append(f"- {col}: {sample_vals}")
+        sample_preview = "\n".join(col_info)
+
+    return f"""Generate documentation for this database table:
+
+**Table:** {schema_name}.{table_name}
+
+**DDL:**
+```sql
+{ddl}
+```
+
+**Sample Values (from {len(sample_df)} random records):**
+{sample_preview}
+
+Please generate comprehensive documentation following the format specified in your instructions. Include realistic use cases and example queries that would be useful for data analysts working with this table."""
+
+
+def train_ai_documentation():
+    """
+    Generate AI-powered documentation for each table using LLM analysis.
+
+    For each non-forbidden table:
+    1. Get 25 random sample records
+    2. Get table DDL for context
+    3. Generate comprehensive documentation using LLM
+    4. Store in documentation collection with deterministic ID (allows re-running)
+
+    Returns:
+        bool: True if training completed successfully, False otherwise
+    """
+    conn = None
+    progress_bar = None
+    status_text = None
+    try:
+        st.toast("Starting AI documentation generation...")
+        logger.info("Starting AI documentation generation")
+
+        vanna_service = VannaService.from_streamlit_session()
+        if not vanna_service:
+            st.error("Failed to initialize VannaService")
+            return False
+
+        # Get forbidden tables
+        try:
+            forbidden_tables, forbidden_columns, _ = read_forbidden_from_json()
+            logger.info(f"Loaded {len(forbidden_tables)} forbidden tables")
+        except Exception as e:
+            logger.warning(f"Error reading forbidden tables: {e}")
+            forbidden_tables = []
+
+        # Get configuration
+        schema_name = get_configured_schema()
+        object_type = get_configured_object_type()
+
+        # Validate object_type to prevent SQL injection (should only be 'tables' or 'views')
+        if object_type not in ("tables", "views"):
+            st.error(f"Invalid object_type: {object_type}")
+            return False
+
+        # Connect to database
+        conn = psycopg2.connect(
+            host=st.secrets["postgres"]["host"],
+            port=st.secrets["postgres"]["port"],
+            database=st.secrets["postgres"]["database"],
+            user=st.secrets["postgres"]["user"],
+            password=st.secrets["postgres"]["password"],
+        )
+
+        # Build query to get table list using parameterized queries
+        cursor = conn.cursor()
+        if forbidden_tables:
+            # Use parameterized query with placeholders for forbidden tables
+            placeholders = ", ".join(["%s"] * len(forbidden_tables))
+            table_list_query = f"""
+                SELECT table_name
+                FROM information_schema.{object_type}
+                WHERE table_schema = %s
+                AND table_name NOT IN ({placeholders})
+                ORDER BY table_name
+            """
+            cursor.execute(table_list_query, [schema_name] + forbidden_tables)
+        else:
+            table_list_query = f"""
+                SELECT table_name
+                FROM information_schema.{object_type}
+                WHERE table_schema = %s
+                ORDER BY table_name
+            """
+            cursor.execute(table_list_query, (schema_name,))
+
+        tables = [row[0] for row in cursor.fetchall()]
+        cursor.close()
+
+        if not tables:
+            st.warning("No tables found to generate documentation for.")
+            conn.close()
+            return False
+
+        total_tables = len(tables)
+        st.toast(f"Found {total_tables} tables to process")
+
+        # Create progress tracking (initialized here for finally block access)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        tables_processed = 0
+        tables_failed = []
+
+        # Process each table
+        for i, table_name in enumerate(tables):
+            try:
+                status_text.text(f"Processing {table_name}... ({i+1}/{total_tables})")
+                progress_bar.progress((i + 1) / total_tables)
+
+                # Get DDL for context
+                ddl = _get_single_table_ddl(conn, schema_name, table_name)
+
+                # Get random sample data
+                sample_df = _get_random_sample_data(conn, schema_name, table_name, limit=25)
+
+                # Build prompt
+                user_prompt = _build_ai_documentation_prompt(schema_name, table_name, ddl, sample_df)
+
+                # Call LLM to generate documentation
+                documentation = vanna_service.submit_prompt(
+                    AI_DOCUMENTATION_SYSTEM_PROMPT,
+                    user_prompt
+                )
+
+                # Validate LLM response
+                if not documentation:
+                    tables_failed.append((table_name, "LLM returned empty response"))
+                    continue
+
+                if len(documentation) < 100:
+                    tables_failed.append((table_name, "LLM response too short (< 100 chars)"))
+                    logger.warning(f"LLM response for {table_name} too short: {len(documentation)} chars")
+                    continue
+
+                # Add table identifier header
+                full_doc = f"# {schema_name}.{table_name}\n\n{documentation}"
+
+                # Generate deterministic ID for this table's AI doc
+                doc_id = f"ai_doc_{schema_name}_{table_name}"
+
+                # Try to remove any existing AI doc for this table first
+                try:
+                    vanna_service.remove_from_training(doc_id)
+                    logger.debug(f"Removed existing AI doc: {doc_id}")
+                except Exception:
+                    pass  # Doesn't exist yet, that's fine
+
+                # Store in documentation collection with deterministic ID
+                success = vanna_service.train(documentation=full_doc, id=doc_id)
+                if success:
+                    tables_processed += 1
+                    st.toast(f"Generated documentation for {table_name}")
+                else:
+                    tables_failed.append((table_name, "Failed to store documentation"))
+
+            except Exception as e:
+                logger.exception(f"Error processing table {table_name}: {e}")
+                tables_failed.append((table_name, str(e)))
+                continue
+
+        # Report results
+        if tables_failed:
+            failed_names = [t for t, _ in tables_failed[:5]]  # Show first 5
+            more_msg = f" and {len(tables_failed) - 5} more" if len(tables_failed) > 5 else ""
+            st.warning(f"Some tables failed: {', '.join(failed_names)}{more_msg}")
+            for table_name, error in tables_failed:
+                logger.warning(f"Failed to generate docs for {table_name}: {error}")
+
+        st.success(f"AI documentation generated for {tables_processed}/{total_tables} tables")
+        logger.info(f"AI documentation complete: {tables_processed} succeeded, {len(tables_failed)} failed")
+        return tables_processed > 0
+
+    except Exception as e:
+        st.error(f"Error generating AI documentation: {e}")
+        logger.exception("Error in train_ai_documentation: %s", e)
+        return False
+    finally:
+        # Clean up progress indicators
+        try:
+            if progress_bar:
+                progress_bar.empty()
+            if status_text:
+                status_text.empty()
+        except Exception:
+            pass  # UI elements may not exist if error occurred early
+
+        # Close database connection
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def train_ddl_describe_to_rag(table: str, ddl: list):
