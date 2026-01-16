@@ -26,6 +26,18 @@ from utils.thriveai_ollama import ThriveAI_Ollama
 logger = logging.getLogger(__name__)
 
 
+def _get_user_id_from_session() -> int | None:
+    """Get user_id from session state cookies."""
+    try:
+        if hasattr(st.session_state, "cookies") and st.session_state.cookies is not None:
+            user_id_str = st.session_state.cookies.get("user_id")
+            if user_id_str:
+                return json.loads(user_id_str)
+    except Exception:
+        pass
+    return None
+
+
 @dataclass
 class UserContext:
     """User context containing authentication and authorization information."""
@@ -773,6 +785,27 @@ class VannaService:
         else:
             return vn_class_name
 
+    def get_llm_provider_and_model(self) -> tuple[str | None, str | None]:
+        """Get the LLM provider and model name separately for logging."""
+        if self.vn is None:
+            return None, None
+
+        vn_class_name = self.vn.__class__.__name__
+        ai_keys = self.config.get("ai_keys", {})
+
+        if "Anthropic" in vn_class_name:
+            return "anthropic", ai_keys.get("anthropic_model")
+        elif "Ollama" in vn_class_name:
+            return "ollama", ai_keys.get("ollama_model")
+        elif "Gemini" in vn_class_name:
+            return "gemini", ai_keys.get("gemini_model")
+        elif "OpenAI" in vn_class_name:
+            return "openai", ai_keys.get("openai_model")
+        elif vn_class_name == "VannaDefault":
+            return "vanna", ai_keys.get("vanna_model")
+        else:
+            return vn_class_name.lower(), None
+
     @st.cache_data(show_spinner="Generating sample questions ...")
     def generate_questions(_self):
         """Generate sample questions using Vanna."""
@@ -808,6 +841,22 @@ class VannaService:
             except Exception:
                 pass
 
+            # Track RAG retrieval time and capture context for logging
+            retrieval_start = time.perf_counter()
+            try:
+                qsl = _self.vn.get_similar_question_sql(question=question)
+            except Exception:
+                qsl = []
+            try:
+                ddl_list = _self.vn.get_related_ddl(question=question)
+            except Exception:
+                ddl_list = []
+            try:
+                doc_list = _self.vn.get_related_documentation(question=question)
+            except Exception:
+                doc_list = []
+            retrieval_time_ms = int((time.perf_counter() - retrieval_start) * 1000)
+
             start_time = time.perf_counter()
             allow_see_data = _self.config["security"].get("allow_llm_to_see_data", False)
 
@@ -829,9 +878,44 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Response is %s", response)
             logger.info("Elapsed time is %s", elapsed_time)
+
+            # Log LLM context to database (non-streaming path)
+            try:
+                from orm.logging_functions import log_llm_context
+
+                llm_provider, llm_model = _self.get_llm_provider_and_model()
+                log_llm_context(
+                    user_id=_get_user_id_from_session(),
+                    question=question,
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                    ddl_list=ddl_list,
+                    doc_list=doc_list,
+                    question_sql_list=qsl,
+                    generated_sql=response,
+                    retrieval_time_ms=retrieval_time_ms,
+                    inference_time_ms=int(elapsed_time * 1000),
+                    total_time_ms=retrieval_time_ms + int(elapsed_time * 1000),
+                )
+            except Exception as log_err:
+                logger.warning("Failed to log LLM context: %s", log_err)
         except Exception as e:
             st.error(f"Error generating SQL: {e}")
             logger.exception("%s", e)
+            # Log error to database
+            try:
+                from orm.logging_functions import log_sql_generation_error
+
+                llm_provider, llm_model = _self.get_llm_provider_and_model()
+                log_sql_generation_error(
+                    error=e,
+                    question=question,
+                    user_id=_get_user_id_from_session(),
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                )
+            except Exception as log_err:
+                logger.warning("Failed to log SQL generation error: %s", log_err)
             return None, 0
         else:
             return response, elapsed_time
@@ -943,6 +1027,17 @@ class VannaService:
                 pass
             st.error(f"Error running SQL: {e}")
             logger.exception("%s", e)
+            # Log SQL execution error to database
+            try:
+                from orm.logging_functions import log_sql_execution_error
+
+                log_sql_execution_error(
+                    error=e,
+                    sql=sql,
+                    user_id=_get_user_id_from_session(),
+                )
+            except Exception as log_err:
+                logger.warning("Failed to log SQL execution error: %s", log_err)
             return None
         else:
             # Preserve backward-compatibility: return only df
@@ -979,6 +1074,17 @@ class VannaService:
         except Exception as e:
             st.error(f"Error generating Plotly code: {e}")
             logger.exception("%s", e)
+            # Log chart generation error
+            try:
+                from orm.logging_functions import log_chart_generation_error
+
+                log_chart_generation_error(
+                    error=e,
+                    user_id=_get_user_id_from_session(),
+                    question=question,
+                )
+            except Exception as log_err:
+                logger.warning("Failed to log chart generation error: %s", log_err)
             return None, 0
         else:
             return code, elapsed_time
@@ -995,6 +1101,13 @@ class VannaService:
         except Exception as e:
             st.error(f"Error generating plot: {e}")
             logger.exception("%s", e)
+            # Log chart generation error
+            try:
+                from orm.logging_functions import log_chart_generation_error
+
+                log_chart_generation_error(error=e, user_id=_get_user_id_from_session())
+            except Exception as log_err:
+                logger.warning("Failed to log plot generation error: %s", log_err)
             return None, 0
         else:
             return plotly_fig, elapsed_time
@@ -1037,6 +1150,9 @@ class VannaService:
         This performs a single backend call using the underlying vn stream API and accumulates content
         to extract the final SQL once streaming completes.
         """
+        # Track RAG retrieval time
+        retrieval_start = time.perf_counter()
+
         # Collect semantic context similar to non-streaming path
         try:
             qsl = _self.vn.get_similar_question_sql(question=question)
@@ -1066,6 +1182,7 @@ class VannaService:
                 _self.vn.user_message(question),
             ]
 
+        retrieval_time_ms = int((time.perf_counter() - retrieval_start) * 1000)
         start_time = time.perf_counter()
         acc_content: list[str] = []
         acc_thinking: list[str] = []
@@ -1120,6 +1237,7 @@ class VannaService:
                 except Exception:
                     sql_text = full_text
                 elapsed = time.perf_counter() - start_time
+                inference_time_ms = int(elapsed * 1000)
                 try:
                     st.session_state["streamed_sql"] = sql_text
                     st.session_state["streamed_for_question"] = question
@@ -1136,6 +1254,29 @@ class VannaService:
                             pass
                 except Exception:
                     pass
+
+                # Log LLM context to database
+                try:
+                    from orm.logging_functions import log_llm_context
+
+                    llm_provider, llm_model = _self.get_llm_provider_and_model()
+                    log_llm_context(
+                        user_id=_get_user_id_from_session(),
+                        question=question,
+                        llm_provider=llm_provider,
+                        llm_model=llm_model,
+                        ddl_list=ddl_list,
+                        doc_list=doc_list,
+                        question_sql_list=qsl,
+                        generated_sql=sql_text,
+                        thinking_content=full_thinking if full_thinking else None,
+                        full_prompt=prompt,
+                        retrieval_time_ms=retrieval_time_ms,
+                        inference_time_ms=inference_time_ms,
+                        total_time_ms=retrieval_time_ms + inference_time_ms,
+                    )
+                except Exception as log_err:
+                    logger.warning("Failed to log LLM context: %s", log_err)
 
         return _gen()
 
