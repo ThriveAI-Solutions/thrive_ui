@@ -85,6 +85,7 @@ def set_user_preferences_in_session_state():
         st.session_state.show_followup = user.show_followup
         st.session_state.show_elapsed_time = user.show_elapsed_time
         st.session_state.llm_fallback = user.llm_fallback
+        st.session_state.confirm_magic_commands = getattr(user, "confirm_magic_commands", True)
         st.session_state.min_message_id = user.min_message_id
         st.session_state.user_role = user.role.role.value
         st.session_state.user_theme = user.theme
@@ -123,6 +124,7 @@ def save_user_settings():
             setattr(user, "show_followup", st.session_state.show_followup)
             setattr(user, "show_elapsed_time", st.session_state.show_elapsed_time)
             setattr(user, "llm_fallback", st.session_state.llm_fallback)
+            setattr(user, "confirm_magic_commands", st.session_state.get("confirm_magic_commands", True))
             setattr(user, "min_message_id", st.session_state.min_message_id)
             setattr(user, "selected_llm_provider", st.session_state.get("selected_llm_provider"))
             setattr(user, "selected_llm_model", st.session_state.get("selected_llm_model"))

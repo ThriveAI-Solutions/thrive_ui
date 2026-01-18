@@ -514,15 +514,26 @@ def is_magic_do_magic(question, previous_df=None):
 
             result = SemanticMagicService.classify(question, MAGIC_RENDERERS)
 
+            # Check if user wants confirmation popup
+            confirm_magic = st.session_state.get("confirm_magic_commands", True)
+
             if result.command_pattern and result.confidence >= SemanticMagicService.HIGH_CONFIDENCE_THRESHOLD:
-                # High confidence - show confirmation dialog
-                show_magic_confirmation_dialog(result, question)
-                st.stop()  # Dialog blocks until user action
+                if confirm_magic:
+                    # High confidence - show confirmation dialog
+                    show_magic_confirmation_dialog(result, question)
+                    st.stop()  # Dialog blocks until user action
+                else:
+                    # Auto-execute without confirmation
+                    return _execute_semantic_magic(result, question, previous_df)
 
             elif result.command_pattern and result.confidence >= SemanticMagicService.LOW_CONFIDENCE_THRESHOLD:
-                # Low confidence - show suggestion dialog
-                show_magic_suggestion_dialog(result, question)
-                st.stop()  # Dialog blocks until user action
+                if confirm_magic:
+                    # Low confidence - show suggestion dialog
+                    show_magic_suggestion_dialog(result, question)
+                    st.stop()  # Dialog blocks until user action
+                else:
+                    # Auto-execute without confirmation (even for low confidence when user disabled confirm)
+                    return _execute_semantic_magic(result, question, previous_df)
 
         # No match found
         return False

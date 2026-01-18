@@ -90,6 +90,9 @@ def save_settings_on_click():
     st.session_state.show_suggested = st.session_state.get("temp_show_suggested", st.session_state.show_suggested)
     st.session_state.show_followup = st.session_state.get("temp_show_followup", st.session_state.show_followup)
     st.session_state.llm_fallback = st.session_state.get("temp_llm_fallback", st.session_state.llm_fallback)
+    st.session_state.confirm_magic_commands = st.session_state.get(
+        "temp_confirm_magic_commands", st.session_state.get("confirm_magic_commands", True)
+    )
     # Handle show_plotly_code even though it's not currently in the UI
     st.session_state.show_plotly_code = st.session_state.get(
         "temp_show_plotly_code", st.session_state.get("show_plotly_code", False)
@@ -229,6 +232,12 @@ with st.sidebar.expander("Settings"):
         "Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup"
     )
     st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
+    st.checkbox(
+        "Confirm Magic Commands",
+        value=st.session_state.get("confirm_magic_commands", True),
+        key="temp_confirm_magic_commands",
+        help="When enabled, shows a confirmation popup before executing detected magic commands. When disabled, magic commands execute automatically.",
+    )
     st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
 st.sidebar.button("Clear", on_click=lambda: set_question(None), use_container_width=True, type="primary")
