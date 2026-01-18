@@ -211,27 +211,67 @@ except Exception:
     pass
 
 with st.sidebar.expander("Settings"):
-    st.checkbox("Show SQL", value=st.session_state.get("show_sql", True), key="temp_show_sql")
-    st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
-    # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show AI Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
     st.checkbox(
-        "Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time"
+        "Show SQL",
+        value=st.session_state.get("show_sql", True),
+        key="temp_show_sql",
+        help="Display the generated SQL query for each question.",
+    )
+    st.checkbox(
+        "Show Table",
+        value=st.session_state.get("show_table", True),
+        key="temp_show_table",
+        help="Display query results in a table format.",
+    )
+    # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
+    st.checkbox(
+        "Show AI Chart",
+        value=st.session_state.get("show_chart", False),
+        key="temp_show_chart",
+        help="Generate and display AI-powered visualizations for query results.",
+    )
+    st.checkbox(
+        "Show Elapsed Time",
+        value=st.session_state.get("show_elapsed_time", True),
+        key="temp_show_elapsed_time",
+        help="Display how long each query took to execute.",
     )
     st.checkbox(
         "Show Question History",
         value=st.session_state.get("show_question_history", True),
         key="temp_show_question_history",
-    )
-    st.checkbox("Voice Input", value=st.session_state.get("voice_input", False), key="temp_voice_input")
-    st.checkbox("Speak Summary", value=st.session_state.get("speak_summary", False), key="temp_speak_summary")
-    st.checkbox(
-        "Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested"
+        help="Display your previously asked questions in the sidebar for quick re-use.",
     )
     st.checkbox(
-        "Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup"
+        "Voice Input",
+        value=st.session_state.get("voice_input", False),
+        key="temp_voice_input",
+        help="Enable microphone input to ask questions by speaking.",
     )
-    st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
+    st.checkbox(
+        "Speak Summary",
+        value=st.session_state.get("speak_summary", False),
+        key="temp_speak_summary",
+        help="Read query result summaries aloud using text-to-speech.",
+    )
+    st.checkbox(
+        "Show Suggested Questions",
+        value=st.session_state.get("show_suggested", False),
+        key="temp_show_suggested",
+        help="Display AI-generated question suggestions based on your data.",
+    )
+    st.checkbox(
+        "Show Follow-up Questions",
+        value=st.session_state.get("show_followup", False),
+        key="temp_show_followup",
+        help="Display suggested follow-up questions after each query.",
+    )
+    st.checkbox(
+        "LLM Fallback on Error",
+        value=st.session_state.get("llm_fallback", False),
+        key="temp_llm_fallback",
+        help="When SQL execution fails, use the LLM to provide a helpful response instead of showing an error.",
+    )
     st.checkbox(
         "Confirm Magic Commands",
         value=st.session_state.get("confirm_magic_commands", True),
