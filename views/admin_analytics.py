@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import math
 
@@ -8,6 +9,9 @@ from sqlalchemy import case, func
 
 from orm.models import Message, RoleTypeEnum, SessionLocal, User
 from utils.enums import MessageType, RoleType
+
+# Cache TTL for analytics queries (5 minutes)
+ANALYTICS_CACHE_TTL_SECONDS = 300
 
 
 def _kpi_card(label: str, value, help_text: str | None = None):
@@ -27,8 +31,12 @@ def _guard_admin():
         st.stop()
 
 
+@st.cache_data(ttl=ANALYTICS_CACHE_TTL_SECONDS, show_spinner="Loading metrics...")
 def _read_metrics(days: int = 30):
-    """Read message-based metrics for the Overview tab."""
+    """Read message-based metrics for the Overview tab.
+
+    Results are cached for 5 minutes to improve dashboard responsiveness.
+    """
     chart_types = [
         MessageType.PLOTLY_CHART.value,
         MessageType.ST_LINE_CHART.value,
@@ -36,9 +44,8 @@ def _read_metrics(days: int = 30):
         MessageType.ST_AREA_CHART.value,
         MessageType.ST_SCATTER_CHART.value,
     ]
-    import datetime as _dt
 
-    since = _dt.datetime.now() - _dt.timedelta(days=days)
+    since = dt.datetime.now() - dt.timedelta(days=days)
 
     with SessionLocal() as session:
         users_count = session.query(func.count()).select_from(User).scalar() or 0
@@ -144,14 +151,12 @@ def _read_metrics(days: int = 30):
 
 def _to_dense_days(rows, days: int):
     """Convert sparse date rows to dense daily series."""
-    import datetime as _dt
-
-    today = _dt.date.today()
-    start = today - _dt.timedelta(days=days - 1)
+    today = dt.date.today()
+    start = today - dt.timedelta(days=days - 1)
     by_date = {r.d: r for r in rows}
     out = []
     for i in range(days):
-        d = start + _dt.timedelta(days=i)
+        d = start + dt.timedelta(days=i)
         k = d.strftime("%Y-%m-%d")
         r = by_date.get(k)
         out.append(
@@ -172,8 +177,6 @@ def _to_dense_days(rows, days: int):
 
 def _render_overview_tab(days_int: int):
     """Render the Overview tab (existing content + new KPIs)."""
-    import datetime as _dt
-
     from orm.logging_functions import get_activity_stats, get_error_stats, get_llm_stats
 
     (
@@ -300,7 +303,7 @@ def _render_overview_tab(days_int: int):
 
     # Top Users by Questions
     st.subheader("Top Users by Questions")
-    since = _dt.datetime.now() - _dt.timedelta(days=days_int)
+    since = dt.datetime.now() - dt.timedelta(days=days_int)
     with SessionLocal() as session:
         top_rows = (
             session.query(User.username, func.count().label("questions"))
@@ -852,13 +855,20 @@ def main():
     st.title("Admin Analytics")
     st.caption("Usage, performance, and audit insights for administrators")
 
-    # Global time range selector
-    days = st.segmented_control(
-        "Time Range",
-        options=["7 days", "30 days", "90 days"],
-        selection_mode="single",
-        default="30 days",
-    )
+    # Global controls: time range and refresh button
+    control_cols = st.columns([3, 1])
+    with control_cols[0]:
+        days = st.segmented_control(
+            "Time Range",
+            options=["7 days", "30 days", "90 days"],
+            selection_mode="single",
+            default="30 days",
+        )
+    with control_cols[1]:
+        if st.button("Refresh Data", help="Clear cached data and reload metrics"):
+            _read_metrics.clear()
+            st.rerun()
+
     days_int = {"7 days": 7, "30 days": 30, "90 days": 90}.get(days or "30 days", 30)
 
     # Tab navigation
