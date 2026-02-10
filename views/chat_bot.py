@@ -73,33 +73,6 @@ if len(st.session_state.messages) > max_messages:
 
 
 ######### Sidebar settings #########
-def save_settings_on_click():
-    """Update session state with temporary settings values and save to database"""
-    # Update session state with temporary values
-    st.session_state.show_sql = st.session_state.get("temp_show_sql", st.session_state.show_sql)
-    st.session_state.show_table = st.session_state.get("temp_show_table", st.session_state.show_table)
-    st.session_state.show_chart = st.session_state.get("temp_show_chart", st.session_state.show_chart)
-    st.session_state.show_elapsed_time = st.session_state.get(
-        "temp_show_elapsed_time", st.session_state.show_elapsed_time
-    )
-    st.session_state.show_question_history = st.session_state.get(
-        "temp_show_question_history", st.session_state.show_question_history
-    )
-    st.session_state.voice_input = st.session_state.get("temp_voice_input", st.session_state.voice_input)
-    st.session_state.speak_summary = st.session_state.get("temp_speak_summary", st.session_state.speak_summary)
-    st.session_state.show_suggested = st.session_state.get("temp_show_suggested", st.session_state.show_suggested)
-    st.session_state.show_followup = st.session_state.get("temp_show_followup", st.session_state.show_followup)
-    st.session_state.llm_fallback = st.session_state.get("temp_llm_fallback", st.session_state.llm_fallback)
-    st.session_state.confirm_magic_commands = st.session_state.get(
-        "temp_confirm_magic_commands", st.session_state.get("confirm_magic_commands", True)
-    )
-    # Handle show_plotly_code even though it's not currently in the UI
-    st.session_state.show_plotly_code = st.session_state.get(
-        "temp_show_plotly_code", st.session_state.get("show_plotly_code", False)
-    )
-
-    # Save to database
-    save_user_settings()
 
 
 st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
@@ -211,74 +184,82 @@ except Exception:
     pass
 
 with st.sidebar.expander("Settings"):
-    st.checkbox(
-        "Show SQL",
-        value=st.session_state.get("show_sql", True),
-        key="temp_show_sql",
-        help="Display the generated SQL query for each question.",
-    )
-    st.checkbox(
-        "Show Table",
-        value=st.session_state.get("show_table", True),
-        key="temp_show_table",
-        help="Display query results in a table format.",
-    )
-    # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox(
-        "Show AI Chart",
-        value=st.session_state.get("show_chart", False),
-        key="temp_show_chart",
-        help="Generate and display AI-powered visualizations for query results.",
-    )
-    st.checkbox(
-        "Show Elapsed Time",
-        value=st.session_state.get("show_elapsed_time", True),
-        key="temp_show_elapsed_time",
-        help="Display how long each query took to execute.",
-    )
-    st.checkbox(
-        "Show Question History",
-        value=st.session_state.get("show_question_history", True),
-        key="temp_show_question_history",
-        help="Display your previously asked questions in the sidebar for quick re-use.",
-    )
-    st.checkbox(
-        "Voice Input",
-        value=st.session_state.get("voice_input", False),
-        key="temp_voice_input",
-        help="Enable microphone input to ask questions by speaking.",
-    )
-    st.checkbox(
-        "Speak Summary",
-        value=st.session_state.get("speak_summary", False),
-        key="temp_speak_summary",
-        help="Read query result summaries aloud using text-to-speech.",
-    )
-    st.checkbox(
-        "Show Suggested Questions",
-        value=st.session_state.get("show_suggested", False),
-        key="temp_show_suggested",
-        help="Display AI-generated question suggestions based on your data.",
-    )
-    st.checkbox(
-        "Show Follow-up Questions",
-        value=st.session_state.get("show_followup", False),
-        key="temp_show_followup",
-        help="Display suggested follow-up questions after each query.",
-    )
-    st.checkbox(
-        "LLM Fallback on Error",
-        value=st.session_state.get("llm_fallback", False),
-        key="temp_llm_fallback",
-        help="When SQL execution fails, use the LLM to provide a helpful response instead of showing an error.",
-    )
-    st.checkbox(
-        "Confirm Magic Commands",
-        value=st.session_state.get("confirm_magic_commands", True),
-        key="temp_confirm_magic_commands",
-        help="When enabled, shows a confirmation popup before executing detected magic commands. When disabled, magic commands execute automatically.",
-    )
-    st.button("Save", on_click=save_settings_on_click, use_container_width=True)
+    # Use st.form to group settings and eliminate temp_* state pattern
+    with st.form("settings_form"):
+        form_show_sql = st.checkbox(
+            "Show SQL",
+            value=st.session_state.get("show_sql", True),
+            help="Display the generated SQL query for each question.",
+        )
+        form_show_table = st.checkbox(
+            "Show Table",
+            value=st.session_state.get("show_table", True),
+            help="Display query results in a table format.",
+        )
+        form_show_chart = st.checkbox(
+            "Show AI Chart",
+            value=st.session_state.get("show_chart", False),
+            help="Generate and display AI-powered visualizations for query results.",
+        )
+        form_show_elapsed_time = st.checkbox(
+            "Show Elapsed Time",
+            value=st.session_state.get("show_elapsed_time", True),
+            help="Display how long each query took to execute.",
+        )
+        form_show_question_history = st.checkbox(
+            "Show Question History",
+            value=st.session_state.get("show_question_history", True),
+            help="Display your previously asked questions in the sidebar for quick re-use.",
+        )
+        form_voice_input = st.checkbox(
+            "Voice Input",
+            value=st.session_state.get("voice_input", False),
+            help="Enable microphone input to ask questions by speaking.",
+        )
+        form_speak_summary = st.checkbox(
+            "Speak Summary",
+            value=st.session_state.get("speak_summary", False),
+            help="Read query result summaries aloud using text-to-speech.",
+        )
+        form_show_suggested = st.checkbox(
+            "Show Suggested Questions",
+            value=st.session_state.get("show_suggested", False),
+            help="Display AI-generated question suggestions based on your data.",
+        )
+        form_show_followup = st.checkbox(
+            "Show Follow-up Questions",
+            value=st.session_state.get("show_followup", False),
+            help="Display suggested follow-up questions after each query.",
+        )
+        form_llm_fallback = st.checkbox(
+            "LLM Fallback on Error",
+            value=st.session_state.get("llm_fallback", False),
+            help="When SQL execution fails, use the LLM to provide a helpful response instead of showing an error.",
+        )
+        form_confirm_magic = st.checkbox(
+            "Confirm Magic Commands",
+            value=st.session_state.get("confirm_magic_commands", True),
+            help="When enabled, shows a confirmation popup before executing detected magic commands.",
+        )
+
+        # Form submit button - updates all settings at once
+        if st.form_submit_button("Save", use_container_width=True):
+            # Update session state directly from form values
+            st.session_state.show_sql = form_show_sql
+            st.session_state.show_table = form_show_table
+            st.session_state.show_chart = form_show_chart
+            st.session_state.show_elapsed_time = form_show_elapsed_time
+            st.session_state.show_question_history = form_show_question_history
+            st.session_state.voice_input = form_voice_input
+            st.session_state.speak_summary = form_speak_summary
+            st.session_state.show_suggested = form_show_suggested
+            st.session_state.show_followup = form_show_followup
+            st.session_state.llm_fallback = form_llm_fallback
+            st.session_state.confirm_magic_commands = form_confirm_magic
+
+            # Save to database
+            save_user_settings()
+            st.toast("Settings saved!")
 
 st.sidebar.button("Clear", on_click=lambda: set_question(None), use_container_width=True, type="primary")
 
@@ -350,8 +331,7 @@ if st.session_state.get("show_suggested", True):
     with st.sidebar.popover("Click to show suggested questions", use_container_width=True):
         questions = get_vn().generate_questions()
         for i, question in enumerate(questions):
-            time.sleep(0.05)
-            button = st.button(
+            st.button(
                 question,
                 on_click=set_question,
                 args=(question, False),
