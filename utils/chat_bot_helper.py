@@ -21,10 +21,9 @@ import re
 logger = logging.getLogger(__name__)
 
 # Patterns for non-recoverable SQL errors that won't benefit from retries
+# Note: "relation/table/column does not exist" errors ARE retried because
+# the LLM may have hallucinated names and can try alternatives with error context
 NON_RECOVERABLE_ERROR_PATTERNS = [
-    r"relation.*does not exist",
-    r"table.*does not exist",
-    r"column.*does not exist",
     r"permission denied",
     r"access denied",
     r"authentication failed",
@@ -473,19 +472,35 @@ def get_unique_messages():
     return unique_messages
 
 
-def set_feedback(index: int, value: str):
+def set_feedback(index: int, value: str, feedback_comment: str = None):
     message = st.session_state.messages[index]
     message.feedback = value
-    message.save()
+    # Only set feedback_comment for negative feedback (thumbs down)
+    if feedback_comment and value == "down":
+        message.feedback_comment = feedback_comment
+
     new_entry = {
         "question": st.session_state.messages[index].question,
         "query": st.session_state.messages[index].query,
     }
-    if st.session_state.cookies.get("role_name") == "Admin":
-        if value == "up":
+
+    is_admin = st.session_state.cookies.get("role_name") == "Admin"
+
+    if value == "up":
+        if is_admin:
+            # Admin thumbs up: auto-approve and train immediately
+            message.training_status = None  # No pending status needed
             write_to_file_and_training(new_entry)
         else:
+            # Non-admin thumbs up: mark as pending for admin review
+            message.training_status = "pending"
+    elif value == "down":
+        if is_admin:
+            # Admin thumbs down: remove from training if previously trained
             remove_from_file_training(new_entry)
+        # For non-admin thumbs down, just save the feedback (no training action needed)
+
+    message.save()
 
 
 def generate_guid():
@@ -946,6 +961,67 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
             st.code(message.query, language="sql", line_numbers=True)
 
 
+# Feedback categories for thumbs down
+FEEDBACK_CATEGORIES = [
+    "Incorrect SQL generated",
+    "Wrong data returned",
+    "Summary doesn't match data",
+    "Response too slow",
+    "Didn't understand my question",
+    "Other",
+]
+
+# Placeholder for category selection (not a valid submission)
+_CATEGORY_PLACEHOLDER = "Select a category..."
+
+
+def _render_thumbs_down_feedback(message: Message, index: int):
+    """Render thumbs down button with feedback popover."""
+    # Show different icon if feedback was already submitted
+    icon = "👎" if message.feedback != "down" else "👎✓"
+
+    with st.popover(icon, use_container_width=False):
+        if message.feedback == "down" and message.feedback_comment:
+            st.info(f"Previous feedback: {message.feedback_comment}")
+
+        st.markdown("**What went wrong?**")
+        # Include placeholder as first option to require explicit selection
+        category_options = [_CATEGORY_PLACEHOLDER] + FEEDBACK_CATEGORIES
+        category = st.radio(
+            "Select a category",
+            category_options,
+            key=f"feedback_category_{message.id}",
+            label_visibility="collapsed",
+        )
+
+        comment = st.text_area(
+            "Additional details (optional)",
+            max_chars=500,
+            key=f"feedback_comment_{message.id}",
+            height=80,
+        )
+
+        btn_cols = st.columns(2)
+        with btn_cols[0]:
+            # Disable submit if no category selected
+            category_selected = category != _CATEGORY_PLACEHOLDER
+            if st.button(
+                "Submit",
+                key=f"submit_feedback_{message.id}",
+                type="primary",
+                use_container_width=True,
+                disabled=not category_selected,
+            ):
+                # Combine category and comment
+                full_comment = f"{category}: {comment}" if comment.strip() else category
+                set_feedback(index, "down", full_comment)
+                st.rerun()
+        with btn_cols[1]:
+            if st.button("Skip", key=f"skip_feedback_{message.id}", use_container_width=True):
+                set_feedback(index, "down")
+                st.rerun()
+
+
 def _render_summary(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
@@ -969,13 +1045,7 @@ def _render_summary(message: Message, index: int):
             args=(index, "up"),
         )
     with cols[1]:
-        st.button(
-            "👎",
-            key=f"thumbs_down_{message.id}",
-            type="primary" if message.feedback == "down" else "secondary",
-            on_click=set_feedback,
-            args=(index, "down"),
-        )
+        _render_thumbs_down_feedback(message, index)
     # Only show Actions popover on the last message group
     if is_last_group:
         with cols[2]:
@@ -1227,8 +1297,10 @@ def normal_message_flow(my_question: str):
         st.session_state["use_retry_context"] = False
         last_failed_sql = st.session_state.get("retry_failed_sql")
         last_error_msg = st.session_state.get("retry_error_msg")
+        user_feedback = st.session_state.get("retry_user_feedback")
         st.session_state["retry_failed_sql"] = None
         st.session_state["retry_error_msg"] = None
+        st.session_state["retry_user_feedback"] = None
         # For manual retry, generate with context from attempt 2
         if sql is None:
             sql, elapsed_time = get_vn().generate_sql_retry(
@@ -1236,6 +1308,7 @@ def normal_message_flow(my_question: str):
                 failed_sql=last_failed_sql,
                 error_message=last_error_msg,
                 attempt_number=2,
+                user_feedback=user_feedback,
             )
 
     # Auto-retry loop for SQL generation and execution
@@ -1245,9 +1318,13 @@ def normal_message_flow(my_question: str):
             if attempt == 1:
                 sql, elapsed_time = get_vn().generate_sql(question=my_question)
             else:
-                # Show retry status to user
+                # Show retry status to user with strategy-specific message
                 with st.chat_message(RoleType.ASSISTANT.value):
-                    st.info(f"Attempt {attempt}/{max_retries + 1}: Trying a different approach...")
+                    if attempt == 2:
+                        strategy = "Trying alternative JOINs, subqueries, or column selections..."
+                    else:
+                        strategy = "Simplifying the query - removing complex JOINs, using essential columns..."
+                    st.info(f"Attempt {attempt}/{max_retries + 1}: {strategy}")
                 logger.info(
                     f"SQL retry attempt {attempt}/{max_retries + 1} for question: {my_question}. "
                     f"Previous error: {last_error_msg}"
@@ -1518,6 +1595,20 @@ def normal_message_flow(my_question: str):
                     )
                 )
 
+        # Store context in session state for use after page rerun
+        st.session_state["pending_sql_error"] = True
+        st.session_state["pending_question"] = my_question
+        st.session_state["retry_failed_sql"] = failed_sql
+        st.session_state["retry_error_msg"] = error_msg
+
+        def handle_inline_retry_click():
+            """Callback to handle inline retry button click - sets up retry context."""
+            user_feedback = st.session_state.get("retry_feedback_inline", "")
+            st.session_state["use_retry_context"] = True
+            st.session_state["retry_user_feedback"] = user_feedback if user_feedback else None
+            st.session_state["my_question"] = st.session_state.get("pending_question")
+            st.session_state["pending_sql_error"] = False
+
         with st.chat_message(RoleType.ASSISTANT.value):
             # Use warning with collapsible details for less intrusive error display
             if attempt > 1:
@@ -1531,26 +1622,18 @@ def normal_message_flow(my_question: str):
                 if failed_sql:
                     st.markdown("**Failed SQL:**")
                     st.code(failed_sql, language="sql", line_numbers=True)
-            # Action buttons remain outside expander for easy access
+            # Feedback input for user hints
+            st.text_input(
+                "Optional feedback to help improve the query",
+                key="retry_feedback_inline",
+                placeholder="e.g., 'try using patient_id instead of id' or 'use a LEFT JOIN'",
+            )
+            # Action button with on_click callback - more reliable than checking return value
             cols = st.columns([0.2, 0.8])
             with cols[0]:
-                retry_clicked = st.button("Retry", type="primary", key="retry_inline")
+                st.button("Retry", type="primary", key="retry_inline", on_click=handle_inline_retry_click)
 
-        if retry_clicked:
-            # Persist retry intent and context, then rerun so it flows through normal pipeline
-            st.session_state["use_retry_context"] = True
-            st.session_state["retry_failed_sql"] = failed_sql
-            st.session_state["retry_error_msg"] = error_msg
-            # Set a persistent flag so the panel can be re-rendered if needed
-            st.session_state["pending_sql_error"] = False
-            st.session_state["pending_question"] = my_question
-            st.session_state["my_question"] = my_question
-            st.rerun()
-        else:
-            # Mark pending error so a persistent panel can be shown if page reruns without action
-            st.session_state["pending_sql_error"] = True
-            st.session_state["pending_question"] = my_question
-            st.stop()
+        st.stop()
     else:
         add_message(
             Message(

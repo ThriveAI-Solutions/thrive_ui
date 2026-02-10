@@ -26,7 +26,7 @@ from orm.models import RoleTypeEnum, SessionLocal, User, UserRole
 from utils.authentication_management import get_user_list_excel
 from utils.chat_bot_helper import get_vn
 from utils.enums import ThemeType
-from utils.vanna_calls import train_ddl, train_enhanced_schema, train_file, training_plan
+from utils.vanna_calls import train_ai_documentation, train_ddl, train_enhanced_schema, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
@@ -392,11 +392,11 @@ with tab2:
 
         # Standard Training Section
         st.subheader("Standard Training")
-        cols = st.columns((0.15, 0.25, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15))
+        cols = st.columns((0.15, 0.20, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15))
         with cols[0]:
             st.button("Train DDL", on_click=train_ddl)
         with cols[1]:
-            st.button("DDL Describe", on_click=lambda: train_ddl(describe_ddl=True))
+            st.button("AI Generate Docs", on_click=train_ai_documentation)
         with cols[2]:
             st.button("Train Plan", on_click=training_plan)
         with cols[3]:

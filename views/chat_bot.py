@@ -90,6 +90,9 @@ def save_settings_on_click():
     st.session_state.show_suggested = st.session_state.get("temp_show_suggested", st.session_state.show_suggested)
     st.session_state.show_followup = st.session_state.get("temp_show_followup", st.session_state.show_followup)
     st.session_state.llm_fallback = st.session_state.get("temp_llm_fallback", st.session_state.llm_fallback)
+    st.session_state.confirm_magic_commands = st.session_state.get(
+        "temp_confirm_magic_commands", st.session_state.get("confirm_magic_commands", True)
+    )
     # Handle show_plotly_code even though it's not currently in the UI
     st.session_state.show_plotly_code = st.session_state.get(
         "temp_show_plotly_code", st.session_state.get("show_plotly_code", False)
@@ -208,27 +211,73 @@ except Exception:
     pass
 
 with st.sidebar.expander("Settings"):
-    st.checkbox("Show SQL", value=st.session_state.get("show_sql", True), key="temp_show_sql")
-    st.checkbox("Show Table", value=st.session_state.get("show_table", True), key="temp_show_table")
-    # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
-    st.checkbox("Show AI Chart", value=st.session_state.get("show_chart", False), key="temp_show_chart")
     st.checkbox(
-        "Show Elapsed Time", value=st.session_state.get("show_elapsed_time", True), key="temp_show_elapsed_time"
+        "Show SQL",
+        value=st.session_state.get("show_sql", True),
+        key="temp_show_sql",
+        help="Display the generated SQL query for each question.",
+    )
+    st.checkbox(
+        "Show Table",
+        value=st.session_state.get("show_table", True),
+        key="temp_show_table",
+        help="Display query results in a table format.",
+    )
+    # st.checkbox("Show Plotly Code", value=False, key="show_plotly_code")
+    st.checkbox(
+        "Show AI Chart",
+        value=st.session_state.get("show_chart", False),
+        key="temp_show_chart",
+        help="Generate and display AI-powered visualizations for query results.",
+    )
+    st.checkbox(
+        "Show Elapsed Time",
+        value=st.session_state.get("show_elapsed_time", True),
+        key="temp_show_elapsed_time",
+        help="Display how long each query took to execute.",
     )
     st.checkbox(
         "Show Question History",
         value=st.session_state.get("show_question_history", True),
         key="temp_show_question_history",
-    )
-    st.checkbox("Voice Input", value=st.session_state.get("voice_input", False), key="temp_voice_input")
-    st.checkbox("Speak Summary", value=st.session_state.get("speak_summary", False), key="temp_speak_summary")
-    st.checkbox(
-        "Show Suggested Questions", value=st.session_state.get("show_suggested", False), key="temp_show_suggested"
+        help="Display your previously asked questions in the sidebar for quick re-use.",
     )
     st.checkbox(
-        "Show Follow-up Questions", value=st.session_state.get("show_followup", False), key="temp_show_followup"
+        "Voice Input",
+        value=st.session_state.get("voice_input", False),
+        key="temp_voice_input",
+        help="Enable microphone input to ask questions by speaking.",
     )
-    st.checkbox("LLM Fallback on Error", value=st.session_state.get("llm_fallback", False), key="temp_llm_fallback")
+    st.checkbox(
+        "Speak Summary",
+        value=st.session_state.get("speak_summary", False),
+        key="temp_speak_summary",
+        help="Read query result summaries aloud using text-to-speech.",
+    )
+    st.checkbox(
+        "Show Suggested Questions",
+        value=st.session_state.get("show_suggested", False),
+        key="temp_show_suggested",
+        help="Display AI-generated question suggestions based on your data.",
+    )
+    st.checkbox(
+        "Show Follow-up Questions",
+        value=st.session_state.get("show_followup", False),
+        key="temp_show_followup",
+        help="Display suggested follow-up questions after each query.",
+    )
+    st.checkbox(
+        "LLM Fallback on Error",
+        value=st.session_state.get("llm_fallback", False),
+        key="temp_llm_fallback",
+        help="When SQL execution fails, use the LLM to provide a helpful response instead of showing an error.",
+    )
+    st.checkbox(
+        "Confirm Magic Commands",
+        value=st.session_state.get("confirm_magic_commands", True),
+        key="temp_confirm_magic_commands",
+        help="When enabled, shows a confirmation popup before executing detected magic commands. When disabled, magic commands execute automatically.",
+    )
     st.button("Save", on_click=save_settings_on_click, use_container_width=True)
 
 st.sidebar.button("Clear", on_click=lambda: set_question(None), use_container_width=True, type="primary")
@@ -371,6 +420,18 @@ if not my_question and st.session_state.get("pending_sql_error", False) and st.s
     pending_question = st.session_state.get("pending_question")
     error_msg = st.session_state.get("last_run_sql_error")
     failed_sql = st.session_state.get("last_failed_sql")
+
+    def handle_retry_click():
+        """Callback to handle retry button click - sets up retry context."""
+        user_feedback = st.session_state.get("retry_feedback_persist", "")
+        st.session_state["use_retry_context"] = True
+        st.session_state["retry_failed_sql"] = failed_sql
+        st.session_state["retry_error_msg"] = error_msg
+        st.session_state["retry_user_feedback"] = user_feedback if user_feedback else None
+        st.session_state["my_question"] = pending_question
+        st.session_state["pending_sql_error"] = False
+        st.session_state["show_failed_sql_open"] = False
+
     with st.chat_message(RoleType.ASSISTANT.value):
         # Use warning with collapsible details for less intrusive error display
         st.warning("I couldn't execute the generated SQL.")
@@ -381,20 +442,16 @@ if not my_question and st.session_state.get("pending_sql_error", False) and st.s
             if failed_sql:
                 st.markdown("**Failed SQL:**")
                 st.code(failed_sql, language="sql", line_numbers=True)
-        # Action button remains outside expander for easy access
-        retry_clicked = st.button("Retry", type="primary", key="retry_persist")
+        # Feedback input for user hints
+        st.text_input(
+            "Optional feedback to help improve the query",
+            key="retry_feedback_persist",
+            placeholder="e.g., 'try using patient_id instead of id' or 'use a LEFT JOIN'",
+        )
+        # Action button with on_click callback - more reliable than checking return value
+        st.button("Retry", type="primary", key="retry_persist", on_click=handle_retry_click)
 
-    if retry_clicked:
-        st.session_state["use_retry_context"] = True
-        st.session_state["retry_failed_sql"] = failed_sql
-        st.session_state["retry_error_msg"] = error_msg
-        st.session_state["my_question"] = pending_question
-        # Clear the pending panel and open state
-        st.session_state["pending_sql_error"] = False
-        st.session_state["show_failed_sql_open"] = False
-        st.rerun()
-    else:
-        st.stop()
+    st.stop()
 
 if my_question:
     magic_response = is_magic_do_magic(my_question)

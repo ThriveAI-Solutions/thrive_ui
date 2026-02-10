@@ -147,8 +147,11 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
         )
         return id
 
-    def add_documentation(self, documentation: str, metadata: dict[str, Any] | None = None, **kwargs) -> str:
-        id = deterministic_uuid(documentation) + "-doc"
+    def add_documentation(
+        self, documentation: str, metadata: dict[str, Any] | None = None, id: str | None = None, **kwargs
+    ) -> str:
+        if id is None:
+            id = deterministic_uuid(documentation) + "-doc"
         self._safe_add(
             self.documentation_collection,
             documents=documentation,

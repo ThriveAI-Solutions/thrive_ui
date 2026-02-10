@@ -480,13 +480,21 @@ class TestRenderMessage:
             call_kwargs.get("key", "").startswith("thumbs_up_")
             for _, call_kwargs in [(c[0], c[1]) for c in mock_st.button.call_args_list]
         )
+        # Thumbs down is now in a popover, so check for submit/skip buttons inside popover
         assert any(
-            call_kwargs.get("key", "").startswith("thumbs_down_")
+            call_kwargs.get("key", "").startswith("submit_feedback_") or call_kwargs.get("key", "").startswith("skip_feedback_")
             for _, call_kwargs in [(c[0], c[1]) for c in mock_st.button.call_args_list]
         )
 
-        # Check popover and its contents
-        mock_st.popover.assert_called_once_with("Actions", use_container_width=True)
+        # Check popovers - there are now two: feedback popover (thumbs down) and Actions popover
+        popover_calls = mock_st.popover.call_args_list
+        assert len(popover_calls) == 2, f"Expected 2 popovers (feedback + Actions), got {len(popover_calls)}"
+        # Check for the thumbs down feedback popover
+        feedback_popover_call = [c for c in popover_calls if "👎" in str(c)]
+        assert len(feedback_popover_call) == 1, "Expected thumbs down feedback popover"
+        # Check for the Actions popover
+        actions_popover_call = [c for c in popover_calls if "Actions" in str(c)]
+        assert len(actions_popover_call) == 1, "Expected Actions popover"
         assert mock_pd_read_json.call_count == 1
         assert mock_pd_read_json.call_args[1]["orient"] == "records"
 

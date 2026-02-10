@@ -49,7 +49,7 @@ user_page = st.Page(
     icon="👤",
 )
 
-# Conditionally add Admin Analytics page for admins
+# Conditionally add Admin pages for admins
 pages = [chat_bot_page, user_page]
 if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
     analytics_page = st.Page(
@@ -57,7 +57,13 @@ if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
         title="Admin Analytics",
         icon="📈",
     )
+    feedback_page = st.Page(
+        page="views/admin_feedback.py",
+        title="Feedback Dashboard",
+        icon="💬",
+    )
     pages.append(analytics_page)
+    pages.append(feedback_page)
 
 pg = st.navigation(pages=pages)
 
