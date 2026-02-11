@@ -13,6 +13,9 @@ from utils.chat_bot_helper import (
     normal_message_flow,
     render_message_group,
     set_question,
+    _render_save_report_dialog,
+    _render_report_history_popover,
+    _render_report_trends_popover,
 )
 from utils.communicate import listen
 from utils.enums import RoleType, ThemeType
@@ -55,7 +58,7 @@ logger = logging.getLogger(__name__)
 set_user_preferences_in_session_state()
 
 # Initialize session state variables
-if "messages" not in st.session_state or st.session_state.messages == []:
+if "messages" not in st.session_state or st.session_state.messages is None or st.session_state.messages == []:
     st.session_state.messages = get_recent_messages()
 if st.session_state.messages is None:
     st.session_state.messages = []
@@ -380,6 +383,11 @@ with messages_container:
         is_last_group = group_index == total_groups - 1
         render_message_group(group_messages, group_index, message_index, is_last_group=is_last_group)
         message_index += len(group_messages)
+
+# Render report-related dialogs if active
+_render_save_report_dialog()
+_render_report_history_popover()
+_render_report_trends_popover()
 
 # Footer placeholder that always stays at the end
 tail_placeholder = st.empty()
