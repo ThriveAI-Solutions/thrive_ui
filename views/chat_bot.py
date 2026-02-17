@@ -20,7 +20,7 @@ from utils.magic_functions import is_magic_do_magic
 
 
 def get_themed_asset_path(asset_name):
-    theme = st.session_state.get("user_theme", ThemeType.HEALTHELINK.value).lower()
+    theme = st.session_state.get("user_theme", ThemeType.WELLTELLAI.value).lower()
     return f"assets/themes/{theme}/{asset_name}"
 
 
@@ -79,8 +79,9 @@ st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="asset
 
 # LLM Selection UI
 with st.sidebar.expander("🤖 LLM Selection", expanded=False):
-    from utils.llm_registry.registry import get_registry
     import json
+
+    from utils.llm_registry.registry import get_registry
 
     registry = get_registry()
     secrets = {
@@ -155,8 +156,9 @@ with st.sidebar.expander("🤖 LLM Selection", expanded=False):
                 save_user_settings()
 
                 # Invalidate VannaService cache
-                from utils.vanna_calls import VannaService
                 import logging
+
+                from utils.vanna_calls import VannaService
 
                 logger = logging.getLogger(__name__)
                 user_id = st.session_state.cookies.get("user_id")
