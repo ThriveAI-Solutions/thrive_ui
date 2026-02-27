@@ -142,7 +142,7 @@ class User(Base):
     llm_fallback = Column(Boolean, default=False)
     confirm_magic_commands = Column(Boolean, default=True)  # True = show popup, False = auto-execute
     min_message_id = Column(Integer, default=0)
-    theme = Column(String(50), default=ThemeType.HEALTHELINK.value)
+    theme = Column(String(50), default=ThemeType.WELLTELLAI.value)
     selected_llm_provider = Column(String(50), default=None)
     selected_llm_model = Column(String(100), default=None)
 
