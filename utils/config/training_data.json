@@ -171,6 +171,10 @@
         {
             "question": "How many patients have diabetes? What percentage of the population is that?",
             "query": "SELECT\n    COUNT(DISTINCT CASE WHEN diabetes = 'Y' THEN research_id END) AS diabetes_count,\n    COUNT(DISTINCT research_id) AS total_patients,\n    ROUND(100.0 * COUNT(DISTINCT CASE WHEN diabetes = 'Y' THEN research_id END) / COUNT(DISTINCT research_id), 2) AS diabetes_percentage\nFROM wny_health"
+        },
+        {
+            "question": "what were the top diagnosis for males over 50 in wny?\n\n",
+            "query": "SELECT question, COUNT(*) AS count \nFROM chronic_disease \nWHERE questionid IN (SELECT questionid FROM wny_health WHERE age > 50 AND sex = 'MALE') \nGROUP BY question \nORDER BY count DESC \nLIMIT 10"
         }
     ],
     "sample_documents": [
