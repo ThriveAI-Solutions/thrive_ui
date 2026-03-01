@@ -26,7 +26,7 @@ from orm.models import RoleTypeEnum, SessionLocal, User, UserRole
 from utils.authentication_management import get_user_list_excel
 from utils.chat_bot_helper import get_vn
 from utils.enums import ThemeType
-from utils.vanna_calls import train_ai_documentation, train_ddl, train_file, training_plan
+from utils.vanna_calls import train_ai_documentation, train_ddl, train_enhanced_schema, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
@@ -365,6 +365,33 @@ with tab1:
 
 with tab2:
     if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
+        # Enhanced Training Section (prominent placement)
+        st.subheader("🚀 Automatic Schema Enrichment")
+        st.caption("Automatically extract and train column statistics, relationships, and semantic information from your database.")
+
+        with st.expander("Enhanced Training Options", expanded=False):
+            col_stats, col_rels, col_views = st.columns(3)
+            with col_stats:
+                include_stats = st.checkbox("Include Column Statistics", value=True, help="Extract min/max/distinct counts, null ratios, and top values")
+            with col_rels:
+                include_rels = st.checkbox("Include Relationships", value=True, help="Discover FK relationships and infer implicit relationships by naming patterns")
+            with col_views:
+                include_views = st.checkbox("Include View Definitions", value=True, help="Extract and document view SQL definitions")
+
+            sample_limit = st.number_input("Sample Limit (rows per column)", min_value=100, max_value=10000, value=1000, help="Maximum rows to sample per column for statistics")
+
+            if st.button("🔬 Run Enhanced Training", type="primary", help="Analyze database schema and automatically train RAG with enriched metadata"):
+                train_enhanced_schema(
+                    include_statistics=include_stats,
+                    include_relationships=include_rels,
+                    include_view_definitions=include_views,
+                    sample_limit=sample_limit,
+                )
+
+        st.divider()
+
+        # Standard Training Section
+        st.subheader("Standard Training")
         cols = st.columns((0.15, 0.20, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15))
         with cols[0]:
             st.button("Train DDL", on_click=train_ddl)
