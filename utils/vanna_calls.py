@@ -2024,6 +2024,102 @@ class VannaService:
             ORDER BY c.table_schema, c.table_name, c.ordinal_position
         """
 
+    def _build_view_definitions_query(self, schema_name: str, forbidden_tables_str: str) -> str:
+        """Build query to extract view definitions from the database."""
+        query = f"""
+            SELECT table_name, view_definition
+            FROM information_schema.views
+            WHERE table_schema = '{schema_name}'
+        """
+        if forbidden_tables_str:
+            query += f" AND table_name NOT IN ({forbidden_tables_str})"
+        query += " ORDER BY table_name"
+        return query
+
+    @staticmethod
+    def _find_join_paths(
+        relationships: list[dict[str, str]], tables: set[str], max_depth: int = 3
+    ) -> list[str]:
+        """Find multi-hop JOIN paths between tables using BFS and generate documentation.
+
+        Args:
+            relationships: List of dicts with parent_table, parent_column,
+                           referenced_table, referenced_column keys.
+            tables: Set of all known table names.
+            max_depth: Maximum number of hops to search.
+
+        Returns:
+            List of documentation strings describing JOIN paths.
+        """
+        # Build adjacency list
+        adjacency: dict[str, list[tuple[str, dict]]] = {}
+        for rel in relationships:
+            src = rel["parent_table"]
+            tgt = rel["referenced_table"]
+            adjacency.setdefault(src, []).append((tgt, rel))
+            adjacency.setdefault(tgt, []).append((src, rel))
+
+        # Calculate centrality (connection count per table)
+        centrality = {t: len(adjacency.get(t, [])) for t in tables}
+        central_tables = [t for t, c in sorted(centrality.items(), key=lambda x: x[1], reverse=True) if c > 2]
+
+        docs: list[str] = []
+
+        # Generate multi-hop JOIN path docs for central tables
+        if central_tables:
+            docs.append(
+                f"Central tables with many relationships: {', '.join(central_tables)}. "
+                "These tables are commonly used in JOIN operations for combining data."
+            )
+
+        # BFS to find paths between non-adjacent table pairs
+        connected_tables = [t for t in tables if t in adjacency]
+        for source in connected_tables:
+            for target in connected_tables:
+                if source >= target:
+                    continue
+                # Skip directly connected pairs (already documented as FK/implicit)
+                direct_neighbors = {n for n, _ in adjacency.get(source, [])}
+                if target in direct_neighbors:
+                    continue
+
+                # BFS
+                visited = {source}
+                queue: list[tuple[str, list[dict]]] = [(source, [])]
+                found_path = None
+
+                while queue:
+                    current, path = queue.pop(0)
+                    if len(path) >= max_depth:
+                        continue
+                    for neighbor, rel in adjacency.get(current, []):
+                        if neighbor == target:
+                            found_path = path + [rel]
+                            break
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            queue.append((neighbor, path + [rel]))
+                    if found_path:
+                        break
+
+                if found_path and len(found_path) >= 2:
+                    # Build JOIN chain description
+                    steps = []
+                    for rel in found_path:
+                        steps.append(
+                            f"JOIN {rel['referenced_table']} ON "
+                            f"{rel['parent_table']}.{rel['parent_column']} = "
+                            f"{rel['referenced_table']}.{rel['referenced_column']}"
+                        )
+                    path_doc = (
+                        f"To connect {source} to {target}, use a multi-step JOIN: "
+                        + " then ".join(steps)
+                        + "."
+                    )
+                    docs.append(path_doc)
+
+        return docs
+
     def get_training_plan_generic(self, df_information_schema):
         """Get a generic training plan."""
         try:
@@ -3103,6 +3199,8 @@ def auto_enhance_schema(clear_existing: bool = True):
         "sample_values_collected": 0,
         "implicit_relationships_added": 0,
         "structured_docs_added": 0,
+        "join_paths_added": 0,
+        "views_documented": 0,
         "errors": [],
     }
 
@@ -3125,6 +3223,9 @@ def auto_enhance_schema(clear_existing: bool = True):
                                     "Unique index ",
                                     "Index '",
                                     "Foreign key relationship: ",
+                                    "To connect ",
+                                    "Central tables with many relationships",
+                                    "View '",
                                 ))
                                 or (content.startswith("TABLE: ") and "." in content[:60])
                                 or (content.startswith("Column ") and "." in content[:80] and " has " in content[:200])
@@ -3437,12 +3538,72 @@ def auto_enhance_schema(clear_existing: bool = True):
                 logger.warning(msg)
                 results["errors"].append(msg)
 
+            # --- Step 4: Multi-hop JOIN path documentation ---
+            try:
+                st.write("Generating multi-hop JOIN path documentation...")
+                # Collect all relationships (explicit + implicit) as dicts
+                all_rels_for_paths: list[dict[str, str]] = []
+                if df_rels is not None and not df_rels.empty:
+                    for _, rel in df_rels.iterrows():
+                        all_rels_for_paths.append({
+                            "parent_table": rel["parent_table"],
+                            "parent_column": rel["parent_column"],
+                            "referenced_table": rel["referenced_table"],
+                            "referenced_column": rel["referenced_column"],
+                        })
+                if "implicit_rels" in dir() and implicit_rels:
+                    all_rels_for_paths.extend(implicit_rels)
+
+                if all_rels_for_paths:
+                    all_tables = set()
+                    for r in all_rels_for_paths:
+                        all_tables.add(r["parent_table"])
+                        all_tables.add(r["referenced_table"])
+
+                    join_path_docs = vanna_service._find_join_paths(all_rels_for_paths, all_tables)
+                    for doc in join_path_docs:
+                        vanna_service.train(documentation=doc)
+                        results["join_paths_added"] += 1
+                    if join_path_docs:
+                        st.write(f"  Generated {results['join_paths_added']} JOIN path docs.")
+            except Exception as e:
+                msg = f"Error generating JOIN path docs: {e}"
+                logger.warning(msg)
+                results["errors"].append(msg)
+
+            # --- Step 5: View definition extraction ---
+            try:
+                st.write("Extracting view definitions...")
+                view_query = vanna_service._build_view_definitions_query(schema_name, forbidden_tables_str)
+                df_views = vanna_service.vn.run_sql(view_query)
+
+                if df_views is not None and not df_views.empty:
+                    for _, view_row in df_views.iterrows():
+                        view_name = view_row["table_name"]
+                        definition = view_row.get("view_definition", "")
+                        if definition:
+                            # Truncate very long definitions
+                            def_text = definition[:500] + ("..." if len(definition) > 500 else "")
+                            view_doc = f"View '{view_name}' is defined as: {def_text}"
+                            vanna_service.train(documentation=view_doc)
+                            results["views_documented"] += 1
+                    if results["views_documented"]:
+                        st.write(f"  Documented {results['views_documented']} views.")
+                else:
+                    st.write("  No views found.")
+            except Exception as e:
+                msg = f"Error extracting view definitions: {e}"
+                logger.warning(msg)
+                results["errors"].append(msg)
+
             # --- Summary ---
             total_items = (
                 results["relationships_added"]
                 + results["index_docs_added"]
                 + results["implicit_relationships_added"]
                 + results["structured_docs_added"]
+                + results["join_paths_added"]
+                + results["views_documented"]
             )
             if results["errors"]:
                 status.update(label=f"Auto-enhance completed with {len(results['errors'])} error(s). {total_items} items added.", state="error")
@@ -3451,13 +3612,16 @@ def auto_enhance_schema(clear_existing: bool = True):
 
             logger.info(
                 "Auto-enhance completed: %d FK relationships, %d implicit relationships, "
-                "%d index docs, %d column stats, %d sample value docs, %d structured table docs",
+                "%d index docs, %d column stats, %d sample value docs, %d structured table docs, "
+                "%d JOIN path docs, %d views documented",
                 results["relationships_added"],
                 results["implicit_relationships_added"],
                 results["index_docs_added"],
                 results["column_stats_collected"],
                 results["sample_values_collected"],
                 results["structured_docs_added"],
+                results["join_paths_added"],
+                results["views_documented"],
             )
 
         except Exception as e:
