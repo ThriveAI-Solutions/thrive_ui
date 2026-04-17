@@ -26,7 +26,7 @@ from orm.models import RoleTypeEnum, SessionLocal, User, UserRole
 from utils.authentication_management import get_user_list_excel
 from utils.chat_bot_helper import get_vn
 from utils.enums import ThemeType
-from utils.vanna_calls import train_ai_documentation, train_ddl, train_file, training_plan
+from utils.vanna_calls import auto_enhance_schema, train_ai_documentation, train_all, train_ddl, train_file, training_plan
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
@@ -311,6 +311,8 @@ def import_training_data_from_csv(uploaded_file):
 @st.dialog("Cast your vote")
 def pop_train(type):
     try:
+        from utils.security_validator import security_validator
+
         if type == "sql":
             with st.form("add_training_data"):
                 question = st.text_input("Question")
@@ -319,9 +321,13 @@ def pop_train(type):
                     if question == "" or content1 == "":
                         st.error("Please fill all fields.")
                     else:
-                        get_vn().train(question=question, sql=content1)
-                        st.toast("Training Data Added Successfully!")
-                        st.rerun()
+                        is_valid, violations = security_validator.validate_sql_content(content1)
+                        if not is_valid:
+                            st.error(f"SQL contains forbidden references: {', '.join(violations)}")
+                        else:
+                            get_vn().train(question=question, sql=content1)
+                            st.toast("Training Data Added Successfully!")
+                            st.rerun()
         else:
             with st.form("add_training_data"):
                 content2 = st.text_input("Documentation")
@@ -329,9 +335,13 @@ def pop_train(type):
                     if content2 == "":
                         st.error("Please fill all fields.")
                     else:
-                        get_vn().train(documentation=content2)
-                        st.toast("Training Data Added Successfully!")
-                        st.rerun()
+                        is_valid, violations = security_validator.validate_documentation(content2)
+                        if not is_valid:
+                            st.error(f"Documentation contains forbidden references: {', '.join(violations)}")
+                        else:
+                            get_vn().train(documentation=content2)
+                            st.toast("Training Data Added Successfully!")
+                            st.rerun()
     except Exception as e:
         st.error(f"An error occurred: {e}")
         logger.error(f"An error occurred: {e}")
@@ -365,7 +375,13 @@ with tab1:
 
 with tab2:
     if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
-        cols = st.columns((0.15, 0.20, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15))
+        # Primary action: Train All (runs DDL → Plan → Auto-Enhance)
+        train_all_col, spacer = st.columns((0.25, 0.75))
+        with train_all_col:
+            st.button("Train All", type="primary", on_click=train_all)
+
+        # Individual training actions
+        cols = st.columns((0.15, 0.20, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15, 0.20))
         with cols[0]:
             st.button("Train DDL", on_click=train_ddl)
         with cols[1]:
@@ -381,10 +397,12 @@ with tab2:
             if st.button("Add Documentation"):
                 pop_train("documentation")
         with cols[6]:
-            st.button("Remove All", type="primary", on_click=delete_all_training)
+            st.button("Remove All", on_click=delete_all_training)
         with cols[7]:
             if st.button("Export CSV"):
                 export_training_data_to_csv()
+        with cols[8]:
+            st.button("Auto-Enhance", on_click=auto_enhance_schema)
 
         # (Moved Bulk User Import to Manage Users tab)
 
@@ -421,6 +439,28 @@ with tab2:
             # Prepare display dataframe with renamed columns for clarity
             display_df = df[["id", "training_data_type", "question", "content"]].copy()
             display_df.columns = ["ID", "Type", "Question", "Content"]
+
+            # Search and filter controls
+            filter_col1, filter_col2 = st.columns([0.6, 0.4])
+            with filter_col1:
+                search_query = st.text_input(
+                    "Search training data",
+                    placeholder="Search by question or content...",
+                    key="training_search",
+                )
+            with filter_col2:
+                available_types = sorted(display_df["Type"].dropna().unique().tolist())
+                type_filter = st.multiselect("Filter by type", options=available_types, key="training_type_filter")
+
+            # Apply filters
+            if search_query:
+                mask = (
+                    display_df["Question"].astype(str).str.contains(search_query, case=False, na=False)
+                    | display_df["Content"].astype(str).str.contains(search_query, case=False, na=False)
+                )
+                display_df = display_df[mask]
+            if type_filter:
+                display_df = display_df[display_df["Type"].isin(type_filter)]
 
             # Use data_editor for interactive grid with selection for deletion
             if st.session_state.cookies.get("role_name") == "Admin":
