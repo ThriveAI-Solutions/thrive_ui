@@ -3633,14 +3633,14 @@ def auto_enhance_schema(clear_existing: bool = True):
 
 
 def train_all():
-    """Run the full training pipeline: DDL → Plan → Auto-Enhance.
+    """Run the full training pipeline: DDL → Plan → Auto-Enhance → AI Docs.
 
-    Provides st.status progress showing 3 sequential steps with elapsed time per step.
+    Provides st.status progress showing 4 sequential steps with elapsed time per step.
     """
     with st.status("Running full training pipeline...", expanded=True) as status:
         overall_start = time.perf_counter()
 
-        st.write("**Step 1/3:** Training DDL structures...")
+        st.write("**Step 1/4:** Training DDL structures...")
         step_start = time.perf_counter()
         try:
             train_ddl()
@@ -3649,7 +3649,7 @@ def train_all():
             st.write(f"  Step 1 failed: {e}")
             logger.exception("train_all step 1 (DDL) failed: %s", e)
 
-        st.write("**Step 2/3:** Building schema plan...")
+        st.write("**Step 2/4:** Building schema plan...")
         step_start = time.perf_counter()
         try:
             training_plan()
@@ -3658,7 +3658,7 @@ def train_all():
             st.write(f"  Step 2 failed: {e}")
             logger.exception("train_all step 2 (Plan) failed: %s", e)
 
-        st.write("**Step 3/3:** Auto-enhancing schema...")
+        st.write("**Step 3/4:** Auto-enhancing schema...")
         step_start = time.perf_counter()
         try:
             auto_enhance_schema(clear_existing=True)
@@ -3667,8 +3667,34 @@ def train_all():
             st.write(f"  Step 3 failed: {e}")
             logger.exception("train_all step 3 (Auto-Enhance) failed: %s", e)
 
+        st.write("**Step 4/4:** Generating AI documentation (LLM-powered, may take a few minutes)...")
+        step_start = time.perf_counter()
+        try:
+            train_ai_documentation()
+            st.write(f"  Step 4 complete ({time.perf_counter() - step_start:.1f}s)")
+        except Exception as e:
+            st.write(f"  Step 4 failed: {e}")
+            logger.exception("train_all step 4 (AI Docs) failed: %s", e)
+
         total_elapsed = time.perf_counter() - overall_start
         status.update(label=f"Training pipeline complete! ({total_elapsed:.1f}s total)", state="complete")
+
+
+def refresh_stats():
+    """Re-run only the auto-enhance step to refresh column statistics and sample values.
+
+    Use this when data has changed but schema (tables/columns) has not.
+    Faster than Train All because it skips DDL, Plan, and AI documentation steps.
+    """
+    with st.status("Refreshing data statistics...", expanded=True) as status:
+        start = time.perf_counter()
+        try:
+            auto_enhance_schema(clear_existing=True)
+            elapsed = time.perf_counter() - start
+            status.update(label=f"Stats refresh complete! ({elapsed:.1f}s)", state="complete")
+        except Exception as e:
+            logger.exception("refresh_stats failed: %s", e)
+            status.update(label=f"Stats refresh failed: {e}", state="error")
 
 
 def train_ddl_describe_to_rag(table: str, ddl: list):
@@ -3953,6 +3979,14 @@ def _analyze_boolean_column(column_data: pd.Series, non_null_count: int) -> list
 
 # Train Vanna on database question/query pairs from file
 def train_file():
+    """DEPRECATED: Use CSV import instead. Loads hardcoded demo Q&A from training_data.json."""
+    import warnings
+
+    warnings.warn(
+        "train_file() is deprecated. Use the CSV import feature instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
         from utils.security_validator import security_validator
 

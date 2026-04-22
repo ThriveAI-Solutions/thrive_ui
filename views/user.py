@@ -26,7 +26,7 @@ from orm.models import RoleTypeEnum, SessionLocal, User, UserRole
 from utils.authentication_management import get_user_list_excel
 from utils.chat_bot_helper import get_vn
 from utils.enums import ThemeType
-from utils.vanna_calls import auto_enhance_schema, train_ai_documentation, train_all, train_ddl, train_file, training_plan
+from utils.vanna_calls import refresh_stats, train_all
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
@@ -375,34 +375,36 @@ with tab1:
 
 with tab2:
     if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
-        # Primary action: Train All (runs DDL → Plan → Auto-Enhance)
-        train_all_col, spacer = st.columns((0.25, 0.75))
-        with train_all_col:
-            st.button("Train All", type="primary", on_click=train_all)
+        # Training pipeline actions
+        train_col1, train_col2, spacer = st.columns((0.20, 0.20, 0.60))
+        with train_col1:
+            st.button(
+                "Train All",
+                type="primary",
+                on_click=train_all,
+                help="Full pipeline: DDL, Schema Plan, Auto-Enhance, AI Docs",
+            )
+        with train_col2:
+            st.button(
+                "Refresh Stats",
+                on_click=refresh_stats,
+                help="Re-run column statistics only (use when data changed but schema is the same)",
+            )
 
-        # Individual training actions
-        cols = st.columns((0.15, 0.20, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15, 0.20))
-        with cols[0]:
-            st.button("Train DDL", on_click=train_ddl)
-        with cols[1]:
-            st.button("AI Generate Docs", on_click=train_ai_documentation)
-        with cols[2]:
-            st.button("Train Plan", on_click=training_plan)
-        with cols[3]:
-            st.button("Train FIle", on_click=train_file)
-        with cols[4]:
+        # Data management actions
+        st.caption("Data Management")
+        mgmt_cols = st.columns((0.15, 0.25, 0.15, 0.15, 0.30))
+        with mgmt_cols[0]:
             if st.button("Add Sql"):
                 pop_train("sql")
-        with cols[5]:
+        with mgmt_cols[1]:
             if st.button("Add Documentation"):
                 pop_train("documentation")
-        with cols[6]:
+        with mgmt_cols[2]:
             st.button("Remove All", on_click=delete_all_training)
-        with cols[7]:
+        with mgmt_cols[3]:
             if st.button("Export CSV"):
                 export_training_data_to_csv()
-        with cols[8]:
-            st.button("Auto-Enhance", on_click=auto_enhance_schema)
 
         # (Moved Bulk User Import to Manage Users tab)
 
