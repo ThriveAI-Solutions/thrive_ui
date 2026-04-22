@@ -12,12 +12,12 @@ import streamlit as st
 from pandas import DataFrame
 from sqlparse.sql import Identifier, IdentifierList
 from sqlparse.tokens import DML, Keyword
-from vanna.anthropic import Anthropic_Chat
-from vanna.google import GoogleGeminiChat
-from vanna.ollama import Ollama  # imported to satisfy tests that patch utils.vanna_calls.Ollama
-from vanna.openai import OpenAI_Chat
-from vanna.remote import VannaDefault
-from vanna.vannadb import VannaDB_VectorStore
+from vanna.legacy.anthropic import Anthropic_Chat
+from vanna.legacy.google import GoogleGeminiChat
+from vanna.legacy.ollama import Ollama  # imported to satisfy tests that patch utils.vanna_calls.Ollama
+from vanna.legacy.openai import OpenAI_Chat
+from vanna.legacy.remote import VannaDefault
+from vanna.legacy.vannadb import VannaDB_VectorStore
 
 from utils.chromadb_vector import ThriveAI_ChromaDB
 from utils.milvus_vector import ThriveAI_Milvus
@@ -257,7 +257,7 @@ class MyVannaGeminiChromaDB(ThriveAI_ChromaDB, GoogleGeminiChat):
                 config={"model": self.configured_model, "api_key": self.configured_api_key},
             )
 
-            # BUG FIX: Vanna 0.7.5 GoogleGeminiChat ignores the model config
+            # BUG FIX: GoogleGeminiChat (vanna.legacy) ignores the model config
             # We need to manually fix the chat_model after initialization
             import google.generativeai as genai
 
@@ -293,7 +293,7 @@ class MyVannaGeminiMilvus(ThriveAI_Milvus, GoogleGeminiChat):
             self.configured_api_key = st.secrets["ai_keys"]["gemini_api"]
             GoogleGeminiChat.__init__(self, config={"model": self.configured_model, "api_key": self.configured_api_key})
 
-            # Fix model configuration per Vanna 0.7.5 note
+            # Fix model configuration per GoogleGeminiChat legacy bug (see MyVannaGeminiChromaDB)
             import google.generativeai as genai
 
             genai.configure(api_key=self.configured_api_key)

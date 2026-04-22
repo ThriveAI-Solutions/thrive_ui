@@ -2,7 +2,7 @@ import json
 import re
 
 from httpx import Timeout
-from vanna.exceptions import DependencyError
+from vanna.legacy.exceptions import DependencyError
 
 from utils.thriveai_base import ThriveAI_Base
 

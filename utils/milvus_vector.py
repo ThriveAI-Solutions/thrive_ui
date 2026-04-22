@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import HashingVectorizer
-from vanna.utils import deterministic_uuid
+from vanna.legacy.utils import deterministic_uuid
 
 logger = logging.getLogger(__name__)
 
