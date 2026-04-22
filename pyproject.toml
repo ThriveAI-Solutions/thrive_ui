@@ -22,7 +22,8 @@ dependencies = [
     "speechrecognition>=3.14.1",
     "streamlit>=1.43.2",
     "streamlit-cookies-manager-ext>=0.1.0",
-    "vanna[anthropic,chromadb,gemini,ollama,postgres]==0.7.5",
+    "vanna[anthropic,chromadb,gemini,ollama,postgres]==2.0.2",
+    "google-generativeai>=0.8.0",  # vanna 2.0.2 [gemini] extra omits this; needed by GoogleGeminiChat legacy module
     "wordcloud>=1.9.4",
     "vertexai>=1.71.1",
     "pymilvus>=2.6.0; sys_platform == 'linux' or sys_platform == 'darwin'",

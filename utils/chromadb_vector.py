@@ -4,8 +4,8 @@ from typing import Any
 
 import pandas as pd
 from chromadb.api import ClientAPI
-from vanna.chromadb.chromadb_vector import ChromaDB_VectorStore
-from vanna.utils import deterministic_uuid
+from vanna.legacy.chromadb.chromadb_vector import ChromaDB_VectorStore
+from vanna.legacy.utils import deterministic_uuid
 
 
 class _CoercingCollection:

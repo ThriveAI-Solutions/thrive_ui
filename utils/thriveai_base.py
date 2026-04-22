@@ -1,6 +1,6 @@
 import logging
 
-from vanna.base import VannaBase
+from vanna.legacy.base import VannaBase
 
 logger = logging.getLogger(__name__)
 
