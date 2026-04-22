@@ -1,5 +1,6 @@
 import sys
 
+import pandas as pd
 import streamlit as st
 
 
@@ -42,7 +43,7 @@ def test_thriveai_ollama_uses_temperature_in_options(monkeypatch):
         def get_related_ddl(self, question, **kwargs): return []
         def get_related_documentation(self, question, **kwargs): return []
         def get_similar_question_sql(self, question, **kwargs): return []
-        def get_training_data(self, **kwargs): return None
+        def get_training_data(self, **kwargs): return pd.DataFrame()
         def remove_training_data(self, id, **kwargs): return True
 
     # Act: instantiate with temperature in options and call submit_prompt
