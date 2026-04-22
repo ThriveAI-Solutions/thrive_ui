@@ -257,7 +257,7 @@ class MyVannaGeminiChromaDB(ThriveAI_ChromaDB, GoogleGeminiChat):
                 config={"model": self.configured_model, "api_key": self.configured_api_key},
             )
 
-            # BUG FIX: Vanna 0.7.5 GoogleGeminiChat ignores the model config
+            # BUG FIX: GoogleGeminiChat (vanna.legacy) ignores the model config
             # We need to manually fix the chat_model after initialization
             import google.generativeai as genai
 
@@ -293,7 +293,7 @@ class MyVannaGeminiMilvus(ThriveAI_Milvus, GoogleGeminiChat):
             self.configured_api_key = st.secrets["ai_keys"]["gemini_api"]
             GoogleGeminiChat.__init__(self, config={"model": self.configured_model, "api_key": self.configured_api_key})
 
-            # Fix model configuration per Vanna 0.7.5 note
+            # Fix model configuration per GoogleGeminiChat legacy bug (see MyVannaGeminiChromaDB)
             import google.generativeai as genai
 
             genai.configure(api_key=self.configured_api_key)

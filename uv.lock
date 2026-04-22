@@ -6496,7 +6496,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.49.0" },
-    { name = "chromadb", specifier = ">=0.6.3" },
+    { name = "chromadb", specifier = ">=1.1.0" },
     { name = "docling", specifier = ">=2.65.0" },
     { name = "ethical-guardrails-lib", git = "https://github.com/ThriveAI-Solutions/ethical_guardrails_lib.git" },
     { name = "google-generativeai", specifier = ">=0.8.0" },
