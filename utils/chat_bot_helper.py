@@ -16,6 +16,7 @@ from orm.models import Message
 from utils.communicate import speak
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
+from utils.report_service import find_matching_report, record_report_execution, get_latest_execution, get_execution_count
 import re
 
 logger = logging.getLogger(__name__)
@@ -960,6 +961,201 @@ def _render_summary_actions_popover(message: Message, index: int, my_df: pd.Data
         with st.expander("Show SQL"):
             st.code(message.query, language="sql", line_numbers=True)
 
+        # Report actions section
+        _render_report_actions(message)
+
+
+def _render_report_actions(message: Message):
+    """Render report-related actions in the summary popover."""
+    matched_report = st.session_state.get("matched_report")
+    current_execution = st.session_state.get("current_execution")
+
+    if matched_report:
+        # This query matched a saved report - show report info and actions
+        st.divider()
+        exec_count = get_execution_count(matched_report.id)
+        latest_exec = get_latest_execution(matched_report.id)
+
+        # Show report indicator
+        st.markdown(f"📊 **Report:** {matched_report.name}")
+        if latest_exec and latest_exec.created_at:
+            from utils.trend_visualization import format_time_ago
+            st.caption(f"Last run: {format_time_ago(latest_exec.created_at)} • {exec_count} total runs")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("📜 View History", key=f"report_history_{message.id}", use_container_width=True):
+                st.session_state["show_report_history"] = matched_report.id
+                st.rerun()
+        with col2:
+            if st.button("📈 View Trends", key=f"report_trends_{message.id}", use_container_width=True):
+                st.session_state["show_report_trends"] = matched_report.id
+                st.rerun()
+    else:
+        # No match - offer to save as new report
+        st.divider()
+        if st.button("💾 Save as Report", key=f"save_report_{message.id}", use_container_width=True):
+            st.session_state["show_save_report_dialog"] = True
+            st.rerun()
+
+
+def _render_save_report_dialog():
+    """Render the save report dialog as a modal-like expander."""
+    if not st.session_state.get("show_save_report_dialog"):
+        return
+
+    sql = st.session_state.get("last_successful_sql")
+    question = st.session_state.get("last_successful_question")
+    group_id = st.session_state.get("last_successful_group_id")
+
+    if not sql or not question:
+        st.session_state["show_save_report_dialog"] = False
+        return
+
+    with st.container():
+        st.subheader("💾 Save as Report")
+
+        report_name = st.text_input(
+            "Report Name",
+            value="",
+            placeholder="e.g., Monthly Patient Count",
+            key="save_report_name",
+            max_chars=200,
+        )
+
+        description = st.text_area(
+            "Description (optional)",
+            placeholder="What this report tracks...",
+            key="save_report_description",
+            max_chars=1000,
+            height=80,
+        )
+
+        with st.expander("SQL Query (frozen)", expanded=False):
+            st.code(sql, language="sql")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Save", type="primary", use_container_width=True, disabled=not report_name.strip()):
+                try:
+                    from utils.report_service import save_report_from_chat
+                    import json as json_module
+
+                    user_id = None
+                    if hasattr(st.session_state, "cookies") and st.session_state.cookies:
+                        user_id_str = st.session_state.cookies.get("user_id")
+                        if user_id_str:
+                            user_id = json_module.loads(user_id_str)
+
+                    if user_id:
+                        report = save_report_from_chat(
+                            user_id=user_id,
+                            name=report_name.strip(),
+                            sql_query=sql,
+                            original_question=question,
+                            source_group_id=group_id,
+                            description=description.strip() if description else None,
+                        )
+                        st.success(f"Report '{report.name}' saved successfully!")
+                        st.session_state["show_save_report_dialog"] = False
+                        st.session_state["matched_report"] = report
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("Could not determine user. Please log in again.")
+                except Exception as e:
+                    st.error(f"Failed to save report: {e}")
+        with col2:
+            if st.button("Cancel", use_container_width=True):
+                st.session_state["show_save_report_dialog"] = False
+                st.rerun()
+
+
+def _render_report_history_popover():
+    """Render report history in a dialog-like container."""
+    report_id = st.session_state.get("show_report_history")
+    if not report_id:
+        return
+
+    from utils.report_service import get_report_by_id, get_report_executions
+    from utils.trend_visualization import build_execution_history_df
+
+    report = get_report_by_id(report_id)
+    if not report:
+        st.session_state["show_report_history"] = None
+        return
+
+    with st.container():
+        col1, col2 = st.columns([0.9, 0.1])
+        with col1:
+            st.subheader(f"📜 History: {report.name}")
+        with col2:
+            if st.button("✕", key="close_history"):
+                st.session_state["show_report_history"] = None
+                st.rerun()
+
+        executions = get_report_executions(report_id, limit=20)
+        if executions:
+            history_df = build_execution_history_df(executions)
+            st.dataframe(history_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No execution history yet.")
+
+
+def _render_report_trends_popover():
+    """Render report trends in a dialog-like container."""
+    report_id = st.session_state.get("show_report_trends")
+    if not report_id:
+        return
+
+    from utils.report_service import get_report_by_id, get_report_executions, get_consistent_columns
+    from utils.trend_visualization import build_trend_chart, build_row_count_chart
+
+    report = get_report_by_id(report_id)
+    if not report:
+        st.session_state["show_report_trends"] = None
+        return
+
+    with st.container():
+        col1, col2 = st.columns([0.9, 0.1])
+        with col1:
+            st.subheader(f"📈 Trends: {report.name}")
+        with col2:
+            if st.button("✕", key="close_trends"):
+                st.session_state["show_report_trends"] = None
+                st.rerun()
+
+        executions = get_report_executions(report_id, limit=50)
+        if len(executions) < 2:
+            st.info("Need at least 2 executions to show trends. Run this report again later!")
+            return
+
+        # Reverse to get chronological order
+        executions = list(reversed(executions))
+
+        # Show row count chart
+        row_chart = build_row_count_chart(executions)
+        if row_chart:
+            st.plotly_chart(row_chart, use_container_width=True)
+
+        # Show metric trends
+        consistent_cols = get_consistent_columns(report_id)
+        if consistent_cols:
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_col = st.selectbox("Column", consistent_cols, key="trend_column")
+            with col2:
+                selected_metric = st.selectbox("Metric", ["sum", "avg", "min", "max", "count"], key="trend_metric")
+
+            if selected_col:
+                trend_chart = build_trend_chart(executions, selected_col, selected_metric)
+                if trend_chart:
+                    st.plotly_chart(trend_chart, use_container_width=True)
+                else:
+                    st.info(f"No trend data available for {selected_col}")
+        else:
+            st.info("No consistent numeric columns across executions for trend analysis.")
+
 
 # Feedback categories for thumbs down
 FEEDBACK_CATEGORIES = [
@@ -1409,6 +1605,41 @@ def normal_message_flow(my_question: str):
     if final_sql and isinstance(df, pd.DataFrame):
         # SQL executed successfully
         st.session_state["df"] = df
+
+        # Check if this question matches a saved report
+        try:
+            user_id = None
+            if hasattr(st.session_state, "cookies") and st.session_state.cookies:
+                import json as json_module
+                user_id_str = st.session_state.cookies.get("user_id")
+                if user_id_str:
+                    user_id = json_module.loads(user_id_str)
+
+            if user_id:
+                matched_report = find_matching_report(user_id, my_question, final_sql)
+                if matched_report:
+                    # Record this as a report execution
+                    execution = record_report_execution(
+                        matched_report, df, user_id, get_current_group_id(), sql_elapsed_time
+                    )
+                    st.session_state["matched_report"] = matched_report
+                    st.session_state["current_execution"] = execution
+                    logger.info(f"Auto-detected report match: '{matched_report.name}'")
+                else:
+                    st.session_state["matched_report"] = None
+                    st.session_state["current_execution"] = None
+            else:
+                st.session_state["matched_report"] = None
+                st.session_state["current_execution"] = None
+        except Exception as e:
+            logger.warning(f"Failed to check for matching report: {e}")
+            st.session_state["matched_report"] = None
+            st.session_state["current_execution"] = None
+
+        # Store the current query context for "Save as Report" functionality
+        st.session_state["last_successful_sql"] = final_sql
+        st.session_state["last_successful_question"] = my_question
+        st.session_state["last_successful_group_id"] = get_current_group_id()
 
         # Show SQL if enabled and this was a successful retry (SQL wasn't shown during first attempt)
         if attempt > 1 and st.session_state.get("show_sql", True):

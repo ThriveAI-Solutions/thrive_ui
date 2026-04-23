@@ -410,6 +410,78 @@ class AdminAction(Base):
     target_user = relationship("User", foreign_keys=[target_user_id])
 
 
+class SavedReport(Base):
+    """Saved SQL reports that can be re-executed to track data changes over time."""
+
+    __tablename__ = "thrive_saved_report"
+    __table_args__ = (
+        Index("ix_thrive_saved_report_user_id", "user_id"),
+        Index("ix_thrive_saved_report_created_at", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("thrive_user.id"), nullable=False)
+    name = Column(String(200), nullable=False)
+    description = Column(String(1000))
+
+    # Frozen SQL - never regenerated
+    sql_query = Column(String, nullable=False)
+    original_question = Column(String(1000))
+    source_group_id = Column(String(50))  # If saved from chat
+
+    # Metadata
+    is_public = Column(Boolean, default=False)  # v2: sharing
+    is_archived = Column(Boolean, default=False)
+    tags = Column(String(500))  # JSON array
+
+    # Scheduling (v2 - nullable for now)
+    schedule_cron = Column(String(100))
+    last_scheduled_run = Column(TIMESTAMP)
+
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    executions = relationship("ReportExecution", back_populates="report", cascade="all, delete-orphan")
+
+
+class ReportExecution(Base):
+    """Records each execution of a saved report for trend tracking."""
+
+    __tablename__ = "thrive_report_execution"
+    __table_args__ = (
+        Index("ix_thrive_report_execution_report_id", "report_id"),
+        Index("ix_thrive_report_execution_created_at", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    report_id = Column(Integer, ForeignKey("thrive_saved_report.id"), nullable=False)
+
+    triggered_by = Column(String(50))  # "manual", "scheduled", "api", "auto"
+    executed_by_user_id = Column(Integer, ForeignKey("thrive_user.id"))
+
+    # Results snapshot
+    dataframe_json = Column(String)  # Full DataFrame as JSON
+    row_count = Column(Integer)
+    column_names = Column(String)  # JSON array
+
+    # Execution metadata
+    elapsed_time = Column(Numeric(10, 6))
+    success = Column(Boolean, default=True)
+    error_message = Column(String(2000))
+
+    # Pre-computed metrics for trend charts
+    numeric_summary = Column(String)  # JSON: {column: {sum, avg, min, max}}
+
+    group_id = Column(String(50))  # Optional chat link
+    created_at = Column(TIMESTAMP, server_default=func.now())
+
+    # Relationships
+    report = relationship("SavedReport", back_populates="executions")
+    executed_by = relationship("User", foreign_keys=[executed_by_user_id])
+
+
 class ErrorLog(Base):
     """Structured error logging for debugging and monitoring."""
 

@@ -5192,6 +5192,449 @@ def _loop_questions(question, tuple, previous_df):
         add_message(Message(RoleType.ASSISTANT, f"Error in loop questions: {str(e)}", MessageType.ERROR))
 
 
+# ==================== SAVED REPORTS ====================
+
+
+def _list_reports(question, match_tuple, previous_df):
+    """List all saved reports for the current user."""
+    import json as json_module
+    from utils.report_service import get_user_reports, get_execution_count, get_latest_execution
+    from utils.trend_visualization import format_time_ago
+
+    try:
+        # Get user_id from session
+        user_id = None
+        if hasattr(st.session_state, "cookies") and st.session_state.cookies:
+            user_id_str = st.session_state.cookies.get("user_id")
+            if user_id_str:
+                user_id = json_module.loads(user_id_str)
+
+        if not user_id:
+            add_message(
+                Message(RoleType.ASSISTANT, "Could not determine user. Please log in again.", MessageType.ERROR)
+            )
+            return
+
+        reports = get_user_reports(user_id)
+
+        if not reports:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "📊 No saved reports yet.\n\nTo save a report, ask a question and click **Save as Report** in the Actions menu.",
+                    MessageType.TEXT,
+                    group_id=get_current_group_id(),
+                )
+            )
+            return
+
+        # Build report list
+        lines = ["📊 **Your Saved Reports**\n"]
+        for report in reports:
+            exec_count = get_execution_count(report.id)
+            latest = get_latest_execution(report.id)
+            last_run = format_time_ago(latest.created_at) if latest else "Never"
+
+            lines.append(f"**{report.name}**")
+            lines.append(f"  - Runs: {exec_count} | Last run: {last_run}")
+            if report.description:
+                lines.append(f"  - {report.description[:80]}...")
+            lines.append("")
+
+        lines.append("_Use `/run <name>` to execute a report or `/report-info <name>` for details._")
+
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                "\n".join(lines),
+                MessageType.TEXT,
+                group_id=get_current_group_id(),
+            )
+        )
+
+    except Exception as e:
+        add_message(
+            Message(RoleType.ASSISTANT, f"Error listing reports: {str(e)}", MessageType.ERROR)
+        )
+
+
+def _run_report(question, match_tuple, previous_df):
+    """Execute a saved report by name."""
+    import json as json_module
+    from utils.report_service import get_report_by_name, execute_report, get_user_reports
+
+    try:
+        report_name = match_tuple.get("report_name", "").strip()
+        if not report_name:
+            add_message(
+                Message(RoleType.ASSISTANT, "Please specify a report name: `/run <report_name>`", MessageType.ERROR)
+            )
+            return
+
+        # Get user_id
+        user_id = None
+        if hasattr(st.session_state, "cookies") and st.session_state.cookies:
+            user_id_str = st.session_state.cookies.get("user_id")
+            if user_id_str:
+                user_id = json_module.loads(user_id_str)
+
+        if not user_id:
+            add_message(
+                Message(RoleType.ASSISTANT, "Could not determine user. Please log in again.", MessageType.ERROR)
+            )
+            return
+
+        # Try exact match first
+        report = get_report_by_name(user_id, report_name)
+
+        # If no exact match, try fuzzy matching
+        if not report:
+            all_reports = get_user_reports(user_id)
+            if all_reports:
+                report_names = [r.name for r in all_reports]
+                matches = difflib.get_close_matches(report_name, report_names, n=1, cutoff=0.6)
+                if matches:
+                    for r in all_reports:
+                        if r.name == matches[0]:
+                            report = r
+                            break
+
+        if not report:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Report '{report_name}' not found. Use `/reports` to see available reports.",
+                    MessageType.ERROR,
+                )
+            )
+            return
+
+        # Execute the report
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                f"📊 Running report: **{report.name}**...",
+                MessageType.TEXT,
+                group_id=get_current_group_id(),
+            )
+        )
+
+        execution, df = execute_report(report.id, user_id, triggered_by="manual", group_id=get_current_group_id())
+
+        if execution.success and df is not None:
+            st.session_state["df"] = df
+            st.session_state["matched_report"] = report
+            st.session_state["current_execution"] = execution
+
+            # Display results
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    df,
+                    MessageType.DATAFRAME,
+                    report.sql_query,
+                    report.original_question,
+                    df,
+                    execution.elapsed_time,
+                    group_id=get_current_group_id(),
+                )
+            )
+        else:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Report execution failed: {execution.error_message}",
+                    MessageType.ERROR,
+                )
+            )
+
+    except Exception as e:
+        add_message(
+            Message(RoleType.ASSISTANT, f"Error running report: {str(e)}", MessageType.ERROR)
+        )
+
+
+def _report_info(question, match_tuple, previous_df):
+    """Show detailed information about a saved report."""
+    import json as json_module
+    from utils.report_service import get_report_by_name, get_user_reports, get_execution_count, get_latest_execution
+    from utils.trend_visualization import format_time_ago
+
+    try:
+        report_name = match_tuple.get("report_name", "").strip()
+        if not report_name:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "Please specify a report name: `/report-info <report_name>`",
+                    MessageType.ERROR,
+                )
+            )
+            return
+
+        # Get user_id
+        user_id = None
+        if hasattr(st.session_state, "cookies") and st.session_state.cookies:
+            user_id_str = st.session_state.cookies.get("user_id")
+            if user_id_str:
+                user_id = json_module.loads(user_id_str)
+
+        if not user_id:
+            add_message(
+                Message(RoleType.ASSISTANT, "Could not determine user. Please log in again.", MessageType.ERROR)
+            )
+            return
+
+        # Try exact match first, then fuzzy
+        report = get_report_by_name(user_id, report_name)
+        if not report:
+            all_reports = get_user_reports(user_id)
+            if all_reports:
+                report_names = [r.name for r in all_reports]
+                matches = difflib.get_close_matches(report_name, report_names, n=1, cutoff=0.6)
+                if matches:
+                    for r in all_reports:
+                        if r.name == matches[0]:
+                            report = r
+                            break
+
+        if not report:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Report '{report_name}' not found. Use `/reports` to see available reports.",
+                    MessageType.ERROR,
+                )
+            )
+            return
+
+        exec_count = get_execution_count(report.id)
+        latest = get_latest_execution(report.id)
+        last_run = format_time_ago(latest.created_at) if latest else "Never"
+
+        lines = [
+            f"📊 **Report: {report.name}**\n",
+            f"**Created:** {report.created_at.strftime('%Y-%m-%d %H:%M') if report.created_at else 'Unknown'}",
+            f"**Executions:** {exec_count} | **Last run:** {last_run}",
+        ]
+
+        if report.description:
+            lines.append(f"\n**Description:** {report.description}")
+
+        lines.append(f"\n**Original Question:**\n> {report.original_question}")
+        lines.append(f"\n**SQL Query:**\n```sql\n{report.sql_query}\n```")
+        lines.append(f"\n_Use `/run {report.name}` to execute this report._")
+
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                "\n".join(lines),
+                MessageType.TEXT,
+                group_id=get_current_group_id(),
+            )
+        )
+
+    except Exception as e:
+        add_message(
+            Message(RoleType.ASSISTANT, f"Error getting report info: {str(e)}", MessageType.ERROR)
+        )
+
+
+def _delete_report(question, match_tuple, previous_df):
+    """Archive (soft delete) a saved report."""
+    import json as json_module
+    from utils.report_service import get_report_by_name, get_user_reports, archive_report
+
+    try:
+        report_name = match_tuple.get("report_name", "").strip()
+        if not report_name:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "Please specify a report name: `/delete-report <report_name>`",
+                    MessageType.ERROR,
+                )
+            )
+            return
+
+        # Get user_id
+        user_id = None
+        if hasattr(st.session_state, "cookies") and st.session_state.cookies:
+            user_id_str = st.session_state.cookies.get("user_id")
+            if user_id_str:
+                user_id = json_module.loads(user_id_str)
+
+        if not user_id:
+            add_message(
+                Message(RoleType.ASSISTANT, "Could not determine user. Please log in again.", MessageType.ERROR)
+            )
+            return
+
+        # Try exact match first, then fuzzy
+        report = get_report_by_name(user_id, report_name)
+        if not report:
+            all_reports = get_user_reports(user_id)
+            if all_reports:
+                report_names = [r.name for r in all_reports]
+                matches = difflib.get_close_matches(report_name, report_names, n=1, cutoff=0.6)
+                if matches:
+                    for r in all_reports:
+                        if r.name == matches[0]:
+                            report = r
+                            break
+
+        if not report:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Report '{report_name}' not found. Use `/reports` to see available reports.",
+                    MessageType.ERROR,
+                )
+            )
+            return
+
+        # Archive the report
+        if archive_report(report.id, user_id):
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"✅ Report '{report.name}' has been archived.",
+                    MessageType.TEXT,
+                    group_id=get_current_group_id(),
+                )
+            )
+        else:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Failed to archive report '{report.name}'.",
+                    MessageType.ERROR,
+                )
+            )
+
+    except Exception as e:
+        add_message(
+            Message(RoleType.ASSISTANT, f"Error deleting report: {str(e)}", MessageType.ERROR)
+        )
+
+
+def _show_trends(question, match_tuple, previous_df):
+    """Show trend analysis for a saved report."""
+    import json as json_module
+    from utils.report_service import (
+        get_report_by_name,
+        get_user_reports,
+        get_report_executions,
+        get_consistent_columns,
+    )
+    from utils.trend_visualization import build_trend_chart, build_row_count_chart
+
+    try:
+        report_name = match_tuple.get("report_name", "").strip()
+        if not report_name:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "Please specify a report name: `/trends <report_name>`",
+                    MessageType.ERROR,
+                )
+            )
+            return
+
+        # Get user_id
+        user_id = None
+        if hasattr(st.session_state, "cookies") and st.session_state.cookies:
+            user_id_str = st.session_state.cookies.get("user_id")
+            if user_id_str:
+                user_id = json_module.loads(user_id_str)
+
+        if not user_id:
+            add_message(
+                Message(RoleType.ASSISTANT, "Could not determine user. Please log in again.", MessageType.ERROR)
+            )
+            return
+
+        # Find report
+        report = get_report_by_name(user_id, report_name)
+        if not report:
+            all_reports = get_user_reports(user_id)
+            if all_reports:
+                report_names = [r.name for r in all_reports]
+                matches = difflib.get_close_matches(report_name, report_names, n=1, cutoff=0.6)
+                if matches:
+                    for r in all_reports:
+                        if r.name == matches[0]:
+                            report = r
+                            break
+
+        if not report:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Report '{report_name}' not found. Use `/reports` to see available reports.",
+                    MessageType.ERROR,
+                )
+            )
+            return
+
+        # Get executions
+        executions = get_report_executions(report.id, limit=50)
+        if len(executions) < 2:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"📈 Report '{report.name}' needs at least 2 executions to show trends.\nRun the report again later to see trends.",
+                    MessageType.TEXT,
+                    group_id=get_current_group_id(),
+                )
+            )
+            return
+
+        # Reverse to chronological order
+        executions = list(reversed(executions))
+
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                f"📈 **Trends for: {report.name}**\n_{len(executions)} executions_",
+                MessageType.TEXT,
+                group_id=get_current_group_id(),
+            )
+        )
+
+        # Show row count chart
+        row_chart = build_row_count_chart(executions)
+        if row_chart:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    row_chart,
+                    MessageType.PLOTLY_CHART,
+                    group_id=get_current_group_id(),
+                )
+            )
+
+        # Show first numeric column trend
+        consistent_cols = get_consistent_columns(report.id)
+        if consistent_cols:
+            col = consistent_cols[0]
+            trend_chart = build_trend_chart(executions, col, "sum")
+            if trend_chart:
+                add_message(
+                    Message(
+                        RoleType.ASSISTANT,
+                        trend_chart,
+                        MessageType.PLOTLY_CHART,
+                        group_id=get_current_group_id(),
+                    )
+                )
+
+    except Exception as e:
+        add_message(
+            Message(RoleType.ASSISTANT, f"Error showing trends: {str(e)}", MessageType.ERROR)
+        )
+
+
 FOLLOW_UP_MAGIC_RENDERERS = {
     # ==================== DATA EXPLORATION & BASIC INFO ====================
     r"^head\s+(?P<num_rows>\d+)$": {
@@ -5355,6 +5798,42 @@ MAGIC_RENDERERS = {
         "description": "Find and recreate a thumbs-up conversation matching your search (≥90% similarity)",
         "sample_values": {"search_text": "diabetes by county"},
         "category": "Help & System Commands",
+        "show_example": True,
+    },
+    # ==================== SAVED REPORTS ====================
+    r"^/reports$": {
+        "func": _list_reports,
+        "description": "List all your saved reports",
+        "sample_values": {},
+        "category": "Saved Reports",
+        "show_example": False,
+    },
+    r"^/run\s+(?P<report_name>.+)$": {
+        "func": _run_report,
+        "description": "Execute a saved report by name",
+        "sample_values": {"report_name": "Monthly Patient Count"},
+        "category": "Saved Reports",
+        "show_example": True,
+    },
+    r"^/report-info\s+(?P<report_name>.+)$": {
+        "func": _report_info,
+        "description": "Show details and SQL for a saved report",
+        "sample_values": {"report_name": "Monthly Patient Count"},
+        "category": "Saved Reports",
+        "show_example": True,
+    },
+    r"^/delete-report\s+(?P<report_name>.+)$": {
+        "func": _delete_report,
+        "description": "Archive (delete) a saved report",
+        "sample_values": {"report_name": "Monthly Patient Count"},
+        "category": "Saved Reports",
+        "show_example": True,
+    },
+    r"^/trends\s+(?P<report_name>.+)$": {
+        "func": _show_trends,
+        "description": "Show trend analysis for a saved report over time",
+        "sample_values": {"report_name": "Monthly Patient Count"},
+        "category": "Saved Reports",
         "show_example": True,
     },
     # ==================== DATABASE EXPLORATION ====================
