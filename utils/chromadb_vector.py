@@ -247,6 +247,17 @@ class ThriveAI_ChromaDB(ChromaDB_VectorStore):
 
         return df
 
+    def remove_training_data(self, id: str, **kwargs) -> bool:
+        """Remove a training entry by ID from all collections."""
+        found = False
+        for collection in [self.sql_collection, self.ddl_collection, self.documentation_collection]:
+            try:
+                collection.delete(ids=[id])
+                found = True
+            except Exception:
+                pass
+        return found
+
     def get_similar_question_sql(self, question: str, metadata: dict[str, Any] | None = None, **kwargs) -> list:
         return self._extract_documents(
             self.sql_collection.query(
