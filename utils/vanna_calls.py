@@ -662,12 +662,14 @@ class VannaService:
                     model=self.config["ai_keys"]["vanna_model"],
                 )
 
+            schema_name = self.config["postgres"].get("schema_name", "public")
             self.vn.connect_to_postgres(
                 host=self.config["postgres"]["host"],
                 dbname=self.config["postgres"]["database"],
                 user=self.config["postgres"]["user"],
                 password=self.config["postgres"]["password"],
                 port=self.config["postgres"]["port"],
+                options=f"-c search_path={schema_name},public",
             )
         except Exception as e:
             st.error(f"Error setting up Vanna: {e}")
@@ -729,12 +731,14 @@ class VannaService:
             raise ValueError(f"Unknown provider: {provider_id}")
 
         # Connect to PostgreSQL
+        schema_name = self.config["postgres"].get("schema_name", "public")
         self.vn.connect_to_postgres(
             host=self.config["postgres"]["host"],
             dbname=self.config["postgres"]["database"],
             user=self.config["postgres"]["user"],
             password=self.config["postgres"]["password"],
             port=self.config["postgres"]["port"],
+            options=f"-c search_path={schema_name},public",
         )
 
     @classmethod

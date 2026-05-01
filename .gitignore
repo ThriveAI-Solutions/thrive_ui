@@ -207,3 +207,6 @@ documentation/
 # Issue tracking (bd) and scratchpads
 .beads/
 scratchpads/
+
+# Playwright MCP tooling
+.playwright-mcp/
