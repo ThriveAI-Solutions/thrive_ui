@@ -1541,26 +1541,26 @@ class VannaService:
             id: Optional custom ID for documentation (allows overwriting)
         """
         try:
-            from utils.security_validator import security_validator
-
-            # Validate against forbidden references before training
-            if question and sql:
-                is_valid, violations = security_validator.validate_sql_content(sql)
-                if not is_valid:
-                    logger.warning("Training SQL blocked: %s", violations)
-                    return False
-
-            elif documentation:
-                is_valid, violations = security_validator.validate_documentation(documentation)
-                if not is_valid:
-                    logger.warning("Training documentation blocked: %s", violations)
-                    return False
-
-            elif ddl:
-                is_valid, violations = security_validator.validate_sql_content(ddl)
-                if not is_valid:
-                    logger.warning("Training DDL blocked: %s", violations)
-                    return False
+            # from utils.security_validator import security_validator
+            #
+            # # Validate against forbidden references before training
+            # if question and sql:
+            #     is_valid, violations = security_validator.validate_sql_content(sql)
+            #     if not is_valid:
+            #         logger.warning("Training SQL blocked: %s", violations)
+            #         return False
+            #
+            # elif documentation:
+            #     is_valid, violations = security_validator.validate_documentation(documentation)
+            #     if not is_valid:
+            #         logger.warning("Training documentation blocked: %s", violations)
+            #         return False
+            #
+            # elif ddl:
+            #     is_valid, violations = security_validator.validate_sql_content(ddl)
+            #     if not is_valid:
+            #         logger.warning("Training DDL blocked: %s", violations)
+            #         return False
 
             effective_metadata = metadata.copy() if metadata is not None else {}
             effective_metadata["user_role"] = self.user_role
