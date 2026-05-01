@@ -1,5 +1,6 @@
 import sys
 
+import pandas as pd
 import streamlit as st
 
 
@@ -32,8 +33,21 @@ def test_thriveai_ollama_uses_temperature_in_options(monkeypatch):
     # Lazy import under test to use patched module
     from utils.thriveai_ollama import ThriveAI_Ollama
 
+    # ThriveAI_Ollama is a mixin that doesn't implement vector store abstract methods
+    # from VannaBase. Create a subclass with stubbed vector store methods for testing.
+    class StubbedThriveAIOllama(ThriveAI_Ollama):
+        def add_ddl(self, ddl, **kwargs): pass
+        def add_documentation(self, documentation, **kwargs): pass
+        def add_question_sql(self, question, sql, **kwargs): pass
+        def generate_embedding(self, data, **kwargs): return []
+        def get_related_ddl(self, question, **kwargs): return []
+        def get_related_documentation(self, question, **kwargs): return []
+        def get_similar_question_sql(self, question, **kwargs): return []
+        def get_training_data(self, **kwargs): return pd.DataFrame()
+        def remove_training_data(self, id, **kwargs): return True
+
     # Act: instantiate with temperature in options and call submit_prompt
-    inst = ThriveAI_Ollama(
+    inst = StubbedThriveAIOllama(
         config={"model": "llama3", "ollama_host": "http://localhost:11434", "options": {"temperature": 0.5}}
     )
     prompt = [inst.system_message("sys"), inst.user_message("hello")]
