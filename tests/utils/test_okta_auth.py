@@ -176,9 +176,7 @@ def test_sync_okta_user_to_db_matches_existing_by_sub(in_memory_orm_session):
 
         # Same sub, but the email has changed at the IdP. We still match
         # by sub and accept the new email on the row.
-        updated = sync_okta_user_to_db(
-            _claims(email="alice.new@example.com"), session
-        )
+        updated = sync_okta_user_to_db(_claims(email="alice.new@example.com"), session)
 
         assert updated.id == first_id
         assert updated.email == "alice.new@example.com"
@@ -211,9 +209,7 @@ def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_
         # Now Alice logs in. Her group claim says doctor, but admin pre-set
         # her role. Per spec §6, Okta is source of truth for OIDC users —
         # her role gets refreshed from the claim on every login.
-        user = sync_okta_user_to_db(
-            _claims(groups=["thriveai-doctor"]), session
-        )
+        user = sync_okta_user_to_db(_claims(groups=["thriveai-doctor"]), session)
 
         assert user.id == pre_id
         assert user.okta_sub == "okta-sub-1"  # sub now stamped onto pre row
@@ -309,19 +305,21 @@ def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_se
     login_mock = MagicMock()
     stop_mock = MagicMock(side_effect=SystemExit)
 
-    with patch("streamlit.user", fake_user), \
-         patch("streamlit.button", button_mock), \
-         patch("streamlit.login", login_mock), \
-         patch("streamlit.stop", stop_mock), \
-         patch("streamlit.title"), \
-         patch("streamlit.markdown"):
+    with (
+        patch("streamlit.user", fake_user),
+        patch("streamlit.button", button_mock),
+        patch("streamlit.login", login_mock),
+        patch("streamlit.stop", stop_mock),
+        patch("streamlit.title"),
+        patch("streamlit.markdown"),
+    ):
         try:
             handle_oidc_auth()
         except SystemExit:
             pass
 
     button_mock.assert_called_once()  # SSO button rendered
-    login_mock.assert_not_called()    # not clicked yet
+    login_mock.assert_not_called()  # not clicked yet
     stop_mock.assert_called_once()
 
 
@@ -337,12 +335,14 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
     button_mock = MagicMock(return_value=True)
     login_mock = MagicMock()
 
-    with patch("streamlit.user", fake_user), \
-         patch("streamlit.button", button_mock), \
-         patch("streamlit.login", login_mock), \
-         patch("streamlit.stop", MagicMock(side_effect=SystemExit)), \
-         patch("streamlit.title"), \
-         patch("streamlit.markdown"):
+    with (
+        patch("streamlit.user", fake_user),
+        patch("streamlit.button", button_mock),
+        patch("streamlit.login", login_mock),
+        patch("streamlit.stop", MagicMock(side_effect=SystemExit)),
+        patch("streamlit.title"),
+        patch("streamlit.markdown"),
+    ):
         try:
             handle_oidc_auth()
         except SystemExit:
@@ -389,12 +389,14 @@ def test_handle_oidc_auth_when_logged_in_runs_sync_and_populates_state(
 
     button_mock = MagicMock(return_value=False)  # logout not clicked
 
-    with patch("streamlit.user", fake_user), \
-         patch("streamlit.session_state", fake_session_state), \
-         patch("streamlit.sidebar", sidebar_mock), \
-         patch("streamlit.title"), \
-         patch("streamlit.button", button_mock), \
-         patch("orm.functions.set_user_preferences_in_session_state", MagicMock()):
+    with (
+        patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.sidebar", sidebar_mock),
+        patch("streamlit.title"),
+        patch("streamlit.button", button_mock),
+        patch("orm.functions.set_user_preferences_in_session_state", MagicMock()),
+    ):
         from utils.okta_auth import handle_oidc_auth
 
         handle_oidc_auth()
@@ -433,13 +435,15 @@ def test_handle_oidc_auth_logout_button_calls_handle_oidc_logout(in_memory_orm_s
     button_mock = MagicMock(return_value=True)  # user clicked Log Out
     logout_mock = MagicMock()
 
-    with patch("streamlit.user", fake_user), \
-         patch("streamlit.session_state", fake_session_state), \
-         patch("streamlit.sidebar", sidebar_mock), \
-         patch("streamlit.title"), \
-         patch("streamlit.button", button_mock), \
-         patch("utils.okta_auth.handle_oidc_logout", logout_mock), \
-         patch("orm.functions.set_user_preferences_in_session_state", MagicMock()):
+    with (
+        patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.sidebar", sidebar_mock),
+        patch("streamlit.title"),
+        patch("streamlit.button", button_mock),
+        patch("utils.okta_auth.handle_oidc_logout", logout_mock),
+        patch("orm.functions.set_user_preferences_in_session_state", MagicMock()),
+    ):
         from utils.okta_auth import handle_oidc_auth
 
         handle_oidc_auth()
@@ -459,17 +463,19 @@ def test_handle_oidc_logout_clears_state_and_calls_st_logout(in_memory_orm_sessi
         "selected_llm_model": "claude-3",
         "user_role": 1,
     }
-    fake_session_state["cookies"].get.return_value = '42'
+    fake_session_state["cookies"].get.return_value = "42"
 
     logout_mock = MagicMock()
     invalidate_mock = MagicMock()
     markdown_mock = MagicMock()
 
-    with patch("streamlit.session_state", fake_session_state), \
-         patch("streamlit.logout", logout_mock), \
-         patch("streamlit.markdown", markdown_mock), \
-         patch("streamlit.secrets", new={"auth": {"post_logout_redirect_url": "https://portal.example/"}}), \
-         patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", invalidate_mock):
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout", logout_mock),
+        patch("streamlit.markdown", markdown_mock),
+        patch("streamlit.secrets", new={"auth": {"post_logout_redirect_url": "https://portal.example/"}}),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", invalidate_mock),
+    ):
         from utils.okta_auth import handle_oidc_logout
 
         handle_oidc_logout()
@@ -481,8 +487,5 @@ def test_handle_oidc_logout_clears_state_and_calls_st_logout(in_memory_orm_sessi
     assert fake_session_state["selected_llm_provider"] is None
     assert fake_session_state["selected_llm_model"] is None
     # Redirect HTML was emitted before st.logout().
-    redirect_call_found = any(
-        "https://portal.example/" in str(call)
-        for call in markdown_mock.call_args_list
-    )
+    redirect_call_found = any("https://portal.example/" in str(call) for call in markdown_mock.call_args_list)
     assert redirect_call_found, "expected a redirect markdown to the post_logout_redirect_url"

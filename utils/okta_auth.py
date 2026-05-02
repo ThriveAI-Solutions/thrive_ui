@@ -48,9 +48,7 @@ def role_id_from_groups(groups: Iterable[str], session: SqlSession) -> int:
     if role is None:
         # Defensive: the four UserRole rows should always exist (seeded by
         # orm.models.seed_initial_data). If they're missing, log and fall back.
-        logger.error(
-            "UserRole row for %s not found; falling back to first available role", chosen
-        )
+        logger.error("UserRole row for %s not found; falling back to first available role", chosen)
         role = session.query(UserRole).first()
         if role is None:
             raise RuntimeError("No UserRole rows seeded — DB is uninitialized")
@@ -98,19 +96,15 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
 
     # 2. Bootstrap match by email (case-insensitive) and stamp sub.
     if user is None and email:
-        user = (
-            session.query(User)
-            .filter(func.lower(User.email) == email.lower())
-            .one_or_none()
-        )
+        user = session.query(User).filter(func.lower(User.email) == email.lower()).one_or_none()
         if user is not None:
             user.okta_sub = sub
 
     # 3. JIT-create.
     if user is None:
         user = User(
-            username=email or sub,         # admin can rename later
-            password=None,                 # OIDC-only user
+            username=email or sub,  # admin can rename later
+            password=None,  # OIDC-only user
             email=email or None,
             okta_sub=sub,
             first_name=given_name,
@@ -191,14 +185,18 @@ def handle_oidc_auth() -> None:
         return  # for tests where st.stop is mocked
 
     # Logged in. Materialize claims and sync.
-    claims = st.user.to_dict() if hasattr(st.user, "to_dict") else {
-        "sub": getattr(st.user, "sub", None),
-        "email": getattr(st.user, "email", None),
-        "email_verified": getattr(st.user, "email_verified", None),
-        "given_name": getattr(st.user, "given_name", ""),
-        "family_name": getattr(st.user, "family_name", ""),
-        "groups": getattr(st.user, "groups", []),
-    }
+    claims = (
+        st.user.to_dict()
+        if hasattr(st.user, "to_dict")
+        else {
+            "sub": getattr(st.user, "sub", None),
+            "email": getattr(st.user, "email", None),
+            "email_verified": getattr(st.user, "email_verified", None),
+            "given_name": getattr(st.user, "given_name", ""),
+            "family_name": getattr(st.user, "family_name", ""),
+            "groups": getattr(st.user, "groups", []),
+        }
+    )
 
     from orm.models import SessionLocal
 
@@ -285,11 +283,7 @@ def handle_oidc_logout() -> None:
         logger.warning("Failed to clear mirrored cookies on OIDC logout: %s", exc)
 
     # 4. Emit a meta-refresh redirect to the post-logout URL.
-    redirect_url = (
-        st.secrets.get("auth", {}).get("post_logout_redirect_url")
-        if hasattr(st, "secrets")
-        else None
-    )
+    redirect_url = st.secrets.get("auth", {}).get("post_logout_redirect_url") if hasattr(st, "secrets") else None
     if redirect_url:
         st.markdown(
             f'<meta http-equiv="refresh" content="0; url={redirect_url}">',
