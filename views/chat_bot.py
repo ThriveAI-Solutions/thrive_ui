@@ -145,7 +145,7 @@ with st.sidebar.expander("🤖 LLM Selection", expanded=False):
             )
 
             # Apply button
-            if st.button("Apply LLM Selection", type="primary", use_container_width=True):
+            if st.button("Apply LLM Selection", type="primary", width="stretch"):
                 # Update session state
                 st.session_state.selected_llm_provider = selected_provider_id
                 st.session_state.selected_llm_model = selected_model_id
@@ -245,7 +245,7 @@ with st.sidebar.expander("Settings"):
         )
 
         # Form submit button - updates all settings at once
-        if st.form_submit_button("Save", use_container_width=True):
+        if st.form_submit_button("Save", width="stretch"):
             # Update session state directly from form values
             st.session_state.show_sql = form_show_sql
             st.session_state.show_table = form_show_table
@@ -263,10 +263,10 @@ with st.sidebar.expander("Settings"):
             save_user_settings()
             st.toast("Settings saved!")
 
-st.sidebar.button("Clear", on_click=lambda: set_question(None), use_container_width=True, type="primary")
+st.sidebar.button("Clear", on_click=lambda: set_question(None), width="stretch", type="primary")
 
 # Community Engagement CSV Upload
-with st.sidebar.popover("📊 Community Engagement", use_container_width=True):
+with st.sidebar.popover("📊 Community Engagement", width="stretch"):
     st.markdown("**Upload a CSV file with questions**")
     st.caption("CSV should have a 'question' column")
 
@@ -278,7 +278,7 @@ with st.sidebar.popover("📊 Community Engagement", use_container_width=True):
     )
 
     if uploaded_file is not None:
-        if st.button("Load Questions", use_container_width=True, type="primary"):
+        if st.button("Load Questions", width="stretch", type="primary"):
             load_community_questions(uploaded_file)
             st.rerun()
 
@@ -299,9 +299,7 @@ if st.session_state.get("community_questions"):
         community_questions = st.session_state.get("community_questions", [])
 
         # Add "Ask All Questions" button at the top
-        if st.button(
-            "🚀 Ask All Questions", use_container_width=True, type="primary", key="ask_all_community_questions"
-        ):
+        if st.button("🚀 Ask All Questions", width="stretch", type="primary", key="ask_all_community_questions"):
             st.session_state.processing_community_questions = True
             st.session_state.community_question_index = 0
             set_question(community_questions[0], False)
@@ -314,12 +312,12 @@ if st.session_state.get("community_questions"):
                 on_click=set_question,
                 args=(question, False),
                 key=f"community_question_{idx}",
-                use_container_width=True,
+                width="stretch",
             )
 
 if st.session_state.get("voice_input", True):
-    with st.sidebar.popover("🎤 Speak Your Question", use_container_width=True):
-        if st.button("Listen", use_container_width=True):
+    with st.sidebar.popover("🎤 Speak Your Question", width="stretch"):
+        if st.button("Listen", width="stretch"):
             text = listen()
             if text:
                 st.toast(f"Recognized text: {text}")
@@ -330,7 +328,7 @@ if st.session_state.get("voice_input", True):
 
 # Show suggested questions
 if st.session_state.get("show_suggested", True):
-    with st.sidebar.popover("Click to show suggested questions", use_container_width=True):
+    with st.sidebar.popover("Click to show suggested questions", width="stretch"):
         questions = get_vn().generate_questions()
         for i, question in enumerate(questions):
             st.button(
@@ -338,7 +336,7 @@ if st.session_state.get("show_suggested", True):
                 on_click=set_question,
                 args=(question, False),
                 key=f"suggested_question_{i}",
-                use_container_width=True,
+                width="stretch",
             )
 
 # Display questions history in sidebar
@@ -352,7 +350,7 @@ if st.session_state.get("show_question_history", True):
                 past_question.content,
                 on_click=set_question,
                 args=(past_question.content,),
-                use_container_width=True,
+                width="stretch",
             )
     else:
         st.sidebar.text("No questions asked yet")

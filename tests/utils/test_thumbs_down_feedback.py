@@ -90,10 +90,12 @@ class TestSetFeedbackWithComment:
 
         set_feedback(0, "down", "Wrong results returned")
 
-        mock_remove.assert_called_once_with({
-            "question": "How many patients?",
-            "query": "SELECT COUNT(*) FROM patients",
-        })
+        mock_remove.assert_called_once_with(
+            {
+                "question": "How many patients?",
+                "query": "SELECT COUNT(*) FROM patients",
+            }
+        )
 
 
 class TestFeedbackCategories:

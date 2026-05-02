@@ -122,10 +122,18 @@ class User(Base):
     __tablename__ = "thrive_user"
     id = Column(Integer, primary_key=True)
     user_role_id = Column(Integer, ForeignKey("thrive_user_role.id"))
-    username = Column(String(50), nullable=False, unique=True)
+    # 320 aligns with email max length for OIDC JIT users (username defaults to email or sub).
+    username = Column(String(320), nullable=False, unique=True)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
+    # OIDC-only users store a reserved non-hash sentinel here so legacy SQLite
+    # databases with NOT NULL password constraints can JIT-provision them.
     password = Column(String(255), nullable=False)
+    # OIDC fields (NULL for local-only users; populated for users who
+    # authenticate via Okta SSO). See
+    # docs/superpowers/specs/2026-05-01-okta-oidc-integration-design.md §5.
+    okta_sub = Column(String(255), nullable=True, unique=True)
+    email = Column(String(320, collation="NOCASE"), nullable=True, unique=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     show_sql = Column(Boolean, default=True)

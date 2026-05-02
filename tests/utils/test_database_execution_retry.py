@@ -120,13 +120,15 @@ class _MockVNWithDatabaseError:
         user_feedback=None,
     ):
         """Track retry calls and return a modified SQL."""
-        self._retry_calls.append({
-            "question": question,
-            "failed_sql": failed_sql,
-            "error_message": error_message,
-            "attempt_number": attempt_number,
-            "user_feedback": user_feedback,
-        })
+        self._retry_calls.append(
+            {
+                "question": question,
+                "failed_sql": failed_sql,
+                "error_message": error_message,
+                "attempt_number": attempt_number,
+                "user_feedback": user_feedback,
+            }
+        )
         return (f"SELECT * FROM patients /* retry attempt {attempt_number} */", 0.01)
 
     def run_sql(self, sql: str):
@@ -168,7 +170,7 @@ class TestDatabaseExecutionRetry:
         # Create mock that fails twice then succeeds on third attempt
         # Use a recoverable error (type mismatch is not in NON_RECOVERABLE_ERROR_PATTERNS)
         vn = _MockVNWithDatabaseError(
-            error_message='type mismatch in comparison',
+            error_message="type mismatch in comparison",
             fail_count=2,  # Fail first 2 attempts
             fake_st=fake_st,
         )
@@ -182,7 +184,7 @@ class TestDatabaseExecutionRetry:
 
         # First retry should have received error context
         first_retry = vn._retry_calls[0]
-        assert first_retry["error_message"] == 'type mismatch in comparison'
+        assert first_retry["error_message"] == "type mismatch in comparison"
         assert first_retry["failed_sql"] is not None
         assert "SELECT" in first_retry["failed_sql"]
         assert first_retry["attempt_number"] == 2
@@ -197,7 +199,7 @@ class TestDatabaseExecutionRetry:
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         # Use a recoverable error (division by zero is not in NON_RECOVERABLE_ERROR_PATTERNS)
-        error_msg = 'division by zero'
+        error_msg = "division by zero"
         vn = _MockVNWithDatabaseError(error_message=error_msg, fail_count=2, fake_st=fake_st)
         monkeypatch.setattr(cbh, "get_vn", lambda: vn)
 
@@ -292,14 +294,17 @@ class TestDatabaseExecutionRetry:
 class TestNonRecoverableErrors:
     """Test that non-recoverable errors skip the retry loop."""
 
-    @pytest.mark.parametrize("error_pattern", [
-        # These are truly non-recoverable - no point retrying
-        "permission denied for table users",
-        "access denied",
-        "authentication failed",
-        'database "nope" does not exist',
-        'schema "missing" does not exist',
-    ])
+    @pytest.mark.parametrize(
+        "error_pattern",
+        [
+            # These are truly non-recoverable - no point retrying
+            "permission denied for table users",
+            "access denied",
+            "authentication failed",
+            'database "nope" does not exist',
+            'schema "missing" does not exist',
+        ],
+    )
     def test_non_recoverable_error_skips_retry(self, error_pattern, monkeypatch):
         """Test that non-recoverable errors skip the auto-retry loop."""
         import utils.chat_bot_helper as cbh
@@ -326,16 +331,18 @@ class TestNonRecoverableErrors:
         # For non-recoverable errors, retry should NOT be called
         # The first run_sql fails and is detected as non-recoverable
         assert len(vn._retry_calls) == 0, (
-            f"Non-recoverable error '{error_pattern}' should skip retries, "
-            f"but got {len(vn._retry_calls)} retry calls"
+            f"Non-recoverable error '{error_pattern}' should skip retries, but got {len(vn._retry_calls)} retry calls"
         )
 
-    @pytest.mark.parametrize("error_pattern", [
-        # These ARE recoverable - LLM may have hallucinated names and can try alternatives
-        'relation "missing_table" does not exist',
-        'table "missing" does not exist',
-        'column "bad_col" does not exist',
-    ])
+    @pytest.mark.parametrize(
+        "error_pattern",
+        [
+            # These ARE recoverable - LLM may have hallucinated names and can try alternatives
+            'relation "missing_table" does not exist',
+            'table "missing" does not exist',
+            'column "bad_col" does not exist',
+        ],
+    )
     def test_missing_object_errors_trigger_retry(self, error_pattern, monkeypatch):
         """Test that missing table/column errors DO trigger retry (LLM can try alternatives)."""
         import utils.chat_bot_helper as cbh
@@ -445,6 +452,7 @@ class TestVannaServiceRunSql:
         # Create a VannaService with mocked vn
         with patch.object(VannaService, "_setup_vanna"):
             from utils.vanna_calls import UserContext
+
             service = VannaService.__new__(VannaService)
             service.vn = MagicMock()
             service.vn.run_sql.side_effect = Exception("Connection refused")
@@ -480,6 +488,7 @@ class TestVannaServiceRunSql:
 
         with patch.object(VannaService, "_setup_vanna"):
             from utils.vanna_calls import UserContext
+
             service = VannaService.__new__(VannaService)
             service.vn = MagicMock()
             service.vn.run_sql.return_value = pd.DataFrame({"col": [1]})

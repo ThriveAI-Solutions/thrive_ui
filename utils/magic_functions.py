@@ -1,36 +1,38 @@
 import difflib
-from io import StringIO
 import random
 import re
-import streamlit as st
-from PIL import Image
+import time
+from io import StringIO
+
 import numpy as np
 import pandas as pd
-import time
 import plotly.express as px
 import plotly.graph_objects as go
+import streamlit as st
+from PIL import Image
 from plotly.subplots import make_subplots
-from wordcloud import WordCloud
 from scipy import stats
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
+from sklearn.preprocessing import StandardScaler
+from wordcloud import WordCloud
+
 from orm.models import Message, SessionLocal
 from utils.chat_bot_helper import (
+    add_acknowledgement,
     add_message,
-    set_question,
+    get_current_group_id,
     get_vn,
     normal_message_flow,
-    add_acknowledgement,
-    get_current_group_id,
+    set_question,
 )
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import (
+    get_configured_object_type,
+    get_configured_schema,
     read_forbidden_from_json,
     run_sql_cached,
-    get_configured_schema,
-    get_configured_object_type,
 )
 
 unwanted_words = {"y", "n", "none", "unknown", "yes", "no"}
@@ -1238,7 +1240,7 @@ def _generate_heatmap(question, tuple, previous_df):
         if len(numeric_df.columns) < 2:
             add_message(
                 Message(
-                    RoleType.ASSISTANT, f"Need at least 2 numeric columns for correlation heatmap", MessageType.ERROR
+                    RoleType.ASSISTANT, "Need at least 2 numeric columns for correlation heatmap", MessageType.ERROR
                 )
             )
             return
@@ -1518,13 +1520,13 @@ def _generate_pairplot(question, tuple, previous_df):
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
         if len(numeric_cols) < 2:
-            add_message(Message(RoleType.ASSISTANT, f"Need at least 2 numeric columns for pairplot", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "Need at least 2 numeric columns for pairplot", MessageType.ERROR))
             return
 
         # Limit to first 8 numeric columns for readability
         if len(numeric_cols) > 8:
             numeric_cols = numeric_cols[:8]
-            add_message(Message(RoleType.ASSISTANT, f"Showing first 8 numeric columns for clarity", MessageType.TEXT))
+            add_message(Message(RoleType.ASSISTANT, "Showing first 8 numeric columns for clarity", MessageType.TEXT))
 
         # Create enhanced scatter matrix
         fig = px.scatter_matrix(
@@ -2330,7 +2332,7 @@ def _boxplot_visualization(question, tuple, previous_df):
         outliers = data[(data < lower_fence) | (data > upper_fence)]
 
         # Add statistical annotations
-        stats_text = f"<b>Statistical Summary</b><br>"
+        stats_text = "<b>Statistical Summary</b><br>"
         stats_text += f"Count: {len(data):,}<br>"
         stats_text += f"Mean: {data.mean():.3f}<br>"
         stats_text += f"Median: {data.median():.3f}<br>"
@@ -2355,12 +2357,12 @@ def _boxplot_visualization(question, tuple, previous_df):
         )
 
         # Add interpretation guide
-        interpretation_text = f"<b>Interpretation Guide</b><br>"
-        interpretation_text += f"Box: Q1 to Q3 (middle 50%)<br>"
-        interpretation_text += f"Line: Median<br>"
-        interpretation_text += f"◊: Mean<br>"
-        interpretation_text += f"Whiskers: 1.5×IQR from box<br>"
-        interpretation_text += f"Red dots: Outliers"
+        interpretation_text = "<b>Interpretation Guide</b><br>"
+        interpretation_text += "Box: Q1 to Q3 (middle 50%)<br>"
+        interpretation_text += "Line: Median<br>"
+        interpretation_text += "◊: Mean<br>"
+        interpretation_text += "Whiskers: 1.5×IQR from box<br>"
+        interpretation_text += "Red dots: Outliers"
 
         fig.add_annotation(
             text=interpretation_text,
@@ -2432,7 +2434,7 @@ def _cluster_analysis(question, tuple, previous_df):
         numeric_df = df.select_dtypes(include=[np.number]).dropna()
 
         if numeric_df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No numeric columns found for clustering", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "No numeric columns found for clustering", MessageType.ERROR))
             return
 
         # Standardize the data
@@ -2553,11 +2555,11 @@ def _pca_analysis(question, tuple, previous_df):
         numeric_df = df.select_dtypes(include=[np.number]).dropna()
 
         if numeric_df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No numeric columns found for PCA", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "No numeric columns found for PCA", MessageType.ERROR))
             return
 
         if len(numeric_df.columns) < 2:
-            add_message(Message(RoleType.ASSISTANT, f"Need at least 2 numeric columns for PCA", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "Need at least 2 numeric columns for PCA", MessageType.ERROR))
             return
 
         # Standardize the data
@@ -2661,7 +2663,7 @@ def _confusion_matrix(question, tuple, previous_df):
                 return
 
         if df is None or df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No data found for confusion matrix analysis", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "No data found for confusion matrix analysis", MessageType.ERROR))
             return
 
         # Clean data
@@ -2669,7 +2671,7 @@ def _confusion_matrix(question, tuple, previous_df):
 
         if df_clean.empty:
             add_message(
-                Message(RoleType.ASSISTANT, f"No valid data found after removing null values", MessageType.ERROR)
+                Message(RoleType.ASSISTANT, "No valid data found after removing null values", MessageType.ERROR)
             )
             return
 
@@ -2677,7 +2679,7 @@ def _confusion_matrix(question, tuple, previous_df):
         y_pred = df_clean[pred_column]
 
         # Import confusion matrix from sklearn
-        from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+        from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
         # Calculate confusion matrix
         cm = confusion_matrix(y_true, y_pred)
@@ -2714,7 +2716,7 @@ def _confusion_matrix(question, tuple, previous_df):
 
         # Generate detailed analysis
         analysis = []
-        analysis.append(f"CONFUSION MATRIX ANALYSIS")
+        analysis.append("CONFUSION MATRIX ANALYSIS")
         analysis.append("=" * 40)
         analysis.append(f"Dataset: {table_name}")
         analysis.append(f"True Column: {true_column}")
@@ -3432,7 +3434,7 @@ def _correlation_analysis(question, tuple, previous_df):
         clean_df = df[[column1_name, column2_name]].dropna()
 
         if clean_df.empty:
-            add_message(Message(RoleType.ASSISTANT, f"No valid data found for correlation analysis", MessageType.ERROR))
+            add_message(Message(RoleType.ASSISTANT, "No valid data found for correlation analysis", MessageType.ERROR))
             return
 
         # Check if both columns are numeric
@@ -4373,21 +4375,21 @@ def _anomaly_detection(question, tuple, previous_df):
 
             # Show some example anomalies
             example_anomalies = list(all_anomalies)[:5]
-            report += f"\n\n**Example Anomalous Values:**"
+            report += "\n\n**Example Anomalous Values:**"
             for idx in example_anomalies:
                 if idx < len(data):
                     value = data.iloc[idx] if hasattr(data, "iloc") else data[idx]
                     report += f"\n• Index {idx}: {value:.4f}"
         else:
-            report += f"\n\n**No significant anomalies detected** by any method."
+            report += "\n\n**No significant anomalies detected** by any method."
 
-        report += f"\n\n**Recommendations:**"
+        report += "\n\n**Recommendations:**"
         if len(all_anomalies) / len(data) > 0.1:
             report += f"\n• High anomaly rate (>{len(all_anomalies) / len(data) * 100:.1f}%) - investigate data quality"
         if len(z_anomalies) != len(iqr_anomalies):
-            report += f"\n• Methods show different results - consider domain knowledge for validation"
-        report += f"\n• Use multiple methods for robust anomaly detection"
-        report += f"\n• Investigate flagged points for data entry errors or genuine outliers"
+            report += "\n• Methods show different results - consider domain knowledge for validation"
+        report += "\n• Use multiple methods for robust anomaly detection"
+        report += "\n• Investigate flagged points for data entry errors or genuine outliers"
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -4662,7 +4664,7 @@ def _smart_sample(question, tuple, previous_df):
                 best_score = overall_score
                 best_method = method_name
 
-        report += f"\n\n**Recommendation:**"
+        report += "\n\n**Recommendation:**"
         if best_method:
             report += f"\n• **Best method: {best_method}** (score: {best_score:.3f})"
             best_sample = sampling_methods[best_method]
@@ -4670,21 +4672,21 @@ def _smart_sample(question, tuple, previous_df):
 
             # Provide usage advice
             if "Stratified" in best_method:
-                report += f"\n• Maintains proportional representation across categories"
+                report += "\n• Maintains proportional representation across categories"
             elif "Balanced" in best_method:
-                report += f"\n• Provides balanced representation for imbalanced classes"
+                report += "\n• Provides balanced representation for imbalanced classes"
             elif "Cluster" in best_method:
-                report += f"\n• Captures data structure through clustering"
+                report += "\n• Captures data structure through clustering"
             elif best_method == "Systematic":
-                report += f"\n• Ensures even coverage across the dataset"
+                report += "\n• Ensures even coverage across the dataset"
             else:
-                report += f"\n• Simple random sampling provides unbiased selection"
+                report += "\n• Simple random sampling provides unbiased selection"
 
-        report += f"\n\n**Implementation Note:**"
-        report += f"\n• The recommended sample has been prepared and can be used for analysis"
-        report += f"\n• Consider your specific use case when choosing the sampling method"
-        report += f"\n• For ML training, stratified or balanced sampling often works best"
-        report += f"\n• For general analysis, systematic or simple random sampling is sufficient"
+        report += "\n\n**Implementation Note:**"
+        report += "\n• The recommended sample has been prepared and can be used for analysis"
+        report += "\n• Consider your specific use case when choosing the sampling method"
+        report += "\n• For ML training, stratified or balanced sampling often works best"
+        report += "\n• For general analysis, systematic or simple random sampling is sufficient"
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -4832,7 +4834,7 @@ def _transform_data(question, tuple, previous_df):
                         transformed_data, lambda_param = stats.boxcox(original_data)
                         transformations[f"Box-Cox (λ={lambda_param:.3f})"] = transformed_data
                         transformation_info[f"Box-Cox (λ={lambda_param:.3f})"] = (
-                            f"Box-Cox transformation optimized for normality"
+                            "Box-Cox transformation optimized for normality"
                         )
                 except ImportError:
                     transformations["Box-Cox (unavailable)"] = original_data
@@ -5033,26 +5035,26 @@ def _transform_data(question, tuple, previous_df):
                         report += " ⚠️ (No improvement)"
 
             # Provide usage recommendations
-            report += f"\n\n**Recommendations:**"
+            report += "\n\n**Recommendations:**"
             transform_desc = transformation_info.get(main_transform_name, "")
             if transform_desc:
                 report += f"\n• {transform_desc}"
 
             if is_numeric:
                 if abs(original_data.skew()) > 1:
-                    report += f"\n• Original data is highly skewed - transformation recommended"
+                    report += "\n• Original data is highly skewed - transformation recommended"
                 if main_transform_name.startswith("Log") and (original_data <= 0).any():
-                    report += f"\n• ⚠️ Log transformation requires positive values - consider log1p instead"
+                    report += "\n• ⚠️ Log transformation requires positive values - consider log1p instead"
                 if "normalize" in operation.lower():
-                    report += f"\n• Normalization is useful for machine learning algorithms"
+                    report += "\n• Normalization is useful for machine learning algorithms"
 
             # Create result DataFrame with transformed column
             result_df = df.copy()
             result_df[f"{column_name}_transformed"] = main_transformed
 
-            report += f"\n\n**Result:**"
+            report += "\n\n**Result:**"
             report += f"\n• Added column: '{column_name}_transformed'"
-            report += f"\n• Use this transformed data for further analysis"
+            report += "\n• Use this transformed data for further analysis"
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -5697,12 +5699,12 @@ def show_magic_confirmation_dialog(result, question: str):
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Execute", type="primary", use_container_width=True):
+        if st.button("Execute", type="primary", width="stretch"):
             st.session_state["semantic_magic_confirmed"] = True
             st.session_state["semantic_magic_result"] = result
             st.rerun()
     with col2:
-        if st.button("Cancel", use_container_width=True):
+        if st.button("Cancel", width="stretch"):
             st.session_state["semantic_magic_confirmed"] = False
             st.session_state["semantic_magic_result"] = None
             st.rerun()
@@ -5728,16 +5730,16 @@ def show_magic_suggestion_dialog(result, question: str):
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("Yes, run it", type="primary", use_container_width=True):
+        if st.button("Yes, run it", type="primary", width="stretch"):
             st.session_state["semantic_magic_confirmed"] = True
             st.session_state["semantic_magic_result"] = result
             st.rerun()
     with col2:
-        if st.button("No, search data", use_container_width=True):
+        if st.button("No, search data", width="stretch"):
             st.session_state["semantic_magic_confirmed"] = False
             st.session_state["semantic_magic_result"] = None
             st.rerun()
     with col3:
-        if st.button("Show /help", use_container_width=True):
+        if st.button("Show /help", width="stretch"):
             st.session_state["semantic_magic_confirmed"] = "help"
             st.rerun()

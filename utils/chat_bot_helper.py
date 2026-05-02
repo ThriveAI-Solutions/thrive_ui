@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 import time
 import uuid
 from io import StringIO
@@ -16,7 +17,6 @@ from orm.models import Message
 from utils.communicate import speak
 from utils.enums import MessageType, RoleType
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -705,7 +705,7 @@ def render_followup_button(group_id: str, messages: list = None):
     # Center the button using columns
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        with st.popover("Follow Up", use_container_width=True):
+        with st.popover("Follow Up", width="stretch"):
             st.markdown("**Quick Analysis Commands**")
             st.caption("Click to run on your query results")
 
@@ -721,7 +721,7 @@ def render_followup_button(group_id: str, messages: list = None):
                             label,
                             key=f"{button_key}_{cmd.replace(' ', '_')}",
                             help=description,
-                            use_container_width=True,
+                            width="stretch",
                         ):
                             # Execute the follow-up command
                             set_question(f"/followup {cmd}")
@@ -733,7 +733,7 @@ def render_followup_button(group_id: str, messages: list = None):
                     "Generate",
                     key=f"{button_key}_ai_questions",
                     help="AI-generated follow-up questions",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     # Parse the DataFrame from the summary message
                     my_df = (
@@ -881,7 +881,7 @@ def _render_dataframe(message: Message, index: int):
 def _render_summary_actions_popover(message: Message, index: int, my_df: pd.DataFrame):
     # Helper for the popover content within summary messages
     # Note: "Follow-up Questions" has been moved to the Follow Up popover (render_followup_button)
-    with st.popover("Actions", use_container_width=True):
+    with st.popover("Actions", width="stretch"):
         st.button("Speak Summary", key=f"speak_summary_{message.id}", on_click=lambda: speak(message.content))
         if st.button("Generate Table", key=f"table_{message.id}"):
             # Ensure DataFrame is converted to JSON string for the Message constructor if it expects that
@@ -980,7 +980,7 @@ def _render_thumbs_down_feedback(message: Message, index: int):
     # Show different icon if feedback was already submitted
     icon = "👎" if message.feedback != "down" else "👎✓"
 
-    with st.popover(icon, use_container_width=False):
+    with st.popover(icon, width="content"):
         if message.feedback == "down" and message.feedback_comment:
             st.info(f"Previous feedback: {message.feedback_comment}")
 
@@ -1009,7 +1009,7 @@ def _render_thumbs_down_feedback(message: Message, index: int):
                 "Submit",
                 key=f"submit_feedback_{message.id}",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=not category_selected,
             ):
                 # Combine category and comment
@@ -1017,7 +1017,7 @@ def _render_thumbs_down_feedback(message: Message, index: int):
                 set_feedback(index, "down", full_comment)
                 st.rerun()
         with btn_cols[1]:
-            if st.button("Skip", key=f"skip_feedback_{message.id}", use_container_width=True):
+            if st.button("Skip", key=f"skip_feedback_{message.id}", width="stretch"):
                 set_feedback(index, "down")
                 st.rerun()
 
@@ -1078,7 +1078,7 @@ def _render_followup(message: Message, index: int):
                     on_click=set_question,
                     args=(question_value,),
                     key=generate_guid(),
-                    use_container_width=True,
+                    width="stretch",
                 )
             # Optionally, add an else to log/warn about non-string items if expected.
 

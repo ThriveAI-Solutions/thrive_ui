@@ -437,7 +437,7 @@ def main() -> None:
                     st.markdown("**Data Results:**")
                     try:
                         df = pd.read_json(StringIO(item.dataframe_json), orient="records")
-                        st.dataframe(df, use_container_width=True)
+                        st.dataframe(df, width="stretch")
                     except (ValueError, TypeError) as e:
                         logger.debug("Unable to parse dataframe JSON for message %s: %s", item.id, e)
                         st.caption("Unable to display dataframe")
