@@ -363,8 +363,8 @@ with tab1:
                 else:
                     st.error("Current password is incorrect.")
 
-with tab2:
-    if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
+if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
+    with tab2:
         cols = st.columns((0.15, 0.20, 0.15, 0.15, 0.15, 0.25, 0.15, 0.15))
         with cols[0]:
             st.button("Train DDL", on_click=train_ddl)
