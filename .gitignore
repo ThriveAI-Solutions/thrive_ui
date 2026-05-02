@@ -211,3 +211,6 @@ documentation/
 # Issue tracking (bd) and scratchpads
 .beads/
 scratchpads/
+
+# superpowers
+/docs/superpowers/
