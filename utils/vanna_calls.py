@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 import time
 from dataclasses import dataclass
@@ -23,9 +22,10 @@ from vanna.legacy.vannadb import VannaDB_VectorStore
 
 from utils.chromadb_vector import ThriveAI_ChromaDB
 from utils.milvus_vector import ThriveAI_Milvus
+from utils.quick_logger import calculate_process_performance, get_logger, pvlog, set_start_time
 from utils.thriveai_ollama import ThriveAI_Ollama
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _get_user_id_from_session() -> int | None:
@@ -2338,12 +2338,12 @@ def remove_from_file_training(new_entry: dict):
             with training_file_path.open("w") as file:
                 json.dump(training_data, file, indent=4)
 
-            logging.info("Entry removed from training_data.json")
+            pvlog("info", "Entry removed from training_data.json", logger=logger)
         else:
-            logging.warning("Entry not found, nothing removed from training_data.json")
+            pvlog("warning", "Entry not found, nothing removed from training_data.json", logger=logger)
     except Exception as e:
         st.error(f"Error removing entry from training_data.json: {e}")
-        logging.exception("Error removing entry from training_data.json: %s", e)
+        logger.exception("Error removing entry from training_data.json: %s", e)
 
 
 def write_to_file_and_training(new_entry: dict):
@@ -2368,9 +2368,9 @@ def write_to_file_and_training(new_entry: dict):
             with training_file_path.open("w") as file:
                 json.dump(training_data, file, indent=4)
 
-            logging.info("New entry added to training_data.json")
+            pvlog("info", "New entry added to training_data.json", logger=logger)
         else:
-            logging.info("Duplicate entry found. No new entry added.")
+            pvlog("info", "Duplicate entry found. No new entry added.", logger=logger)
     except Exception as e:
         st.error(f"Error writing to training_data.json: {e}")
         logger.exception("%s", e)
@@ -3732,7 +3732,9 @@ def train_all():
     Provides st.status progress showing 4 sequential steps with elapsed time per step.
     """
     with st.status("Running full training pipeline...", expanded=True) as status:
+        perf_start = set_start_time()
         overall_start = time.perf_counter()
+        pvlog("info", "Step 1 - Starting full training pipeline", logger=logger, step=1)
 
         st.write("**Step 1/4:** Training DDL structures...")
         step_start = time.perf_counter()
@@ -3771,6 +3773,7 @@ def train_all():
             logger.exception("train_all step 4 (AI Docs) failed: %s", e)
 
         total_elapsed = time.perf_counter() - overall_start
+        calculate_process_performance("train_all", perf_start, logger=logger)
         status.update(label=f"Training pipeline complete! ({total_elapsed:.1f}s total)", state="complete")
 
 

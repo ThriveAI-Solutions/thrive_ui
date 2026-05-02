@@ -8,7 +8,6 @@ This module provides functions to log:
 """
 
 import json
-import logging
 import traceback
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,8 +23,9 @@ from orm.models import (
     SessionLocal,
     UserActivity,
 )
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ============== LLM Context Logging ==============

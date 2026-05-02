@@ -1,6 +1,5 @@
 import hashlib
 import io
-import logging
 
 import pandas as pd
 import streamlit as st
@@ -35,9 +34,11 @@ user_role = st.session_state.get("user_role", RoleTypeEnum.PATIENT.value)
 # Don't get training data at module load time - get it when rendering the page
 # df = vn.get_training_data()
 
-logging.debug(f"{st.session_state.to_dict()=}")
+from utils.quick_logger import get_logger, pvlog
 
-logger = logging.getLogger(__name__)
+pvlog("debug", f"{st.session_state.to_dict()=}")
+
+logger = get_logger(__name__)
 
 
 def import_users():

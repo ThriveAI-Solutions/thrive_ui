@@ -1,6 +1,5 @@
 import enum
 import json
-import logging
 from decimal import Decimal
 
 import pandas as pd
@@ -11,8 +10,9 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
 from utils.enums import MessageType, RoleType, ThemeType
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Load database settings from st.secrets
 # db_settings = st.secrets["postgres"]

@@ -1,5 +1,4 @@
 import json
-import logging
 from typing import Any
 
 import pandas as pd
@@ -40,7 +39,9 @@ class _CoercingCollection:
         return getattr(self._underlying, item)
 
 
-logger = logging.getLogger(__name__)
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ThriveAI_ChromaDB(ChromaDB_VectorStore):

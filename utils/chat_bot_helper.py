@@ -1,7 +1,6 @@
 import ast
 import hashlib
 import json
-import logging
 import random
 import re
 import time
@@ -16,9 +15,10 @@ from orm.functions import save_user_settings, set_user_preferences_in_session_st
 from orm.models import Message
 from utils.communicate import speak
 from utils.enums import MessageType, RoleType
+from utils.quick_logger import get_logger
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Patterns for non-recoverable SQL errors that won't benefit from retries
 # Note: "relation/table/column does not exist" errors ARE retried because

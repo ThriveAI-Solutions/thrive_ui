@@ -1,5 +1,4 @@
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +7,9 @@ import pandas as pd
 from sklearn.feature_extraction.text import HashingVectorizer
 from vanna.legacy.utils import deterministic_uuid
 
-logger = logging.getLogger(__name__)
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ThriveAI_Milvus:

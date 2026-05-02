@@ -1,4 +1,3 @@
-import logging
 import time
 
 import pandas as pd
@@ -50,7 +49,9 @@ def load_community_questions(csv_file):
         st.error(f"Error loading CSV: {str(e)}")
 
 
-logger = logging.getLogger(__name__)
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 set_user_preferences_in_session_state()
 
@@ -156,11 +157,7 @@ with st.sidebar.expander("🤖 LLM Selection", expanded=False):
                 save_user_settings()
 
                 # Invalidate VannaService cache
-                import logging
-
                 from utils.vanna_calls import VannaService
-
-                logger = logging.getLogger(__name__)
                 user_id = st.session_state.cookies.get("user_id")
                 user_role = st.session_state.get("user_role")
                 if user_id and user_role is not None:

@@ -1,11 +1,11 @@
 """Ollama LLM provider with dynamic model discovery."""
 
-import logging
 import ollama
 from utils.llm_registry.base import LLMProvider
 from utils.llm_registry.models import LLMModelInfo, LLMProviderHealth
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OllamaProvider(LLMProvider):

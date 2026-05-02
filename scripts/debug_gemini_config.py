@@ -11,10 +11,13 @@ from pathlib import Path
 # Add the project root to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from utils.quick_logger import pvlog, set_speaking_log  # noqa: E402
+
 
 def setup_logging():
     """Setup basic logging."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    set_speaking_log(False)
 
 
 def check_secrets():

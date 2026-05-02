@@ -6,13 +6,14 @@ to determine if they map to magic commands.
 
 import hashlib
 import json
-import logging
 import re
 from dataclasses import dataclass, field
 
 import streamlit as st
 
-logger = logging.getLogger(__name__)
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass

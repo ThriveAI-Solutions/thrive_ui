@@ -1,6 +1,5 @@
 import datetime as dt
 import json
-import logging
 from enum import Enum
 from io import StringIO
 
@@ -10,9 +9,10 @@ from sqlalchemy import func, or_
 
 from orm.models import Message, RoleTypeEnum, SessionLocal, User
 from utils.enums import MessageType
+from utils.quick_logger import get_logger
 from utils.vanna_calls import write_to_file_and_training
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TrainingStatus(str, Enum):

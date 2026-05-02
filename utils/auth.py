@@ -1,12 +1,12 @@
-import logging
 from datetime import datetime, timedelta
 
 import streamlit as st
 
 import utils.okta_auth as okta_auth
 from orm.functions import set_user_preferences_in_session_state, verify_user_credentials
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def check_authenticate():

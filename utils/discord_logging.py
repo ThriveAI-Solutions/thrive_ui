@@ -108,9 +108,6 @@ def add_discord_handler_if_configured(logger: logging.Logger) -> None:
 
 def initialize_discord_logging_after_streamlit(username: str):
     """Call this function after Streamlit is fully initialized to ensure Discord logging works."""
-    # Get all existing loggers and add Discord handlers
-    import logging
-
     loggers_to_update = [logging.getLogger()]  # Start with root logger
 
     DiscordHandler.current_user = username

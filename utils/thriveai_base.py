@@ -1,8 +1,8 @@
-import logging
-
 from vanna.legacy.base import VannaBase
 
-logger = logging.getLogger(__name__)
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ThriveAI_Base(VannaBase):
