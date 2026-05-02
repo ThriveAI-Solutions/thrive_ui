@@ -66,7 +66,11 @@ def is_oidc_mode() -> bool:
     import streamlit as st
 
     auth_section = st.secrets.get("auth", {}) if hasattr(st, "secrets") else {}
-    if not isinstance(auth_section, dict):
+    # Streamlit's secrets sub-sections are an AttrDict-like Mapping, not a
+    # plain dict. Use duck typing (`.get`) rather than `isinstance(..., dict)`
+    # so we accept Streamlit's real type while still rejecting a string
+    # misconfiguration like `auth = "oidc"`.
+    if not hasattr(auth_section, "get"):
         return False
     return auth_section.get("mode") == "oidc"
 

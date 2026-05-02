@@ -142,6 +142,37 @@ def test_is_oidc_mode_returns_false_when_auth_section_is_not_a_dict():
         assert is_oidc_mode() is False
 
 
+def test_is_oidc_mode_accepts_mapping_like_secrets_sub_section():
+    """Streamlit's real secrets sub-section is a Mapping, not a dict.
+
+    Regression: an earlier defensive `isinstance(..., dict)` guard returned
+    False for Streamlit's actual Secrets/AttrDict object, which broke OIDC
+    mode at runtime even though `[auth].mode = "oidc"` was correctly set.
+    """
+    from collections.abc import Mapping
+    from unittest.mock import patch
+
+    from utils.okta_auth import is_oidc_mode
+
+    class FakeStreamlitSecretsSubsection(Mapping):
+        def __init__(self, data):
+            self._data = data
+
+        def __getitem__(self, key):
+            return self._data[key]
+
+        def __iter__(self):
+            return iter(self._data)
+
+        def __len__(self):
+            return len(self._data)
+
+    fake_top_level = {"auth": FakeStreamlitSecretsSubsection({"mode": "oidc"})}
+
+    with patch("streamlit.secrets", new=fake_top_level):
+        assert is_oidc_mode() is True
+
+
 def _claims(sub="okta-sub-1", email="alice@example.com", groups=None, **extra):
     """Build a fake OIDC claims dict (the shape st.user.to_dict() returns)."""
     base = {
