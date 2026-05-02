@@ -99,3 +99,33 @@ def test_role_id_from_groups_nurse_alone(in_memory_orm_session):
         nurse_role = session.query(UserRole).filter_by(role_name="Nurse").one()
 
     assert role_id == nurse_role.id
+
+
+def test_is_oidc_mode_returns_true_when_auth_mode_is_oidc():
+    """When [auth].mode = 'oidc', is_oidc_mode() returns True."""
+    from unittest.mock import patch
+
+    from utils.okta_auth import is_oidc_mode
+
+    with patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}):
+        assert is_oidc_mode() is True
+
+
+def test_is_oidc_mode_returns_false_when_auth_section_absent():
+    """No [auth] section → local mode."""
+    from unittest.mock import patch
+
+    from utils.okta_auth import is_oidc_mode
+
+    with patch("streamlit.secrets", new={}):
+        assert is_oidc_mode() is False
+
+
+def test_is_oidc_mode_returns_false_when_mode_is_local():
+    """[auth].mode = 'local' → local mode (explicit fallback)."""
+    from unittest.mock import patch
+
+    from utils.okta_auth import is_oidc_mode
+
+    with patch("streamlit.secrets", new={"auth": {"mode": "local"}}):
+        assert is_oidc_mode() is False

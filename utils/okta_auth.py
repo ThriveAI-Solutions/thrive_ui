@@ -55,3 +55,14 @@ def role_id_from_groups(groups: Iterable[str], session: SqlSession) -> int:
         if role is None:
             raise RuntimeError("No UserRole rows seeded — DB is uninitialized")
     return role.id
+
+
+def is_oidc_mode() -> bool:
+    """True iff secrets.toml has [auth].mode == 'oidc'.
+
+    Any other value, or a missing [auth] section, means local mode.
+    """
+    import streamlit as st
+
+    auth_section = st.secrets.get("auth", {}) if hasattr(st, "secrets") else {}
+    return auth_section.get("mode") == "oidc"
