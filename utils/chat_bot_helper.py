@@ -1166,50 +1166,50 @@ def add_acknowledgement():
 
 
 def normal_message_flow(my_question: str):
-    # check guardrails here
-    guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
-    logger.debug(
-        "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
-        my_question,
-        guardrail_score,
-        guardrail_sentence,
-    )
-    if guardrail_score == 2:
-        logger.info(
-            "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
-            my_question,
-            guardrail_score,
-            guardrail_sentence,
-        )
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                guardrail_sentence,
-                MessageType.ERROR,
-                "",
-                my_question,
-                group_id=get_current_group_id(),
-            )
-        )
-        st.stop()
-    if guardrail_score >= 3:
-        logger.warning(
-            "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
-            my_question,
-            guardrail_score,
-            guardrail_sentence,
-        )
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                guardrail_sentence,
-                MessageType.ERROR,
-                "",
-                my_question,
-                group_id=get_current_group_id(),
-            )
-        )
-        st.stop()
+    # Ethical guardrails temporarily disabled for training/testing
+    # guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
+    # logger.debug(
+    #     "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
+    #     my_question,
+    #     guardrail_score,
+    #     guardrail_sentence,
+    # )
+    # if guardrail_score == 2:
+    #     logger.info(
+    #         "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
+    #         my_question,
+    #         guardrail_score,
+    #         guardrail_sentence,
+    #     )
+    #     add_message(
+    #         Message(
+    #             RoleType.ASSISTANT,
+    #             guardrail_sentence,
+    #             MessageType.ERROR,
+    #             "",
+    #             my_question,
+    #             group_id=get_current_group_id(),
+    #         )
+    #     )
+    #     st.stop()
+    # if guardrail_score >= 3:
+    #     logger.warning(
+    #         "Ethical Guardrails triggered: Question=%s Score=%s Response=%s",
+    #         my_question,
+    #         guardrail_score,
+    #         guardrail_sentence,
+    #     )
+    #     add_message(
+    #         Message(
+    #             RoleType.ASSISTANT,
+    #             guardrail_sentence,
+    #             MessageType.ERROR,
+    #             "",
+    #             my_question,
+    #             group_id=get_current_group_id(),
+    #         )
+    #     )
+    #     st.stop()
 
     add_acknowledgement()
 

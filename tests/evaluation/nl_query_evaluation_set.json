@@ -1,0 +1,195 @@
+{
+    "metadata": {
+        "version": "1.0",
+        "created": "2026-04-23",
+        "description": "Natural language question evaluation set for Vanna text-to-SQL against the PostgreSQL dw schema (72.65.18.81:5469). Questions span easy/medium/hard/very-hard difficulty across the federated clinical data tables. Use this to score different training configurations by comparing generated SQL output against expected_sql and validating results match expected_result.",
+        "database": {
+            "host": "72.65.18.81",
+            "port": 5469,
+            "schema": "dw",
+            "dialect": "postgresql"
+        },
+        "scoring": {
+            "per_question": "1 point if the query returns the correct result (exact match on values, column order ignored). 0.5 partial credit if the SQL is semantically correct but returns slightly different formatting (e.g., rounding, column aliases).",
+            "total": "10 points maximum"
+        },
+        "tables_used": [
+            "internal_patient_profile_v",
+            "federated_encounters_v",
+            "federated_allergies_v",
+            "federated_vaccination_v",
+            "federated_adt_v",
+            "list_perform_only_patients_risk_report_v"
+        ]
+    },
+    "questions": [
+        {
+            "id": 1,
+            "difficulty": "easy",
+            "natural_language": "How many patients are in the system?",
+            "expected_sql": "SELECT COUNT(*) AS total_patients FROM dw.internal_patient_profile_v;",
+            "expected_result": {
+                "columns": ["total_patients"],
+                "rows": [[50000]]
+            },
+            "skills_tested": ["basic COUNT", "single table"],
+            "why_this_difficulty": "Simplest possible query -- a single count on one table with no filters."
+        },
+        {
+            "id": 2,
+            "difficulty": "easy",
+            "natural_language": "What are the most common allergies reported by patients?",
+            "expected_sql": "SELECT allergy, COUNT(*) AS allergy_count FROM dw.federated_allergies_v GROUP BY allergy ORDER BY allergy_count DESC LIMIT 10;",
+            "expected_result": {
+                "columns": ["allergy", "allergy_count"],
+                "rows": [
+                    ["Penicillin", 3905],
+                    ["NO KNOWN ALLERGIES", 2091],
+                    ["Sulfa drugs", 1456],
+                    ["Peanuts", 1008],
+                    ["Shellfish", 743],
+                    ["Aspirin", 542],
+                    ["Codeine", 493],
+                    ["Latex", 486]
+                ]
+            },
+            "skills_tested": ["GROUP BY", "ORDER BY", "LIMIT"],
+            "why_this_difficulty": "Standard aggregation with sorting. The model must pick the right table and column but the SQL pattern is straightforward."
+        },
+        {
+            "id": 3,
+            "difficulty": "medium",
+            "natural_language": "How many patient encounters happened at each location, and what percentage of total encounters does each location represent?",
+            "expected_sql": "SELECT location, COUNT(*) AS encounter_count, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS pct_of_total FROM dw.federated_encounters_v GROUP BY location ORDER BY encounter_count DESC;",
+            "expected_result": {
+                "columns": ["location", "encounter_count", "pct_of_total"],
+                "rows": [
+                    ["Main Office", 39282, 25.08],
+                    ["ECMC", 39166, 25.01],
+                    ["Kaleida Health System", 39092, 24.96],
+                    ["Erie County Med. Ctr.", 39054, 24.94]
+                ]
+            },
+            "skills_tested": ["GROUP BY", "percentage calculation", "window function OR subquery for total"],
+            "why_this_difficulty": "Requires computing both a count and a percentage of the grand total, which needs either a window function (SUM OVER) or a subquery."
+        },
+        {
+            "id": 4,
+            "difficulty": "medium",
+            "natural_language": "How many distinct patients received a COVID-19 vaccine?",
+            "expected_sql": "SELECT COUNT(DISTINCT patient_id) AS covid_vaccinated_patients FROM dw.federated_vaccination_v WHERE vaccine ILIKE '%COVID%' AND status = 'Administered';",
+            "expected_result": {
+                "columns": ["covid_vaccinated_patients"],
+                "rows": [[27357]]
+            },
+            "skills_tested": ["COUNT DISTINCT", "ILIKE partial match", "multiple WHERE conditions"],
+            "why_this_difficulty": "Requires understanding that COVID vaccines have varying names (needs ILIKE), that only 'Administered' status should count, and that patients should be deduplicated."
+        },
+        {
+            "id": 5,
+            "difficulty": "medium",
+            "natural_language": "What is the breakdown of allergy types and their severity levels?",
+            "expected_sql": "SELECT type, severity, COUNT(*) AS count FROM dw.federated_allergies_v GROUP BY type, severity ORDER BY type, count DESC;",
+            "expected_result": {
+                "columns": ["type", "severity", "count"],
+                "rows_note": "Multi-dimensional grouping. Key types: 'Drug allergy' (6396 total), 'Food allergy' (1751), 'Adverse Reaction' (486), None (2091). Severities: None, Moderate, Severe, Mild."
+            },
+            "skills_tested": ["multi-column GROUP BY", "two-dimensional aggregation"],
+            "why_this_difficulty": "Requires grouping by two categorical columns simultaneously and understanding the relationship between allergy type and severity."
+        },
+        {
+            "id": 6,
+            "difficulty": "hard",
+            "natural_language": "What is the average number of encounters per patient for each encounter type? Include the total encounters and unique patients for context.",
+            "expected_sql": "SELECT type, COUNT(*) AS total_encounters, COUNT(DISTINCT patient_id) AS unique_patients, ROUND(COUNT(*)::numeric / COUNT(DISTINCT patient_id), 2) AS avg_encounters_per_patient FROM dw.federated_encounters_v GROUP BY type ORDER BY avg_encounters_per_patient DESC;",
+            "expected_result": {
+                "columns": ["type", "total_encounters", "unique_patients", "avg_encounters_per_patient"],
+                "rows": [
+                    ["O", 117259, 42289, 2.77],
+                    ["E", 23643, 18008, 1.31],
+                    ["I", 15692, 13000, 1.21]
+                ]
+            },
+            "skills_tested": ["ratio of COUNT to COUNT DISTINCT", "numeric casting for division", "multiple aggregations in one query"],
+            "why_this_difficulty": "Requires computing a ratio between two different aggregation functions (total rows vs distinct patients), plus a type cast to avoid integer division."
+        },
+        {
+            "id": 7,
+            "difficulty": "hard",
+            "natural_language": "Which vaccines have the highest refusal rate? Only include vaccines with at least 100 total records.",
+            "expected_sql": "SELECT vaccine, COUNT(*) AS total_records, COUNT(CASE WHEN status = 'Refused' THEN 1 END) AS refused_count, ROUND(100.0 * COUNT(CASE WHEN status = 'Refused' THEN 1 END) / COUNT(*), 2) AS refusal_rate_pct FROM dw.federated_vaccination_v GROUP BY vaccine HAVING COUNT(*) >= 100 ORDER BY refusal_rate_pct DESC LIMIT 5;",
+            "expected_result": {
+                "columns": ["vaccine", "total_records", "refused_count", "refusal_rate_pct"],
+                "rows": [
+                    ["DTaP & Hib Immunization", 996, 38, 3.82],
+                    ["Pneumococcal conjugate PCV13", 5638, 190, 3.37],
+                    ["COVID-19 vaccine, mRNA, LNP-S, PF, 100 mcg", 46550, 1446, 3.11],
+                    ["Tdap", 34022, 1058, 3.11],
+                    ["Zoster (shingles) recombinant", 8436, 260, 3.08]
+                ]
+            },
+            "skills_tested": ["conditional aggregation (CASE inside COUNT)", "HAVING clause", "percentage calculation", "ORDER BY derived column"],
+            "why_this_difficulty": "Requires conditional counting with CASE, a HAVING filter on the aggregate, and computing a percentage -- all in one query. Tests whether the model understands the difference between WHERE and HAVING."
+        },
+        {
+            "id": 8,
+            "difficulty": "hard",
+            "natural_language": "How many patients are flagged as frail and have more than 5 chronic conditions?",
+            "expected_sql": "SELECT COUNT(*) AS frail_high_burden_patients FROM dw.list_perform_only_patients_risk_report_v WHERE frailty_flag = 'Y' AND chronic_condition_count::int > 5;",
+            "expected_result": {
+                "columns": ["frail_high_burden_patients"],
+                "rows": [[1727]]
+            },
+            "skills_tested": ["type casting (varchar to int)", "multiple WHERE conditions", "domain knowledge of risk table"],
+            "why_this_difficulty": "The chronic_condition_count column is stored as varchar, so the model must cast it to integer for numeric comparison. Also requires knowing which table holds risk/frailty data."
+        },
+        {
+            "id": 9,
+            "difficulty": "very_hard",
+            "natural_language": "For the top 10 cities by patient population, show the average number of chronic conditions per patient and the percentage of patients who are frail. Sort by average chronic conditions descending.",
+            "expected_sql": "SELECT p.city, COUNT(*) AS patient_count, ROUND(AVG(r.chronic_condition_count::numeric), 2) AS avg_chronic_conditions, ROUND(100.0 * COUNT(CASE WHEN r.frailty_flag = 'Y' THEN 1 END) / COUNT(*), 2) AS pct_frail FROM dw.internal_patient_profile_v p JOIN dw.list_perform_only_patients_risk_report_v r ON p.patient_id = r.patient_id WHERE p.city IN (SELECT city FROM dw.internal_patient_profile_v GROUP BY city ORDER BY COUNT(*) DESC LIMIT 10) GROUP BY p.city ORDER BY avg_chronic_conditions DESC;",
+            "expected_result": {
+                "columns": ["city", "patient_count", "avg_chronic_conditions", "pct_frail"],
+                "rows": [
+                    ["LANCASTER", 1922, 3.01, 50.31],
+                    ["HAMBURG", 1965, 2.99, 50.89],
+                    ["AMHERST", 4055, 2.97, 50.38],
+                    ["LEWISTON", 1946, 2.96, 52.06],
+                    ["BUFFALO", 7946, 2.95, 48.98],
+                    ["GETZVILLE", 1947, 2.95, 49.82],
+                    ["CHEEKTOWAGA", 3881, 2.94, 51.02],
+                    ["NIAGARA FALLS", 3782, 2.93, 50.03],
+                    ["EAST AURORA", 1939, 2.91, 49.92],
+                    ["ORCHARD PARK", 1958, 2.90, 51.28]
+                ]
+            },
+            "skills_tested": ["JOIN across two tables", "subquery for top-N filter", "type casting", "conditional aggregation", "percentage calculation", "multi-layer query"],
+            "why_this_difficulty": "Requires joining two tables, filtering by a subquery (top 10 cities), casting varchar to numeric, computing two different aggregations (AVG and conditional percentage), all in one query. Tests multi-table reasoning and complex aggregation."
+        },
+        {
+            "id": 10,
+            "difficulty": "very_hard",
+            "natural_language": "Show the yearly trend of emergency, inpatient, and outpatient ADT events. For each year and setting, show the event count and the year-over-year change as a percentage.",
+            "expected_sql": "WITH yearly AS (SELECT EXTRACT(YEAR FROM event_date)::int AS event_year, clean_setting, COUNT(*) AS event_count FROM dw.federated_adt_v WHERE event_date IS NOT NULL GROUP BY event_year, clean_setting) SELECT event_year, clean_setting, event_count, ROUND(100.0 * (event_count - LAG(event_count) OVER (PARTITION BY clean_setting ORDER BY event_year)) / LAG(event_count) OVER (PARTITION BY clean_setting ORDER BY event_year), 2) AS yoy_change_pct FROM yearly ORDER BY clean_setting, event_year;",
+            "expected_result": {
+                "columns": ["event_year", "clean_setting", "event_count", "yoy_change_pct"],
+                "rows": [
+                    [2022, "EMERGENCY", 2930, null],
+                    [2023, "EMERGENCY", 2965, 1.19],
+                    [2024, "EMERGENCY", 2956, -0.30],
+                    [2025, "EMERGENCY", 2987, 1.05],
+                    [2022, "INPATIENT", 2996, null],
+                    [2023, "INPATIENT", 2865, -4.37],
+                    [2024, "INPATIENT", 2803, -2.16],
+                    [2025, "INPATIENT", 2864, 2.18],
+                    [2022, "OUTPATIENT", 2942, null],
+                    [2023, "OUTPATIENT", 2923, -0.65],
+                    [2024, "OUTPATIENT", 2895, -0.96],
+                    [2025, "OUTPATIENT", 2847, -1.66]
+                ]
+            },
+            "skills_tested": ["CTE", "EXTRACT for date parts", "LAG window function", "PARTITION BY", "year-over-year percentage calculation", "NULL handling for first year"],
+            "why_this_difficulty": "Requires a CTE for readability, date extraction, and the LAG window function partitioned by setting to compute year-over-year changes. This is the most complex SQL pattern -- combining temporal analysis with window functions across categories."
+        }
+    ]
+}

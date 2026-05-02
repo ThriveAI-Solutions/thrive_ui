@@ -214,3 +214,6 @@ scratchpads/
 
 # superpowers
 /docs/superpowers/
+
+# Playwright MCP tooling
+.playwright-mcp/
