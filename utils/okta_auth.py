@@ -170,7 +170,32 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
             user.last_name = family_name
         user.user_role_id = target_role_id
 
-    session.commit()
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        session.commit()
+    except IntegrityError:
+        # Concurrent first-login winner stole the okta_sub or email — roll
+        # back and re-query for the now-existing row instead of crashing.
+        session.rollback()
+        user = session.query(User).filter(User.okta_sub == sub).one_or_none()
+        if user is None and email:
+            user = session.query(User).filter(func.lower(User.email) == email.lower()).one_or_none()
+        if user is None:
+            raise
+        logger.info("Recovered from JIT race for sub=%s — using existing row id=%s", sub, user.id)
+        # Apply the same per-login refresh the non-race path applies.
+        if email and user.email != email:
+            user.email = email
+        if given_name and user.first_name != given_name:
+            user.first_name = given_name
+        if family_name and user.last_name != family_name:
+            user.last_name = family_name
+        if not user.okta_sub:
+            user.okta_sub = sub
+        user.user_role_id = target_role_id
+        session.commit()
+
     session.refresh(user)
     # Force-load the role relationship so the caller can read user.role.
     _ = user.role

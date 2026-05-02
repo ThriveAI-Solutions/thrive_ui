@@ -344,6 +344,59 @@ def test_sync_okta_user_to_db_role_updates_on_subsequent_login(in_memory_orm_ses
         assert user.role.role == RoleTypeEnum.ADMIN
 
 
+def test_sync_okta_user_to_db_handles_jit_race_via_integrity_error(in_memory_orm_session):
+    """Concurrent first-login race: loser rolls back and re-queries instead of crashing.
+
+    Two reruns / browser tabs / processes can pass the okta_sub lookup at the same
+    time; one wins the unique-constraint race and the other must recover gracefully
+    by re-querying for the now-existing row.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from orm.models import User, UserRole
+    from utils.okta_auth import OIDC_PASSWORD_SENTINEL, sync_okta_user_to_db
+
+    SessionLocal = in_memory_orm_session
+
+    with SessionLocal() as losing_session:
+        original_commit = losing_session.commit
+        commit_calls = {"n": 0}
+
+        def racing_commit():
+            commit_calls["n"] += 1
+            if commit_calls["n"] == 1:
+                # Simulate a concurrent winner: insert the row out-of-band
+                # via a separate session, then raise the IntegrityError that
+                # the real DB would raise on our commit.
+                with SessionLocal() as winning_session:
+                    role = winning_session.query(UserRole).filter_by(role_name="Doctor").one()
+                    winning_session.add(
+                        User(
+                            username="alice-other",
+                            password=OIDC_PASSWORD_SENTINEL,
+                            email="alice@example.com",
+                            okta_sub="okta-sub-1",
+                            first_name="Alice",
+                            last_name="Anderson",
+                            user_role_id=role.id,
+                        )
+                    )
+                    winning_session.commit()
+                raise IntegrityError("UNIQUE constraint failed", None, Exception("conflict"))
+            return original_commit()
+
+        losing_session.commit = racing_commit
+
+        user = sync_okta_user_to_db(_claims(), losing_session)
+
+        assert user is not None
+        assert user.okta_sub == "okta-sub-1"
+        assert user.email == "alice@example.com"
+
+    with SessionLocal() as verify:
+        assert verify.query(User).filter(User.okta_sub == "okta-sub-1").count() == 1
+
+
 def test_sync_okta_user_to_db_email_match_is_case_insensitive(in_memory_orm_session):
     """Existing row with email 'Alice@Example.com' matches claim 'alice@example.com'."""
     from orm.models import User, UserRole

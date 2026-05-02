@@ -56,6 +56,16 @@ def _username_needs_varchar_wide_migration(typ: str | None) -> bool:
     return bool(re.search(pattern, s, flags=re.IGNORECASE))
 
 
+def _apply_indexes(conn: sqlite3.Connection, index_ddls: list[str]) -> None:
+    """Re-apply standalone indexes captured before a table rebuild.
+
+    Extracted into its own function so tests can monkeypatch it to simulate
+    a mid-rebuild crash and verify the SAVEPOINT rollback works.
+    """
+    for index_sql in index_ddls:
+        conn.execute(index_sql)
+
+
 def _standalone_index_ddls(conn: sqlite3.Connection, table: str) -> list[str]:
     rows = conn.execute(
         """
@@ -127,17 +137,26 @@ def _widen_username_recreate_table(conn: sqlite3.Connection) -> None:
     fk_was = conn.execute("PRAGMA foreign_keys").fetchone()[0]
     try:
         conn.execute("PRAGMA foreign_keys=OFF")
-        conn.execute(f'ALTER TABLE thrive_user RENAME TO "{_USERNAME_REBUILD_TMP}"')
-        conn.execute(new_ddl)
+        # SAVEPOINT makes the rename → INSERT → DROP → re-index sequence
+        # atomic. A crash mid-rebuild rolls back to the savepoint, leaving
+        # thrive_user untouched and the backup table absent — recoverable
+        # by simply re-running the migration.
+        conn.execute("SAVEPOINT widen_username")
+        try:
+            conn.execute(f'ALTER TABLE thrive_user RENAME TO "{_USERNAME_REBUILD_TMP}"')
+            conn.execute(new_ddl)
 
-        colnames = [row[1] for row in conn.execute(f'PRAGMA table_info("{_USERNAME_REBUILD_TMP}")')]
-        cols_sql = ", ".join(f'"{c}"' for c in colnames)
-        conn.execute(f'INSERT INTO thrive_user ({cols_sql}) SELECT {cols_sql} FROM "{_USERNAME_REBUILD_TMP}"')
-        conn.execute(f'DROP TABLE "{_USERNAME_REBUILD_TMP}"')
+            colnames = [row[1] for row in conn.execute(f'PRAGMA table_info("{_USERNAME_REBUILD_TMP}")')]
+            cols_sql = ", ".join(f'"{c}"' for c in colnames)
+            conn.execute(f'INSERT INTO thrive_user ({cols_sql}) SELECT {cols_sql} FROM "{_USERNAME_REBUILD_TMP}"')
+            conn.execute(f'DROP TABLE "{_USERNAME_REBUILD_TMP}"')
 
-        for index_sql in indexes:
-            conn.execute(index_sql)
-
+            _apply_indexes(conn, indexes)
+            conn.execute("RELEASE SAVEPOINT widen_username")
+        except Exception:
+            conn.execute("ROLLBACK TO SAVEPOINT widen_username")
+            conn.execute("RELEASE SAVEPOINT widen_username")
+            raise
     finally:
         conn.execute(f"PRAGMA foreign_keys={fk_was}")
     logger.info("username column rebuild complete (ORM width 320)")
