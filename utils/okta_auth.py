@@ -154,6 +154,15 @@ def populate_session_state_from_user(user) -> None:
     st.session_state["user_role"] = user.role.role.value
     st.session_state["username"] = f"{user.first_name} {user.last_name}".strip()
 
+    # Mirror local-mode behavior: flush encrypted cookies to the browser so
+    # subsequent reruns see the persisted values, not just in-memory state.
+    cookies = st.session_state["cookies"]
+    if hasattr(cookies, "save"):
+        try:
+            cookies.save()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to save cookies after OIDC populate: %s", exc)
+
     # Reuse the existing preference loader; it reads cookies['user_id'] and
     # populates the same set of session-state keys local-mode login does.
     try:
