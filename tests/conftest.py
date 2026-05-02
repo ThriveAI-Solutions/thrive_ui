@@ -210,3 +210,48 @@ def cleanup_after_tests(request):
         # Remove scripts dir from path
         if str(scripts_dir) in sys.path:
             sys.path.remove(str(scripts_dir))
+
+
+# OIDC integration test fixture --------------------------------------------
+@pytest.fixture
+def in_memory_orm_session(monkeypatch):
+    """In-memory SQLite ORM session with UserRoles seeded.
+
+    Patches orm.models.SessionLocal and orm.models.engine so production code
+    that imports SessionLocal (e.g. orm.functions.create_user) transparently
+    uses this in-memory DB. Yields the SessionLocal class — call it to get
+    a session. Tests typically use:
+
+        with in_memory_orm_session() as session:
+            session.query(User).all()
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from orm.models import Base, RoleTypeEnum, UserRole
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    # Seed the four UserRole rows so user_role_id FKs resolve.
+    with TestingSessionLocal() as session:
+        for role_name, description, role_enum in [
+            ("Admin", "Administrator with full access", RoleTypeEnum.ADMIN),
+            ("Doctor", "Physician with access to individual patient data", RoleTypeEnum.DOCTOR),
+            ("Nurse", "Nurse with access to relevant patient data", RoleTypeEnum.NURSE),
+            ("Patient", "Patient access only", RoleTypeEnum.PATIENT),
+        ]:
+            session.add(UserRole(role_name=role_name, description=description, role=role_enum))
+        session.commit()
+
+    monkeypatch.setattr("orm.models.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("orm.models.engine", engine)
+    # orm.functions.SessionLocal is imported at module load time, so patch
+    # there too. If a future caller does `from orm.models import SessionLocal`
+    # in another module, add a similar monkeypatch line for that module.
+    monkeypatch.setattr("orm.functions.SessionLocal", TestingSessionLocal)
+
+    yield TestingSessionLocal
+
+    engine.dispose()

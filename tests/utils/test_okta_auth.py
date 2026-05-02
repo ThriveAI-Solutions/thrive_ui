@@ -38,3 +38,12 @@ def test_user_model_has_okta_sub_and_email_columns():
 
     assert "okta_sub" in unique_columns
     assert "email" in unique_columns
+
+
+def test_in_memory_orm_session_fixture_seeds_user_roles(in_memory_orm_session):
+    """Smoke test: fixture should create the four UserRole rows."""
+    from orm.models import UserRole
+
+    with in_memory_orm_session() as session:
+        names = {r.role_name for r in session.query(UserRole).all()}
+        assert names == {"Admin", "Doctor", "Nurse", "Patient"}
