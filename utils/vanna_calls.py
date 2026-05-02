@@ -2379,9 +2379,7 @@ def _get_random_sample_data(conn, schema_name: str, table_name: str, limit: int 
 
         safe_schema = psycopg2_sql.Identifier(schema_name)
         safe_table = psycopg2_sql.Identifier(table_name)
-        query = psycopg2_sql.SQL("SELECT * FROM {}.{} ORDER BY RANDOM() LIMIT %s").format(
-            safe_schema, safe_table
-        )
+        query = psycopg2_sql.SQL("SELECT * FROM {}.{} ORDER BY RANDOM() LIMIT %s").format(safe_schema, safe_table)
         df = pd.read_sql_query(query.as_string(conn), conn, params=(limit,))
         return df
     except Exception as e:
@@ -2517,7 +2515,7 @@ def train_ai_documentation():
         # Process each table
         for i, table_name in enumerate(tables):
             try:
-                status_text.text(f"Processing {table_name}... ({i+1}/{total_tables})")
+                status_text.text(f"Processing {table_name}... ({i + 1}/{total_tables})")
                 progress_bar.progress((i + 1) / total_tables)
 
                 # Get DDL for context
@@ -2530,10 +2528,7 @@ def train_ai_documentation():
                 user_prompt = _build_ai_documentation_prompt(schema_name, table_name, ddl, sample_df)
 
                 # Call LLM to generate documentation
-                documentation = vanna_service.submit_prompt(
-                    AI_DOCUMENTATION_SYSTEM_PROMPT,
-                    user_prompt
-                )
+                documentation = vanna_service.submit_prompt(AI_DOCUMENTATION_SYSTEM_PROMPT, user_prompt)
 
                 # Validate LLM response
                 if not documentation:

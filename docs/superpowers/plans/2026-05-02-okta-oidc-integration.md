@@ -101,15 +101,11 @@ Edit `orm/models.py`. Find the User class (currently around lines 121–152). Af
     email = Column(String(320, collation="NOCASE"), nullable=True, unique=True)
 ```
 
-Also relax the `password` column to nullable, because OIDC-provisioned users have no local password:
+Keep the `password` column non-null. OIDC-provisioned users have no local password, but the app stores a reserved non-hash sentinel so existing SQLite databases with a `NOT NULL` password constraint can JIT-provision them safely:
 
-Change line 128 from:
+Keep line 128 as:
 ```python
     password = Column(String(255), nullable=False)
-```
-to:
-```python
-    password = Column(String(255), nullable=True)  # NULL for OIDC-only users
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
@@ -185,23 +181,21 @@ def migrate(db_path: str) -> None:
             logger.info("okta_sub already present — skipping")
         else:
             conn.execute("ALTER TABLE thrive_user ADD COLUMN okta_sub VARCHAR(255)")
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_thrive_user_okta_sub ON thrive_user(okta_sub)")
-            logger.info("Added okta_sub column and unique index")
+            logger.info("Added okta_sub column")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_thrive_user_okta_sub ON thrive_user(okta_sub)")
+        logger.info("Ensured okta_sub unique index")
 
         if _column_exists(conn, "thrive_user", "email"):
             logger.info("email already present — skipping")
         else:
             conn.execute("ALTER TABLE thrive_user ADD COLUMN email VARCHAR(320) COLLATE NOCASE")
-            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_thrive_user_email ON thrive_user(email)")
-            logger.info("Added email column and unique index")
+            logger.info("Added email column")
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_thrive_user_email ON thrive_user(email)")
+        logger.info("Ensured email unique index")
 
-        # SQLite cannot drop NOT NULL via ALTER TABLE. The original password
-        # column was created NOT NULL; new fresh installs via Base.metadata.create_all
-        # will use the relaxed nullability. Existing dev DBs continue to enforce
-        # NOT NULL on password — acceptable because OIDC users won't be inserted
-        # into pre-existing dev DBs without going through the new code path.
-        # If you need OIDC users in an existing dev DB, supply a placeholder
-        # password (e.g., "OIDC_USER") at insert time.
+        # The password column remains NOT NULL. OIDC-only users are inserted
+        # with a reserved non-hash sentinel by utils.okta_auth so migrated
+        # SQLite databases and fresh schemas behave the same way.
         conn.commit()
     logger.info("Migration complete")
 
@@ -632,7 +626,7 @@ def _claims(sub="okta-sub-1", email="alice@example.com", groups=None, **extra):
 def test_sync_okta_user_to_db_jit_creates_new_user(in_memory_orm_session):
     """First-time login: row is JIT-created with default DOCTOR role."""
     from orm.models import RoleTypeEnum, User
-    from utils.okta_auth import sync_okta_user_to_db
+    from utils.okta_auth import OIDC_PASSWORD_SENTINEL, sync_okta_user_to_db
 
     with in_memory_orm_session() as session:
         user = sync_okta_user_to_db(_claims(groups=["unrelated-group"]), session)
@@ -671,9 +665,8 @@ def test_sync_okta_user_to_db_matches_existing_by_sub(in_memory_orm_session):
 
 def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_session):
     """Pre-provisioned row (email set, sub NULL) gets sub stamped on first login."""
-    from orm.functions import create_user
     from orm.models import User, UserRole
-    from utils.okta_auth import sync_okta_user_to_db
+    from utils.okta_auth import OIDC_PASSWORD_SENTINEL, sync_okta_user_to_db
 
     with in_memory_orm_session() as session:
         admin_role = session.query(UserRole).filter_by(role_name="Admin").one()
@@ -682,7 +675,7 @@ def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_
         # admin role (i.e. an admin pre-created this user expecting them to log in).
         pre = User(
             username="alice@example.com",
-            password=None,
+            password=OIDC_PASSWORD_SENTINEL,
             email="alice@example.com",
             okta_sub=None,
             first_name="Alice",
@@ -723,13 +716,13 @@ def test_sync_okta_user_to_db_role_updates_on_subsequent_login(in_memory_orm_ses
 def test_sync_okta_user_to_db_email_match_is_case_insensitive(in_memory_orm_session):
     """Existing row with email 'Alice@Example.com' matches claim 'alice@example.com'."""
     from orm.models import User, UserRole
-    from utils.okta_auth import sync_okta_user_to_db
+    from utils.okta_auth import OIDC_PASSWORD_SENTINEL, sync_okta_user_to_db
 
     with in_memory_orm_session() as session:
         doctor_role = session.query(UserRole).filter_by(role_name="Doctor").one()
         pre = User(
             username="alice@example.com",
-            password=None,
+            password=OIDC_PASSWORD_SENTINEL,
             email="Alice@Example.com",
             okta_sub=None,
             first_name="A",
@@ -755,6 +748,9 @@ Expected: FAIL — `ImportError: cannot import name 'sync_okta_user_to_db'`.
 Append to `utils/okta_auth.py`:
 
 ```python
+
+
+OIDC_PASSWORD_SENTINEL = "__OIDC_AUTH_ONLY__"
 
 
 def sync_okta_user_to_db(claims: dict, session: SqlSession):
@@ -799,7 +795,7 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
     if user is None:
         user = User(
             username=email or sub,         # admin can rename later
-            password=None,                 # OIDC-only user
+            password=OIDC_PASSWORD_SENTINEL,
             email=email or None,
             okta_sub=sub,
             first_name=given_name,

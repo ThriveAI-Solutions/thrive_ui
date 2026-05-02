@@ -11,7 +11,8 @@ for the full design.
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from collections.abc import Mapping
+from typing import Any, Iterable
 
 from sqlalchemy.orm import Session as SqlSession
 
@@ -33,6 +34,50 @@ OKTA_GROUP_TO_ROLE: dict[str, RoleTypeEnum] = {
 # is assigned. Per stakeholder guidance ("give everyone more lax permissions
 # by default"), the default is DOCTOR.
 DEFAULT_ROLE_IF_NO_GROUP_MATCH: RoleTypeEnum = RoleTypeEnum.DOCTOR
+
+# OIDC users authenticate through Okta only. Local auth hashes user input with
+# SHA-256 before comparing, so this non-hex sentinel can never match a local
+# password login while still satisfying legacy SQLite NOT NULL schemas.
+OIDC_PASSWORD_SENTINEL = "__OIDC_AUTH_ONLY__"
+
+
+def auth_secrets_section() -> Mapping[str, Any] | None:
+    """Return Streamlit ``[auth]`` as a mapping, or None if missing or invalid.
+
+    Rejects scalar misconfigurations (e.g. ``auth = "oidc"``) the same way
+    ``is_oidc_mode`` does, so callers can safely use ``.get(...)``.
+    """
+    import streamlit as st
+
+    if not hasattr(st, "secrets"):
+        return None
+    auth_section = st.secrets.get("auth", {})
+    if not hasattr(auth_section, "get"):
+        return None
+    return auth_section
+
+
+def normalize_groups_claim(raw: Any) -> list[str]:
+    """Coerce the OIDC ``groups`` claim to a list of non-empty group name strings."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        if "," in s:
+            return [part.strip() for part in s.split(",") if part.strip()]
+        return [s]
+    if isinstance(raw, (list, tuple, set)):
+        out: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                stripped = item.strip()
+                if stripped:
+                    out.append(stripped)
+        return out
+    logger.warning("Unexpected groups claim type %s — using empty list", type(raw).__name__)
+    return []
 
 
 def role_id_from_groups(groups: Iterable[str], session: SqlSession) -> int:
@@ -63,16 +108,8 @@ def is_oidc_mode() -> bool:
     `[auth]\nmode = "oidc"`) is also treated as local mode rather than
     crashing.
     """
-    import streamlit as st
-
-    auth_section = st.secrets.get("auth", {}) if hasattr(st, "secrets") else {}
-    # Streamlit's secrets sub-sections are an AttrDict-like Mapping, not a
-    # plain dict. Use duck typing (`.get`) rather than `isinstance(..., dict)`
-    # so we accept Streamlit's real type while still rejecting a string
-    # misconfiguration like `auth = "oidc"`.
-    if not hasattr(auth_section, "get"):
-        return False
-    return auth_section.get("mode") == "oidc"
+    auth = auth_secrets_section()
+    return auth is not None and auth.get("mode") == "oidc"
 
 
 def sync_okta_user_to_db(claims: dict, session: SqlSession):
@@ -96,7 +133,7 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
     email = (claims.get("email") or "").strip()
     given_name = claims.get("given_name") or ""
     family_name = claims.get("family_name") or ""
-    groups = claims.get("groups") or []
+    groups = normalize_groups_claim(claims.get("groups"))
 
     target_role_id = role_id_from_groups(groups, session)
 
@@ -113,7 +150,7 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
     if user is None:
         user = User(
             username=email or sub,  # admin can rename later
-            password=None,  # OIDC-only user
+            password=OIDC_PASSWORD_SENTINEL,
             email=email or None,
             okta_sub=sub,
             first_name=given_name,
@@ -153,15 +190,19 @@ def populate_session_state_from_user(user) -> None:
 
     from orm.functions import set_user_preferences_in_session_state
 
-    st.session_state["cookies"]["user_id"] = json.dumps(user.id)
-    st.session_state["cookies"]["role_name"] = user.role.role_name
+    user_id_cookie = json.dumps(user.id)
+    role_name_cookie = user.role.role_name
+    cookies = st.session_state["cookies"]
+    cookies_changed = cookies.get("user_id") != user_id_cookie or cookies.get("role_name") != role_name_cookie
+    if cookies_changed:
+        cookies["user_id"] = user_id_cookie
+        cookies["role_name"] = role_name_cookie
     st.session_state["user_role"] = user.role.role.value
     st.session_state["username"] = f"{user.first_name} {user.last_name}".strip()
 
     # Mirror local-mode behavior: flush encrypted cookies to the browser so
     # subsequent reruns see the persisted values, not just in-memory state.
-    cookies = st.session_state["cookies"]
-    if hasattr(cookies, "save"):
+    if cookies_changed and hasattr(cookies, "save"):
         try:
             cookies.save()
         except Exception as exc:  # pragma: no cover - defensive
@@ -226,13 +267,17 @@ def handle_oidc_auth() -> None:
         username = user.username
         user_id = user.id
 
-    # Reuse existing login logging.
-    try:
-        from orm.logging_functions import log_login
+    # Streamlit reruns the script frequently. Only the transition into this
+    # authenticated user session is a login event; later reruns are not.
+    login_marker_key = "_oidc_logged_login_user_id"
+    if st.session_state.get(login_marker_key) != user_id:
+        try:
+            from orm.logging_functions import log_login
 
-        log_login(user_id=user_id, username=username, success=True)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to log OIDC login for user %s: %s", username, exc)
+            log_login(user_id=user_id, username=username, success=True)
+            st.session_state[login_marker_key] = user_id
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to log OIDC login for user %s: %s", username, exc)
 
     # Render sidebar welcome banner + Log Out button. This mirrors the local
     # path in utils/auth.py:_handle_local_auth so the user gets the same UI.
@@ -288,6 +333,7 @@ def handle_oidc_logout() -> None:
     st.session_state["selected_llm_model"] = None
     if "_vn_instance" in st.session_state:
         st.session_state["_vn_instance"] = None
+    st.session_state.pop("_oidc_logged_login_user_id", None)
 
     # 3. Clear mirrored cookies.
     try:
@@ -301,7 +347,8 @@ def handle_oidc_logout() -> None:
         logger.warning("Failed to clear mirrored cookies on OIDC logout: %s", exc)
 
     # 4. Emit a meta-refresh redirect to the post-logout URL.
-    redirect_url = st.secrets.get("auth", {}).get("post_logout_redirect_url") if hasattr(st, "secrets") else None
+    auth = auth_secrets_section()
+    redirect_url = auth.get("post_logout_redirect_url") if auth is not None else None
     if redirect_url:
         st.markdown(
             f'<meta http-equiv="refresh" content="0; url={redirect_url}">',

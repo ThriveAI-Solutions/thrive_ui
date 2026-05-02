@@ -1,6 +1,6 @@
 import json
 from decimal import Decimal
-from unittest.mock import ANY, MagicMock, call, patch
+from unittest.mock import MagicMock, call, patch
 
 import pandas as pd
 import pytest
@@ -90,8 +90,8 @@ class TestGetChart:
         df = pd.DataFrame({"data": [3, 4]})
 
         # Enable showing plotly code in session state
-        mock_streamlit_session_state.get.side_effect = (
-            lambda key, default=None: True if key == "show_plotly_code" else default
+        mock_streamlit_session_state.get.side_effect = lambda key, default=None: (
+            True if key == "show_plotly_code" else default
         )
 
         get_chart(my_question, sql, df)
@@ -173,8 +173,8 @@ class TestGetChart:
         df = pd.DataFrame({"data": [3, 4]})
 
         # Enable showing plotly code in session state
-        mock_streamlit_session_state.get.side_effect = (
-            lambda key, default=None: True if key == "show_plotly_code" else default
+        mock_streamlit_session_state.get.side_effect = lambda key, default=None: (
+            True if key == "show_plotly_code" else default
         )
 
         get_chart(my_question, sql, df)
@@ -482,7 +482,8 @@ class TestRenderMessage:
         )
         # Thumbs down is now in a popover, so check for submit/skip buttons inside popover
         assert any(
-            call_kwargs.get("key", "").startswith("submit_feedback_") or call_kwargs.get("key", "").startswith("skip_feedback_")
+            call_kwargs.get("key", "").startswith("submit_feedback_")
+            or call_kwargs.get("key", "").startswith("skip_feedback_")
             for _, call_kwargs in [(c[0], c[1]) for c in mock_st.button.call_args_list]
         )
 
@@ -562,14 +563,14 @@ class TestRenderMessage:
                 on_click=mock_set_question,
                 args=("Question 1?",),
                 key="mock_guid_fw",
-                use_container_width=True,
+                width="stretch",
             ),
             call(
                 "Question 2?",
                 on_click=mock_set_question,
                 args=("Question 2?",),
                 key="mock_guid_fw",
-                use_container_width=True,
+                width="stretch",
             ),
         ]
         mock_st.button.assert_has_calls(

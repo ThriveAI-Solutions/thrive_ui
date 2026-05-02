@@ -6,6 +6,8 @@ flows in these tests; the full flow is validated manually against an Okta
 Developer org per docs/superpowers/specs/2026-05-01-okta-oidc-integration-design.md §11.
 """
 
+import re
+
 from sqlalchemy import create_engine, inspect
 
 
@@ -173,6 +175,74 @@ def test_is_oidc_mode_accepts_mapping_like_secrets_sub_section():
         assert is_oidc_mode() is True
 
 
+def test_auth_secrets_section_returns_mapping_when_valid():
+    from unittest.mock import patch
+
+    from utils.okta_auth import auth_secrets_section
+
+    with patch("streamlit.secrets", new={"auth": {"mode": "oidc", "post_logout_redirect_url": "https://x/"}}):
+        auth = auth_secrets_section()
+        assert auth is not None and auth.get("mode") == "oidc"
+
+
+def test_auth_secrets_section_none_when_auth_is_scalar():
+    from unittest.mock import patch
+
+    from utils.okta_auth import auth_secrets_section
+
+    with patch("streamlit.secrets", new={"auth": "oidc"}):
+        assert auth_secrets_section() is None
+
+
+def test_normalize_groups_claim_list():
+    from utils.okta_auth import normalize_groups_claim
+
+    assert normalize_groups_claim([" thriveai-admin ", "", "unknown"]) == ["thriveai-admin", "unknown"]
+
+
+def test_normalize_groups_claim_tuple():
+    from utils.okta_auth import normalize_groups_claim
+
+    assert normalize_groups_claim(("thriveai-nurse",)) == ["thriveai-nurse"]
+
+
+def test_normalize_groups_claim_comma_separated_string():
+    from utils.okta_auth import normalize_groups_claim
+
+    assert normalize_groups_claim("thriveai-doctor , thriveai-admin") == [
+        "thriveai-doctor",
+        "thriveai-admin",
+    ]
+
+
+def test_normalize_groups_claim_single_string_whitespace_trimmed():
+    from utils.okta_auth import normalize_groups_claim
+
+    assert normalize_groups_claim("  thriveai-patient  ") == ["thriveai-patient"]
+    assert normalize_groups_claim("   ") == []
+
+
+def test_normalize_groups_claim_non_sequence_returns_empty():
+    from unittest.mock import patch
+
+    import utils.okta_auth as mod
+
+    with patch.object(mod.logger, "warning"):
+        from utils.okta_auth import normalize_groups_claim
+
+        assert normalize_groups_claim(12345) == []
+
+
+def test_sync_okta_user_to_db_accept_groups_as_comma_separated_string(in_memory_orm_session):
+    from orm.models import RoleTypeEnum
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        user = sync_okta_user_to_db(_claims(groups="random, thriveai-admin"), session)
+
+    assert user.role.role == RoleTypeEnum.ADMIN
+
+
 def _claims(sub="okta-sub-1", email="alice@example.com", groups=None, **extra):
     """Build a fake OIDC claims dict (the shape st.user.to_dict() returns)."""
     base = {
@@ -190,7 +260,7 @@ def _claims(sub="okta-sub-1", email="alice@example.com", groups=None, **extra):
 def test_sync_okta_user_to_db_jit_creates_new_user(in_memory_orm_session):
     """First-time login: row is JIT-created with default DOCTOR role."""
     from orm.models import RoleTypeEnum, User
-    from utils.okta_auth import sync_okta_user_to_db
+    from utils.okta_auth import OIDC_PASSWORD_SENTINEL, sync_okta_user_to_db
 
     with in_memory_orm_session() as session:
         user = sync_okta_user_to_db(_claims(groups=["unrelated-group"]), session)
@@ -200,7 +270,8 @@ def test_sync_okta_user_to_db_jit_creates_new_user(in_memory_orm_session):
         assert user.email == "alice@example.com"
         assert user.first_name == "Alice"
         assert user.last_name == "Anderson"
-        assert user.password is None
+        assert user.password == OIDC_PASSWORD_SENTINEL
+        assert not re.fullmatch(r"[0-9a-f]{64}", user.password)
         assert user.role.role == RoleTypeEnum.DOCTOR  # default fallback
 
         # Exactly one User row created.
@@ -228,7 +299,7 @@ def test_sync_okta_user_to_db_matches_existing_by_sub(in_memory_orm_session):
 def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_session):
     """Pre-provisioned row (email set, sub NULL) gets sub stamped on first login."""
     from orm.models import User, UserRole
-    from utils.okta_auth import sync_okta_user_to_db
+    from utils.okta_auth import OIDC_PASSWORD_SENTINEL, sync_okta_user_to_db
 
     with in_memory_orm_session() as session:
         admin_role = session.query(UserRole).filter_by(role_name="Admin").one()
@@ -237,7 +308,7 @@ def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_
         # admin role (i.e. an admin pre-created this user expecting them to log in).
         pre = User(
             username="alice@example.com",
-            password=None,
+            password=OIDC_PASSWORD_SENTINEL,
             email="alice@example.com",
             okta_sub=None,
             first_name="Alice",
@@ -276,13 +347,13 @@ def test_sync_okta_user_to_db_role_updates_on_subsequent_login(in_memory_orm_ses
 def test_sync_okta_user_to_db_email_match_is_case_insensitive(in_memory_orm_session):
     """Existing row with email 'Alice@Example.com' matches claim 'alice@example.com'."""
     from orm.models import User, UserRole
-    from utils.okta_auth import sync_okta_user_to_db
+    from utils.okta_auth import OIDC_PASSWORD_SENTINEL, sync_okta_user_to_db
 
     with in_memory_orm_session() as session:
         doctor_role = session.query(UserRole).filter_by(role_name="Doctor").one()
         pre = User(
             username="alice@example.com",
-            password=None,
+            password=OIDC_PASSWORD_SENTINEL,
             email="Alice@Example.com",
             okta_sub=None,
             first_name="A",
@@ -451,6 +522,54 @@ def test_handle_oidc_auth_when_logged_in_runs_sync_and_populates_state(
     button_mock.assert_called()
 
 
+def test_handle_oidc_auth_repeated_reruns_log_login_once(in_memory_orm_session):
+    """A logged-in OIDC session reruns often, but should emit one login event."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    fake_user = SimpleNamespace(is_logged_in=True)
+    fake_user.to_dict = lambda: {
+        "sub": "okta-sub-99",
+        "email": "bob@example.com",
+        "email_verified": True,
+        "given_name": "Bob",
+        "family_name": "Brown",
+        "groups": ["thriveai-doctor"],
+    }
+
+    class FakeCookies(dict):
+        def __init__(self):
+            super().__init__()
+            self.save = MagicMock()
+
+    fake_session_state = {"cookies": FakeCookies()}
+    sidebar_mock = MagicMock()
+    cm1, cm2 = MagicMock(), MagicMock()
+    for cm in (cm1, cm2):
+        cm.__enter__ = MagicMock(return_value=cm)
+        cm.__exit__ = MagicMock(return_value=False)
+    sidebar_mock.columns.return_value = [cm1, cm2]
+
+    log_login_mock = MagicMock()
+
+    with (
+        patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.sidebar", sidebar_mock),
+        patch("streamlit.title"),
+        patch("streamlit.button", MagicMock(return_value=False)),
+        patch("orm.functions.set_user_preferences_in_session_state", MagicMock()),
+        patch("orm.logging_functions.log_login", log_login_mock),
+    ):
+        from utils.okta_auth import handle_oidc_auth
+
+        handle_oidc_auth()
+        handle_oidc_auth()
+
+    log_login_mock.assert_called_once_with(user_id=1, username="bob@example.com", success=True)
+    fake_session_state["cookies"].save.assert_called_once()
+
+
 def test_handle_oidc_auth_logout_button_calls_handle_oidc_logout(in_memory_orm_session):
     """Clicking the sidebar Log Out button calls handle_oidc_logout."""
     from types import SimpleNamespace
@@ -531,3 +650,26 @@ def test_handle_oidc_logout_clears_state_and_calls_st_logout(in_memory_orm_sessi
     # Redirect HTML was emitted before st.logout().
     redirect_call_found = any("https://portal.example/" in str(call) for call in markdown_mock.call_args_list)
     assert redirect_call_found, "expected a redirect markdown to the post_logout_redirect_url"
+
+
+def test_handle_oidc_logout_tolerates_scalar_auth_section(in_memory_orm_session):
+    """Misconfigured secrets ``auth`` as a scalar must not raise on logout (no redirect)."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {
+        "cookies": MagicMock(),
+        "messages": [],
+        "user_role": 1,
+    }
+    fake_session_state["cookies"].get.return_value = "1"
+
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown"),
+        patch("streamlit.secrets", new={"auth": "oidc"}),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
