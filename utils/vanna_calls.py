@@ -2205,27 +2205,25 @@ class VannaService:
 
     def check_references(self, sql):
         """Check SQL for forbidden references."""
-        # Guardrails temporarily disabled for training/testing
-        return sql
-        # try:
-        #     forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
-        #
-        #     # TODO: should I make this role based? or user based?
-        #     parsed = sqlparse.parse(sql)[0]
-        #     tables, columns = get_identifiers(parsed)
-        #
-        #     # Check for forbidden references
-        #     referenced_tables = set(forbidden_tables).intersection(set(tables))
-        #     referenced_columns = set(forbidden_columns).intersection(set(columns))
-        #     if referenced_tables:
-        #         raise ValueError(f"Referenced forbidden tables: {referenced_tables}")
-        #     if referenced_columns:
-        #         raise ValueError(f"Referenced forbidden columns: {referenced_columns}")
-        # except Exception as e:
-        #     st.error(f"Error checking references: {e}")
-        #     logger.exception("%s", e)
-        # else:
-        #     return sql
+        try:
+            forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+
+            # TODO: should I make this role based? or user based?
+            parsed = sqlparse.parse(sql)[0]
+            tables, columns = get_identifiers(parsed)
+
+            # Check for forbidden references
+            referenced_tables = set(forbidden_tables).intersection(set(tables))
+            referenced_columns = set(forbidden_columns).intersection(set(columns))
+            if referenced_tables:
+                raise ValueError(f"Referenced forbidden tables: {referenced_tables}")
+            if referenced_columns:
+                raise ValueError(f"Referenced forbidden columns: {referenced_columns}")
+        except Exception as e:
+            st.error(f"Error checking references: {e}")
+            logger.exception("%s", e)
+        else:
+            return sql
 
     @classmethod
     def _initialize_instance(cls):
