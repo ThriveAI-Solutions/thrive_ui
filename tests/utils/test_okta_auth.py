@@ -7,7 +7,6 @@ Developer org per docs/superpowers/specs/2026-05-01-okta-oidc-integration-design
 """
 
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.orm import sessionmaker
 
 
 def test_user_model_has_okta_sub_and_email_columns():
