@@ -1,7 +1,9 @@
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +113,62 @@ def get_configured_object_type() -> str:
         logger.warning(f"Invalid object_type '{object_type}', defaulting to 'tables'")
         object_type = "tables"
     return object_type
+
+
+class MyVannaCloudChromaDB(ThriveAI_ChromaDB):
+    """Vanna Cloud LLM + local ChromaDB RAG.
+
+    Uses local ChromaDB for training data storage and retrieval,
+    but sends prompts to the Vanna Cloud API for SQL generation.
+    """
+
+    def __init__(self, user_role: int, config=None):
+        try:
+            logger.info("Using Vanna Cloud LLM and local ChromaDB")
+            ThriveAI_ChromaDB.__init__(self, user_role=user_role, config=config)
+            self._api_key = st.secrets["ai_keys"]["vanna_api"]
+            self._model = st.secrets["ai_keys"]["vanna_model"]
+            self._endpoint = "https://ask.vanna.ai/rpc"
+        except Exception as e:
+            logger.exception("Error Configuring MyVannaCloudChromaDB: %s", e)
+            raise
+
+    # -- Vanna Cloud prompt interface --
+
+    def system_message(self, message: str) -> dict:
+        return {"role": "system", "content": message}
+
+    def user_message(self, message: str) -> dict:
+        return {"role": "user", "content": message}
+
+    def assistant_message(self, message: str) -> dict:
+        return {"role": "assistant", "content": message}
+
+    def submit_prompt(self, prompt, **kwargs) -> str:
+        import json
+        import requests
+
+        json_prompt = json.dumps(prompt, ensure_ascii=False)
+        params = [{"data": json_prompt}]
+        response = requests.post(
+            self._endpoint,
+            headers={
+                "Content-Type": "application/json",
+                "Vanna-Key": self._api_key,
+                "Vanna-Org": self._model,
+            },
+            data=json.dumps({
+                "method": "submit_prompt",
+                "params": params,
+            }),
+        )
+        d = response.json()
+        if "result" not in d:
+            return None
+        return d["result"].get("data")
+
+    def log(self, message: str, title: str = "Info"):
+        logger.debug("%s: %s", title, message)
 
 
 class MyVannaAnthropic(VannaDB_VectorStore, Anthropic_Chat):
@@ -647,12 +705,17 @@ class VannaService:
                     self.vn = MyVannaGeminiChromaDB(user_role=self.user_context.user_role, config=chroma_config)
                 else:
                     raise ValueError("Missing Gemini Configuration Values")
+            elif "vanna_api" in self.config["ai_keys"] and "vanna_model" in self.config["ai_keys"]:
+                if chroma_config:
+                    self.vn = MyVannaCloudChromaDB(user_role=self.user_context.user_role, config=chroma_config)
+                else:
+                    logger.info("Using Default")
+                    self.vn = VannaDefault(
+                        api_key=self.config["ai_keys"]["vanna_api"],
+                        model=self.config["ai_keys"]["vanna_model"],
+                    )
             else:
-                logger.info("Using Default")
-                self.vn = VannaDefault(
-                    api_key=self.config["ai_keys"]["vanna_api"],
-                    model=self.config["ai_keys"]["vanna_model"],
-                )
+                raise ValueError("No LLM provider configured in secrets.toml")
 
             if self.vn is None:
                 # Last resort default (remote Vanna DB) if no vn selected yet
@@ -870,6 +933,13 @@ class VannaService:
             else:
                 logger.info("NOT allowing LLM to see data")
                 sql_response = _self.vn.generate_sql(question=question)
+
+            # Surface LLM API errors instead of silently treating them as bad SQL
+            if sql_response and not sql_response.strip().upper().startswith(("SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "EXPLAIN")):
+                # Response is not SQL — likely an error message from the API
+                logger.warning("LLM returned non-SQL response: %s", sql_response[:200])
+                st.error(sql_response)
+                return None, 0
 
             response = _self.check_references(sql_response)
 
@@ -1539,6 +1609,27 @@ class VannaService:
             id: Optional custom ID for documentation (allows overwriting)
         """
         try:
+            # from utils.security_validator import security_validator
+            #
+            # # Validate against forbidden references before training
+            # if question and sql:
+            #     is_valid, violations = security_validator.validate_sql_content(sql)
+            #     if not is_valid:
+            #         logger.warning("Training SQL blocked: %s", violations)
+            #         return False
+            #
+            # elif documentation:
+            #     is_valid, violations = security_validator.validate_documentation(documentation)
+            #     if not is_valid:
+            #         logger.warning("Training documentation blocked: %s", violations)
+            #         return False
+            #
+            # elif ddl:
+            #     is_valid, violations = security_validator.validate_sql_content(ddl)
+            #     if not is_valid:
+            #         logger.warning("Training DDL blocked: %s", violations)
+            #         return False
+
             effective_metadata = metadata.copy() if metadata is not None else {}
             effective_metadata["user_role"] = self.user_role
 
@@ -1555,6 +1646,551 @@ class VannaService:
             st.error(f"Error training Vanna: {e}")
             logger.exception("%s", e)
             return False
+
+    # -------------------------------------------------------------------------
+    # Auto-Enhance Schema — Helper methods ported from DataDrifter2
+    # -------------------------------------------------------------------------
+
+    STRING_TYPES: frozenset = frozenset(
+        {"varchar", "nvarchar", "char", "nchar", "text", "character varying", "character"}
+    )
+    _FLOAT_TYPES: frozenset = frozenset({"float", "real", "double precision", "double"})
+    _RE_NUMERIC = re.compile(r"^-?\d+(\.\d+)?$")
+    _RE_DATE_ISO = re.compile(r"^\d{4}[-/]\d{2}[-/]\d{2}$")
+    _RE_DATE_COMPACT = re.compile(r"^\d{8}$")
+    _RE_BOOLEAN = re.compile(r"^(true|false|yes|no|0|1)$", re.IGNORECASE)
+
+    def _build_relationship_query(self, schema_name: str, forbidden_tables_str: str) -> str:
+        """Build PostgreSQL query to discover foreign key relationships."""
+        query = f"""
+            SELECT
+                tc.constraint_name,
+                kcu.table_name AS parent_table,
+                kcu.column_name AS parent_column,
+                ccu.table_name AS referenced_table,
+                ccu.column_name AS referenced_column
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+            JOIN information_schema.constraint_column_usage ccu
+                ON tc.constraint_name = ccu.constraint_name
+                AND tc.table_schema = ccu.table_schema
+            WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_schema = '{schema_name}'
+        """
+        if forbidden_tables_str:
+            query += f" AND kcu.table_name NOT IN ({forbidden_tables_str}) AND ccu.table_name NOT IN ({forbidden_tables_str})"
+        query += " ORDER BY kcu.table_name, kcu.column_name"
+        return query
+
+    def _build_index_query(self, schema_name: str, forbidden_tables_str: str) -> str:
+        """Build PostgreSQL query to discover index definitions."""
+        query = f"""
+            SELECT
+                t.relname AS table_name,
+                i.relname AS index_name,
+                CASE WHEN ix.indisunique THEN 'UNIQUE' ELSE 'NONUNIQUE' END AS index_type,
+                ix.indisunique AS is_unique,
+                ix.indisprimary AS is_primary_key,
+                STRING_AGG(a.attname, ', ' ORDER BY array_position(ix.indkey, a.attnum)) AS columns
+            FROM pg_index ix
+            JOIN pg_class t ON t.oid = ix.indrelid
+            JOIN pg_class i ON i.oid = ix.indexrelid
+            JOIN pg_namespace n ON n.oid = t.relnamespace
+            JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey[0:ix.indnkeyatts])
+            WHERE n.nspname = '{schema_name}'
+        """
+        if forbidden_tables_str:
+            query += f" AND t.relname NOT IN ({forbidden_tables_str})"
+        query += " GROUP BY t.relname, i.relname, ix.indisunique, ix.indisprimary ORDER BY t.relname, i.relname"
+        return query
+
+    def _build_column_stats_query(
+        self, schema_name: str, table_name: str, column_name: str, data_type: str
+    ) -> str | None:
+        """Build a query to get basic column statistics. Returns None for unsupported types."""
+        quoted_col = f'"{column_name}"'
+        full_table = f'"{schema_name}"."{table_name}"'
+
+        numeric_types = {
+            "int", "integer", "bigint", "smallint", "tinyint", "decimal",
+            "numeric", "float", "real", "double precision", "money", "smallmoney",
+        }
+        if data_type.lower() in numeric_types:
+            return f"""
+                SELECT
+                    MIN({quoted_col}) AS min_val,
+                    MAX({quoted_col}) AS max_val,
+                    AVG(CAST({quoted_col} AS FLOAT)) AS avg_val,
+                    COUNT(DISTINCT {quoted_col}) AS distinct_count,
+                    COUNT(*) AS total_count,
+                    SUM(CASE WHEN {quoted_col} IS NULL THEN 1 ELSE 0 END) AS null_count
+                FROM {full_table}
+            """
+
+        if data_type.lower() in self.STRING_TYPES:
+            return f"""
+                SELECT
+                    COUNT(DISTINCT {quoted_col}) AS distinct_count,
+                    COUNT(*) AS total_count,
+                    SUM(CASE WHEN {quoted_col} IS NULL THEN 1 ELSE 0 END) AS null_count,
+                    MIN(LENGTH({quoted_col})) AS min_length,
+                    MAX(LENGTH({quoted_col})) AS max_length
+                FROM {full_table}
+            """
+
+        temporal_types = {
+            "date", "datetime", "datetime2", "timestamp",
+            "timestamp without time zone", "timestamp with time zone",
+            "time", "smalldatetime",
+        }
+        if data_type.lower() in temporal_types:
+            return f"""
+                SELECT
+                    MIN({quoted_col}) AS min_val,
+                    MAX({quoted_col}) AS max_val,
+                    COUNT(DISTINCT {quoted_col}) AS distinct_count,
+                    COUNT(*) AS total_count,
+                    SUM(CASE WHEN {quoted_col} IS NULL THEN 1 ELSE 0 END) AS null_count
+                FROM {full_table}
+            """
+
+        return None
+
+    def _build_sample_values_query(self, schema_name: str, table_name: str, column_name: str) -> str:
+        """Build query to get sample distinct values for categorical columns."""
+        quoted_col = f'"{column_name}"'
+        full_table = f'"{schema_name}"."{table_name}"'
+        return f"""
+            SELECT {quoted_col} AS sample_value, COUNT(*) AS frequency
+            FROM {full_table}
+            WHERE {quoted_col} IS NOT NULL
+            GROUP BY {quoted_col}
+            ORDER BY COUNT(*) DESC
+            LIMIT 10
+        """
+
+    def _detect_implicit_relationships(
+        self, schema_name: str, df_schema: pd.DataFrame, forbidden_tables: list
+    ) -> list[dict[str, str]]:
+        """Detect implicit relationships based on naming patterns like *_id columns."""
+        implicit_rels = []
+        if df_schema is None or df_schema.empty:
+            return implicit_rels
+
+        table_names = set(df_schema["table_name"].unique())
+        forbidden_lower = {t.lower() for t in forbidden_tables}
+
+        for _, row in df_schema.iterrows():
+            col_name = row["column_name"].lower()
+            table_name = row["table_name"]
+
+            if table_name.lower() in forbidden_lower:
+                continue
+
+            if col_name.endswith("_id") and col_name != "id":
+                potential_table_base = col_name[:-3]
+                candidates = [
+                    potential_table_base,
+                    potential_table_base + "s",
+                    potential_table_base + "es",
+                ]
+                for candidate in candidates:
+                    if candidate in {t.lower() for t in table_names} and candidate not in forbidden_lower:
+                        actual_table = next((t for t in table_names if t.lower() == candidate), candidate)
+
+                        if actual_table == table_name:
+                            continue
+
+                        ref_table_cols = (
+                            df_schema[df_schema["table_name"] == actual_table]["column_name"].str.lower().tolist()
+                        )
+                        if "id" not in ref_table_cols:
+                            continue
+
+                        implicit_rels.append(
+                            {
+                                "parent_table": table_name,
+                                "parent_column": row["column_name"],
+                                "referenced_table": actual_table,
+                                "referenced_column": "id",
+                                "relationship_type": "implicit",
+                            }
+                        )
+                        break
+
+        return implicit_rels
+
+    @staticmethod
+    def _is_valid_compact_date(value: str) -> bool:
+        """Check if an 8-digit string is a valid YYYYMMDD date."""
+        try:
+            datetime.strptime(value, "%Y%m%d")
+            return True
+        except ValueError:
+            return False
+
+    def _detect_type_mismatches(
+        self,
+        data_type: str,
+        sample_values: list[str],
+        threshold: float = 0.9,
+    ) -> list[dict[str, str]]:
+        """Detect when a column's actual data diverges from its declared type."""
+        annotations: list[dict[str, str]] = []
+        clean = [v.strip() for v in sample_values if v and v.strip()]
+        if not clean:
+            return annotations
+
+        dtype_lower = data_type.lower()
+        total = len(clean)
+
+        if dtype_lower in self.STRING_TYPES:
+            date_count = sum(
+                1
+                for v in clean
+                if self._RE_DATE_ISO.match(v) or (self._RE_DATE_COMPACT.match(v) and self._is_valid_compact_date(v))
+            )
+            date_matched = date_count / total > threshold
+            if date_matched:
+                has_slash = any("/" in v for v in clean)
+                has_dash = any("-" in v for v in clean)
+                if has_slash:
+                    date_example = "2025/01/01"
+                elif has_dash:
+                    date_example = "2025-01-01"
+                else:
+                    date_example = "20250101"
+                annotations.append(
+                    {
+                        "level": "CRITICAL",
+                        "message": (
+                            f"stored as {data_type} not DATE "
+                            f"-- use string comparison: WHERE col >= '{date_example}'"
+                        ),
+                    }
+                )
+
+            if not date_matched:
+                numeric_count = sum(1 for v in clean if self._RE_NUMERIC.match(v))
+                numeric_matched = numeric_count / total > threshold
+                if numeric_matched:
+                    annotations.append(
+                        {
+                            "level": "CRITICAL",
+                            "message": (
+                                f"stored as {data_type} but contains numeric values "
+                                f"-- use string comparison: WHERE col = '1' NOT WHERE col = 1"
+                            ),
+                        }
+                    )
+            else:
+                numeric_matched = False
+
+            if not numeric_matched:
+                bool_count = sum(1 for v in clean if self._RE_BOOLEAN.match(v))
+                if bool_count / total > threshold:
+                    annotations.append(
+                        {
+                            "level": "INFO",
+                            "message": f"stored as {data_type} -- use WHERE col = 'true' NOT WHERE col = TRUE",
+                        }
+                    )
+
+        if dtype_lower in self._FLOAT_TYPES:
+            int_like_count = 0
+            for v in clean:
+                try:
+                    fval = float(v)
+                    if fval == int(fval):
+                        int_like_count += 1
+                except (ValueError, OverflowError):
+                    pass
+            if total > 0 and int_like_count / total > threshold:
+                annotations.append(
+                    {
+                        "level": "INFO",
+                        "message": (
+                            f"stored as {data_type} but contains only integer-like values "
+                            f"-- use approximate comparison or CAST for exact matching"
+                        ),
+                    }
+                )
+
+        return annotations
+
+    def _format_structured_table_doc(
+        self,
+        schema_name: str,
+        table_name: str,
+        columns: list[dict[str, Any]],
+        relationships: list[dict[str, str]] | None = None,
+        indexes: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Format collected per-table metadata into a single structured document."""
+        relationships = relationships or []
+        indexes = indexes or []
+
+        fk_map: dict[str, str] = {}
+        for rel in relationships:
+            fk_map.setdefault(rel["parent_column"], f"{rel['referenced_table']}.{rel['referenced_column']}")
+
+        pk_cols: set = set()
+        indexed_cols: set = set()
+        for idx in indexes:
+            cols_list = [c.strip() for c in idx["columns"].split(",")]
+            if idx.get("is_primary_key"):
+                pk_cols.update(cols_list)
+            else:
+                indexed_cols.update(cols_list)
+
+        lines: list[str] = [f"TABLE: {schema_name}.{table_name}"]
+        critical_annotations: list[str] = []
+        prefer_annotations: list[str] = []
+        info_annotations: list[str] = []
+
+        for col in columns:
+            col_name = col["name"]
+            col_type = col["data_type"].upper()
+            markers: list[str] = []
+
+            if col_name in pk_cols:
+                markers.append("[PRIMARY KEY]")
+            if col_name in fk_map:
+                markers.append(f"[FOREIGN KEY -> {fk_map[col_name]}]")
+
+            stats = col.get("stats")
+            detail_parts: list[str] = []
+            if stats:
+                min_val = stats.get("min_val")
+                max_val = stats.get("max_val")
+                avg_val = stats.get("avg_val")
+                if min_val is not None and max_val is not None:
+                    range_str = f"Range: {min_val}-{max_val}"
+                    if avg_val is not None:
+                        range_str += f", AVG: {round(float(avg_val), 2)}"
+                    detail_parts.append(range_str)
+
+                min_len = stats.get("min_length")
+                max_len = stats.get("max_length")
+                if min_len is not None and max_len is not None:
+                    if min_len == max_len:
+                        detail_parts.append(f"Length: {min_len}")
+                    else:
+                        detail_parts.append(f"Length: {min_len}-{max_len}")
+
+                distinct_count = stats.get("distinct_count")
+                total_count = stats.get("total_count")
+                null_count = stats.get("null_count")
+                if distinct_count is not None and total_count is not None:
+                    if total_count > 0 and null_count is not None:
+                        null_pct = round(100 * null_count / total_count, 1)
+                        if null_pct > 0:
+                            detail_parts.append(f"{null_pct}% null")
+
+            sample_vals = col.get("sample_values", [])
+            if sample_vals:
+                quoted = ", ".join(f"'{v}'" for v in sample_vals[:10])
+                detail_parts.append(f"Values: {quoted}")
+
+            markers_str = " ".join(markers)
+            detail_str = ", ".join(detail_parts) if detail_parts else ""
+
+            parts = [f"  {col_name}"]
+            parts.append(col_type)
+            if markers_str:
+                parts.append(markers_str)
+            if detail_str:
+                parts.append(detail_str)
+            lines.append("    ".join(parts))
+
+            for mm in col.get("mismatches", []):
+                annotation = f"{col_name} {mm['message']}"
+                if mm["level"] == "CRITICAL":
+                    critical_annotations.append(f"CRITICAL: {annotation}")
+                else:
+                    info_annotations.append(f"NOTE: {annotation}")
+
+            if col_name in pk_cols:
+                prefer_annotations.append(f"PREFER: Filter on {col_name} (PRIMARY KEY) for exact lookups and joins.")
+            elif col_name in indexed_cols:
+                prefer_annotations.append(f"PREFER: Filter on {col_name} for efficient lookups.")
+
+        if critical_annotations or prefer_annotations or info_annotations:
+            lines.append("")
+        for ann in critical_annotations:
+            lines.append(ann)
+        for ann in prefer_annotations:
+            lines.append(ann)
+        for ann in info_annotations:
+            lines.append(ann)
+
+        return "\n".join(lines)
+
+    def _has_table_rows(self, schema_name: str, table_name: str, context: str = "training") -> bool:
+        """Check if a table has rows before processing."""
+        try:
+            row_count_query = f'SELECT COUNT(*) as row_count FROM "{schema_name}"."{table_name}"'
+            row_count_df = self.vn.run_sql(row_count_query)
+
+            if row_count_df is None or row_count_df.empty:
+                logger.warning("Could not check row count for %s.%s, skipping %s", schema_name, table_name, context)
+                return False
+
+            row_count = row_count_df.iloc[0]["row_count"]
+            if row_count == 0:
+                logger.info("Skipping %s.%s - no rows for %s", schema_name, table_name, context)
+                return False
+
+            return True
+        except Exception as e:
+            logger.warning("Error checking row count for %s.%s: %s, skipping %s", schema_name, table_name, e, context)
+            return False
+
+    def _build_semantic_type_case(self, column_name_token: str, like_op: str = "ILIKE") -> str:
+        """Return the semantic-type CASE expression used in schema/column queries."""
+        c = column_name_token
+        op = like_op
+        return (
+            f"CASE\n"
+            f"                        WHEN {c} {op} '%id' OR {c} {op} '%_id' THEN 'identifier'\n"
+            f"                        WHEN {c} {op} '%name%' OR {c} {op} '%title%' THEN 'name'\n"
+            f"                        WHEN {c} {op} '%email%' THEN 'email'\n"
+            f"                        WHEN {c} {op} '%phone%' OR {c} {op} '%mobile%' OR {c} {op} '%fax%' THEN 'phone'\n"
+            f"                        WHEN {c} {op} '%date%' OR {c} {op} '%time%' OR {c} {op} '%created%' OR {c} {op} '%updated%' OR {c} {op} '%deleted%' OR {c} {op} '%expired%' THEN 'temporal'\n"
+            f"                        WHEN {c} {op} '%price%' OR {c} {op} '%cost%' OR {c} {op} '%amount%' OR {c} {op} '%revenue%' OR {c} {op} '%salary%' OR {c} {op} '%balance%' OR {c} {op} '%fee%' THEN 'monetary'\n"
+            f"                        WHEN {c} {op} '%count%' OR {c} {op} '%quantity%' OR {c} {op} '%number%' OR {c} {op} '%total%' THEN 'quantity'\n"
+            f"                        WHEN {c} {op} '%status%' OR {c} {op} '%state%' OR {c} {op} '%type%' OR {c} {op} '%category%' THEN 'status'\n"
+            f"                        WHEN {c} {op} '%address%' OR {c} {op} '%city%' OR {c} {op} '%zip%' OR {c} {op} '%country%' OR {c} {op} '%region%' OR {c} {op} '%latitude%' OR {c} {op} '%longitude%' THEN 'location'\n"
+            f"                        WHEN {c} {op} '%url%' OR {c} {op} '%link%' OR {c} {op} '%website%' OR {c} {op} '%path%' THEN 'url'\n"
+            f"                        WHEN {c} {op} '%description%' OR {c} {op} '%comment%' OR {c} {op} '%note%' OR {c} {op} '%remark%' OR {c} {op} '%summary%' THEN 'text_content'\n"
+            f"                        WHEN {c} {op} 'is_%' OR {c} {op} 'has_%' OR {c} {op} 'can_%' OR {c} {op} '%flag%' OR {c} {op} '%active%' OR {c} {op} '%enabled%' THEN 'boolean_flag'\n"
+            f"                        WHEN {c} {op} '%percent%' OR {c} {op} '%ratio%' OR {c} {op} '%rate%' OR {c} {op} '%score%' THEN 'percentage'\n"
+            f"                        WHEN {c} {op} '%image%' OR {c} {op} '%photo%' OR {c} {op} '%avatar%' OR {c} {op} '%file%' THEN 'media'\n"
+            f"                        ELSE 'general'\n"
+            f"                    END"
+        )
+
+    def _build_schema_plan_query(self, schema_name: str, where_clause: str) -> str:
+        """Build PostgreSQL schema plan query for auto-enhance."""
+        return f"""
+            SELECT DISTINCT
+                c.table_catalog as database_name,
+                c.table_schema,
+                c.table_name,
+                t.table_type,
+                c.column_name,
+                c.data_type,
+                c.is_nullable,
+                c.column_default,
+                c.ordinal_position,
+                c.character_maximum_length,
+                c.numeric_precision,
+                c.numeric_scale,
+                CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE NULL END as enum_type,
+                {self._build_semantic_type_case("c.column_name", "ILIKE")} as semantic_type
+            FROM information_schema.columns c
+            JOIN information_schema.tables t ON c.table_schema = t.table_schema AND c.table_name = t.table_name
+            {where_clause}
+            ORDER BY c.table_schema, c.table_name, c.ordinal_position
+        """
+
+    def _build_view_definitions_query(self, schema_name: str, forbidden_tables_str: str) -> str:
+        """Build query to extract view definitions from the database."""
+        query = f"""
+            SELECT table_name, view_definition
+            FROM information_schema.views
+            WHERE table_schema = '{schema_name}'
+        """
+        if forbidden_tables_str:
+            query += f" AND table_name NOT IN ({forbidden_tables_str})"
+        query += " ORDER BY table_name"
+        return query
+
+    @staticmethod
+    def _find_join_paths(
+        relationships: list[dict[str, str]], tables: set[str], max_depth: int = 3
+    ) -> list[str]:
+        """Find multi-hop JOIN paths between tables using BFS and generate documentation.
+
+        Args:
+            relationships: List of dicts with parent_table, parent_column,
+                           referenced_table, referenced_column keys.
+            tables: Set of all known table names.
+            max_depth: Maximum number of hops to search.
+
+        Returns:
+            List of documentation strings describing JOIN paths.
+        """
+        # Build adjacency list
+        adjacency: dict[str, list[tuple[str, dict]]] = {}
+        for rel in relationships:
+            src = rel["parent_table"]
+            tgt = rel["referenced_table"]
+            adjacency.setdefault(src, []).append((tgt, rel))
+            adjacency.setdefault(tgt, []).append((src, rel))
+
+        # Calculate centrality (connection count per table)
+        centrality = {t: len(adjacency.get(t, [])) for t in tables}
+        central_tables = [t for t, c in sorted(centrality.items(), key=lambda x: x[1], reverse=True) if c > 2]
+
+        docs: list[str] = []
+
+        # Generate multi-hop JOIN path docs for central tables
+        if central_tables:
+            docs.append(
+                f"Central tables with many relationships: {', '.join(central_tables)}. "
+                "These tables are commonly used in JOIN operations for combining data."
+            )
+
+        # BFS to find paths between non-adjacent table pairs
+        connected_tables = [t for t in tables if t in adjacency]
+        for source in connected_tables:
+            for target in connected_tables:
+                if source >= target:
+                    continue
+                # Skip directly connected pairs (already documented as FK/implicit)
+                direct_neighbors = {n for n, _ in adjacency.get(source, [])}
+                if target in direct_neighbors:
+                    continue
+
+                # BFS
+                visited = {source}
+                queue: list[tuple[str, list[dict]]] = [(source, [])]
+                found_path = None
+
+                while queue:
+                    current, path = queue.pop(0)
+                    if len(path) >= max_depth:
+                        continue
+                    for neighbor, rel in adjacency.get(current, []):
+                        if neighbor == target:
+                            found_path = path + [rel]
+                            break
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            queue.append((neighbor, path + [rel]))
+                    if found_path:
+                        break
+
+                if found_path and len(found_path) >= 2:
+                    # Build JOIN chain description
+                    steps = []
+                    for rel in found_path:
+                        steps.append(
+                            f"JOIN {rel['referenced_table']} ON "
+                            f"{rel['parent_table']}.{rel['parent_column']} = "
+                            f"{rel['referenced_table']}.{rel['referenced_column']}"
+                        )
+                    path_doc = (
+                        f"To connect {source} to {target}, use a multi-step JOIN: "
+                        + " then ".join(steps)
+                        + "."
+                    )
+                    docs.append(path_doc)
+
+        return docs
 
     def get_training_plan_generic(self, df_information_schema):
         """Get a generic training plan."""
@@ -2253,7 +2889,7 @@ def train_ddl():
 
             for table_name, table_data in tables_data.items():
                 # Generate enhanced DDL
-                ddl_lines = [f"\nCREATE TABLE {table_name} ("]
+                ddl_lines = [f"\nCREATE TABLE {schema_name}.{table_name} ("]
 
                 # Add columns with enhanced information
                 column_definitions = []
@@ -2609,6 +3245,530 @@ def train_ai_documentation():
                 pass
 
 
+def auto_enhance_schema(clear_existing: bool = True):
+    """
+    Enhanced automatic schema enrichment for RAG training.
+
+    Discovers FK relationships, implicit relationships, indexes, column statistics,
+    sample values, and type mismatches. Produces structured per-table documentation
+    that gives the LLM rich context for SQL generation.
+
+    Ported from DataDrifter2's auto_enhance_schema().
+
+    Args:
+        clear_existing: If True, remove existing auto-enhance documentation before
+            re-adding (prevents duplicates on repeated runs). Defaults to True.
+    """
+    vanna_service = get_vn()
+    forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
+    schema_name = get_configured_schema()
+    object_type = get_configured_object_type()
+
+    results = {
+        "relationships_added": 0,
+        "index_docs_added": 0,
+        "column_stats_collected": 0,
+        "sample_values_collected": 0,
+        "implicit_relationships_added": 0,
+        "structured_docs_added": 0,
+        "join_paths_added": 0,
+        "views_documented": 0,
+        "errors": [],
+    }
+
+    with st.status("Auto-enhancing schema...", expanded=True) as status:
+        try:
+            # --- Clear existing auto-enhance docs ---
+            if clear_existing:
+                try:
+                    st.write("Clearing previous auto-enhance data...")
+                    training_data = vanna_service.get_training_data()
+                    if training_data is not None and not training_data.empty:
+                        removed = 0
+                        for _, row in training_data.iterrows():
+                            content = str(row.get("content", ""))
+                            if (
+                                content.startswith((
+                                    "Column statistics for ",
+                                    "Implicit relationship",
+                                    "Primary key on ",
+                                    "Unique index ",
+                                    "Index '",
+                                    "Foreign key relationship: ",
+                                    "To connect ",
+                                    "Central tables with many relationships",
+                                    "View '",
+                                ))
+                                or (content.startswith("TABLE: ") and "." in content[:60])
+                                or (content.startswith("Column ") and "." in content[:80] and " has " in content[:200])
+                            ):
+                                vanna_service.remove_from_training(row["id"])
+                                removed += 1
+                        if removed:
+                            st.write(f"Removed {removed} previous auto-enhance entries.")
+                except Exception as clear_err:
+                    logger.warning("Could not clear existing auto-enhance data: %s", clear_err)
+
+            # --- Step 1: FK relationship discovery ---
+            st.write("Step 1/3: Discovering foreign key relationships...")
+            try:
+                rel_query = vanna_service._build_relationship_query(schema_name, forbidden_tables_str)
+                df_rels = vanna_service.vn.run_sql(rel_query)
+
+                if df_rels is not None and not df_rels.empty:
+                    for _, rel in df_rels.iterrows():
+                        parent = rel["parent_table"]
+                        parent_col = rel["parent_column"]
+                        ref_table = rel["referenced_table"]
+                        ref_col = rel["referenced_column"]
+
+                        rel_doc = (
+                            f"Foreign key relationship: {schema_name}.{parent}.{parent_col} "
+                            f"references {schema_name}.{ref_table}.{ref_col}. "
+                            f"Use JOIN {schema_name}.{ref_table} ON "
+                            f"{schema_name}.{parent}.{parent_col} = {schema_name}.{ref_table}.{ref_col} "
+                            f"to connect these tables."
+                        )
+                        vanna_service.train(documentation=rel_doc)
+                        results["relationships_added"] += 1
+                    st.write(f"  Found {results['relationships_added']} FK relationships.")
+                else:
+                    st.write("  No FK relationships found.")
+            except Exception as e:
+                msg = f"Error discovering relationships: {e}"
+                logger.warning(msg)
+                results["errors"].append(msg)
+
+            # --- Step 2: Index discovery ---
+            st.write("Step 2/3: Discovering indexes...")
+            try:
+                idx_query = vanna_service._build_index_query(schema_name, forbidden_tables_str)
+                df_indexes = vanna_service.vn.run_sql(idx_query)
+
+                if df_indexes is not None and not df_indexes.empty:
+                    for _, idx in df_indexes.iterrows():
+                        table = idx["table_name"]
+                        idx_name = idx["index_name"]
+                        is_unique = idx.get("is_unique", False)
+                        is_pk = idx.get("is_primary_key", False)
+                        columns = idx["columns"]
+
+                        if is_pk:
+                            idx_doc = (
+                                f"Primary key on {schema_name}.{table}: columns ({columns}). "
+                                f"Use these columns for exact lookups and joins."
+                            )
+                        elif is_unique:
+                            idx_doc = (
+                                f"Unique index '{idx_name}' on {schema_name}.{table}: columns ({columns}). "
+                                f"These columns contain unique values and can be used for efficient lookups."
+                            )
+                        else:
+                            idx_doc = (
+                                f"Index '{idx_name}' on {schema_name}.{table}: columns ({columns}). "
+                                f"Queries filtering or sorting by these columns will be efficient."
+                            )
+
+                        vanna_service.train(documentation=idx_doc)
+                        results["index_docs_added"] += 1
+                    st.write(f"  Found {results['index_docs_added']} index definitions.")
+                else:
+                    st.write("  No indexes found.")
+            except Exception as e:
+                msg = f"Error discovering indexes: {e}"
+                logger.warning(msg)
+                results["errors"].append(msg)
+
+            # --- Step 3: Column stats, implicit relationships, structured docs ---
+            st.write("Step 3/3: Collecting column statistics and building structured docs...")
+            try:
+                # Build WHERE clause for schema query
+                where_clause = f"WHERE c.table_schema = '{schema_name}'"
+                table_type_conditions = []
+                if object_type in ("tables", "both"):
+                    table_type_conditions.append("t.table_type = 'BASE TABLE'")
+                if object_type in ("views", "both"):
+                    table_type_conditions.append("t.table_type = 'VIEW'")
+                if not table_type_conditions:
+                    table_type_conditions.append("t.table_type = 'BASE TABLE'")
+                where_clause += " AND (" + " OR ".join(table_type_conditions) + ")"
+
+                if forbidden_tables_str:
+                    where_clause += f" AND c.table_name NOT IN ({forbidden_tables_str})"
+                if forbidden_columns:
+                    forbidden_columns_str = ", ".join(f"'{col}'" for col in forbidden_columns)
+                    where_clause += f" AND c.column_name NOT IN ({forbidden_columns_str})"
+
+                schema_query = vanna_service._build_schema_plan_query(schema_name, where_clause)
+                df_schema = vanna_service.vn.run_sql(schema_query)
+
+                if df_schema is not None and not df_schema.empty:
+                    # --- 3a: Implicit relationship detection ---
+                    try:
+                        implicit_rels = vanna_service._detect_implicit_relationships(
+                            schema_name, df_schema, forbidden_tables
+                        )
+                        for rel in implicit_rels:
+                            rel_doc = (
+                                f"Implicit relationship (naming pattern): {schema_name}.{rel['parent_table']}.{rel['parent_column']} "
+                                f"likely references {schema_name}.{rel['referenced_table']}.{rel['referenced_column']}. "
+                                f"Consider JOIN {schema_name}.{rel['referenced_table']} ON "
+                                f"{schema_name}.{rel['parent_table']}.{rel['parent_column']} = "
+                                f"{schema_name}.{rel['referenced_table']}.{rel['referenced_column']}."
+                            )
+                            vanna_service.train(documentation=rel_doc)
+                            results["implicit_relationships_added"] += 1
+                        if implicit_rels:
+                            st.write(f"  Found {results['implicit_relationships_added']} implicit relationships.")
+                    except Exception as e:
+                        logger.warning("Error detecting implicit relationships: %s", e)
+
+                    # --- 3b: Build per-table relationship and index lookups ---
+                    table_rels: dict[str, list[dict[str, str]]] = {}
+                    table_indexes: dict[str, list[dict[str, Any]]] = {}
+
+                    try:
+                        if df_rels is not None and not df_rels.empty:
+                            for _, rel in df_rels.iterrows():
+                                tname = rel["parent_table"]
+                                table_rels.setdefault(tname, []).append({
+                                    "parent_column": rel["parent_column"],
+                                    "referenced_table": rel["referenced_table"],
+                                    "referenced_column": rel["referenced_column"],
+                                })
+                    except Exception:
+                        pass
+
+                    for rel in implicit_rels:
+                        tname = rel["parent_table"]
+                        table_rels.setdefault(tname, []).append({
+                            "parent_column": rel["parent_column"],
+                            "referenced_table": rel["referenced_table"],
+                            "referenced_column": rel["referenced_column"],
+                        })
+
+                    try:
+                        if df_indexes is not None and not df_indexes.empty:
+                            for _, idx in df_indexes.iterrows():
+                                tname = idx["table_name"]
+                                table_indexes.setdefault(tname, []).append({
+                                    "columns": idx["columns"],
+                                    "is_primary_key": idx.get("is_primary_key", False),
+                                    "is_unique": idx.get("is_unique", False),
+                                })
+                    except Exception:
+                        pass
+
+                    # --- 3c: Per-table column stats, samples, mismatches, structured docs ---
+                    tables_processed = 0
+                    max_tables_for_stats = 50
+                    unique_tables = df_schema["table_name"].unique()
+
+                    for table_name in unique_tables:
+                        if tables_processed >= max_tables_for_stats:
+                            break
+
+                        if not vanna_service._has_table_rows(schema_name, table_name, "auto-enhance"):
+                            continue
+
+                        table_data = df_schema[df_schema["table_name"] == table_name]
+                        tables_processed += 1
+
+                        collected_columns: list[dict[str, Any]] = []
+
+                        for _, col_row in table_data.iterrows():
+                            col_name = col_row["column_name"]
+                            data_type = col_row["data_type"]
+
+                            col_info: dict[str, Any] = {
+                                "name": col_name,
+                                "data_type": data_type,
+                            }
+
+                            stats_query = vanna_service._build_column_stats_query(
+                                schema_name, table_name, col_name, data_type
+                            )
+                            if stats_query is None:
+                                collected_columns.append(col_info)
+                                continue
+
+                            distinct_count = None
+                            total_count = None
+                            sample_vals: list[str] = []
+                            try:
+                                df_stats = vanna_service.vn.run_sql(stats_query)
+                                if df_stats is not None and not df_stats.empty:
+                                    stats_row = df_stats.iloc[0]
+                                    stats_dict: dict[str, Any] = {}
+
+                                    distinct_count = stats_row.get("distinct_count")
+                                    total_count = stats_row.get("total_count")
+                                    null_count = stats_row.get("null_count")
+
+                                    if distinct_count is not None:
+                                        stats_dict["distinct_count"] = distinct_count
+                                    if total_count is not None:
+                                        stats_dict["total_count"] = total_count
+                                    if null_count is not None:
+                                        stats_dict["null_count"] = null_count
+
+                                    min_val = stats_row.get("min_val")
+                                    max_val = stats_row.get("max_val")
+                                    avg_val = stats_row.get("avg_val")
+                                    if min_val is not None:
+                                        stats_dict["min_val"] = min_val
+                                        stats_dict["max_val"] = max_val
+                                    if avg_val is not None:
+                                        stats_dict["avg_val"] = avg_val
+
+                                    min_len = stats_row.get("min_length")
+                                    max_len = stats_row.get("max_length")
+                                    if min_len is not None:
+                                        stats_dict["min_length"] = min_len
+                                        stats_dict["max_length"] = max_len
+
+                                    if stats_dict:
+                                        col_info["stats"] = stats_dict
+                                        results["column_stats_collected"] += 1
+
+                                    # Fetch sample values for string columns
+                                    if (
+                                        data_type.lower() in vanna_service.STRING_TYPES
+                                        and total_count is not None
+                                        and total_count > 0
+                                    ):
+                                        try:
+                                            sample_query = vanna_service._build_sample_values_query(
+                                                schema_name, table_name, col_name
+                                            )
+                                            df_samples = vanna_service.vn.run_sql(sample_query)
+                                            if df_samples is not None and not df_samples.empty:
+                                                sample_vals = df_samples["sample_value"].astype(str).tolist()
+                                        except Exception as sample_err:
+                                            logger.debug(
+                                                "Could not get samples for %s.%s: %s", table_name, col_name, sample_err
+                                            )
+
+                                    # Store sample values for low-cardinality categorical columns
+                                    if sample_vals and distinct_count is not None and distinct_count <= 25:
+                                        col_info["sample_values"] = sample_vals[:10]
+                                        results["sample_values_collected"] += 1
+
+                            except Exception as stats_err:
+                                logger.debug("Could not get stats for %s.%s: %s", table_name, col_name, stats_err)
+
+                            # Type mismatch detection
+                            try:
+                                mismatch_samples = sample_vals
+                                if not mismatch_samples and data_type.lower() in vanna_service._FLOAT_TYPES:
+                                    try:
+                                        sample_query = vanna_service._build_sample_values_query(
+                                            schema_name, table_name, col_name
+                                        )
+                                        df_mm_samples = vanna_service.vn.run_sql(sample_query)
+                                        if df_mm_samples is not None and not df_mm_samples.empty:
+                                            mismatch_samples = df_mm_samples["sample_value"].astype(str).tolist()
+                                    except Exception:
+                                        pass
+
+                                if mismatch_samples:
+                                    mismatches = vanna_service._detect_type_mismatches(data_type, mismatch_samples)
+                                    if mismatches:
+                                        col_info["mismatches"] = mismatches
+                            except Exception as mismatch_err:
+                                logger.debug(
+                                    "Could not detect type mismatches for %s.%s: %s",
+                                    table_name, col_name, mismatch_err,
+                                )
+
+                            collected_columns.append(col_info)
+
+                        # Format and store structured table document
+                        if collected_columns:
+                            try:
+                                structured_doc = vanna_service._format_structured_table_doc(
+                                    schema_name=schema_name,
+                                    table_name=table_name,
+                                    columns=collected_columns,
+                                    relationships=table_rels.get(table_name, []),
+                                    indexes=table_indexes.get(table_name, []),
+                                )
+                                vanna_service.train(documentation=structured_doc)
+                                results["structured_docs_added"] += 1
+                            except Exception as fmt_err:
+                                logger.debug("Could not create structured doc for %s: %s", table_name, fmt_err)
+
+                    st.write(
+                        f"  Processed {tables_processed} tables: "
+                        f"{results['column_stats_collected']} column stats, "
+                        f"{results['sample_values_collected']} sample value sets, "
+                        f"{results['structured_docs_added']} structured docs."
+                    )
+
+            except Exception as e:
+                msg = f"Error collecting column stats: {e}"
+                logger.warning(msg)
+                results["errors"].append(msg)
+
+            # --- Step 4: Multi-hop JOIN path documentation ---
+            try:
+                st.write("Generating multi-hop JOIN path documentation...")
+                # Collect all relationships (explicit + implicit) as dicts
+                all_rels_for_paths: list[dict[str, str]] = []
+                if df_rels is not None and not df_rels.empty:
+                    for _, rel in df_rels.iterrows():
+                        all_rels_for_paths.append({
+                            "parent_table": rel["parent_table"],
+                            "parent_column": rel["parent_column"],
+                            "referenced_table": rel["referenced_table"],
+                            "referenced_column": rel["referenced_column"],
+                        })
+                if "implicit_rels" in dir() and implicit_rels:
+                    all_rels_for_paths.extend(implicit_rels)
+
+                if all_rels_for_paths:
+                    all_tables = set()
+                    for r in all_rels_for_paths:
+                        all_tables.add(r["parent_table"])
+                        all_tables.add(r["referenced_table"])
+
+                    join_path_docs = vanna_service._find_join_paths(all_rels_for_paths, all_tables)
+                    for doc in join_path_docs:
+                        vanna_service.train(documentation=doc)
+                        results["join_paths_added"] += 1
+                    if join_path_docs:
+                        st.write(f"  Generated {results['join_paths_added']} JOIN path docs.")
+            except Exception as e:
+                msg = f"Error generating JOIN path docs: {e}"
+                logger.warning(msg)
+                results["errors"].append(msg)
+
+            # --- Step 5: View definition extraction ---
+            try:
+                st.write("Extracting view definitions...")
+                view_query = vanna_service._build_view_definitions_query(schema_name, forbidden_tables_str)
+                df_views = vanna_service.vn.run_sql(view_query)
+
+                if df_views is not None and not df_views.empty:
+                    for _, view_row in df_views.iterrows():
+                        view_name = view_row["table_name"]
+                        definition = view_row.get("view_definition", "")
+                        if definition:
+                            # Truncate very long definitions
+                            def_text = definition[:500] + ("..." if len(definition) > 500 else "")
+                            view_doc = f"View '{view_name}' is defined as: {def_text}"
+                            vanna_service.train(documentation=view_doc)
+                            results["views_documented"] += 1
+                    if results["views_documented"]:
+                        st.write(f"  Documented {results['views_documented']} views.")
+                else:
+                    st.write("  No views found.")
+            except Exception as e:
+                msg = f"Error extracting view definitions: {e}"
+                logger.warning(msg)
+                results["errors"].append(msg)
+
+            # --- Summary ---
+            total_items = (
+                results["relationships_added"]
+                + results["index_docs_added"]
+                + results["implicit_relationships_added"]
+                + results["structured_docs_added"]
+                + results["join_paths_added"]
+                + results["views_documented"]
+            )
+            if results["errors"]:
+                status.update(label=f"Auto-enhance completed with {len(results['errors'])} error(s). {total_items} items added.", state="error")
+            else:
+                status.update(label=f"Auto-enhance complete! {total_items} training items added.", state="complete")
+
+            logger.info(
+                "Auto-enhance completed: %d FK relationships, %d implicit relationships, "
+                "%d index docs, %d column stats, %d sample value docs, %d structured table docs, "
+                "%d JOIN path docs, %d views documented",
+                results["relationships_added"],
+                results["implicit_relationships_added"],
+                results["index_docs_added"],
+                results["column_stats_collected"],
+                results["sample_values_collected"],
+                results["structured_docs_added"],
+                results["join_paths_added"],
+                results["views_documented"],
+            )
+
+        except Exception as e:
+            logger.exception("Error in auto_enhance_schema: %s", e)
+            status.update(label=f"Auto-enhance failed: {e}", state="error")
+            st.error(f"Auto-enhance failed: {e}")
+
+    return results
+
+
+def train_all():
+    """Run the full training pipeline: DDL → Plan → Auto-Enhance → AI Docs.
+
+    Provides st.status progress showing 4 sequential steps with elapsed time per step.
+    """
+    with st.status("Running full training pipeline...", expanded=True) as status:
+        overall_start = time.perf_counter()
+
+        st.write("**Step 1/4:** Training DDL structures...")
+        step_start = time.perf_counter()
+        try:
+            train_ddl()
+            st.write(f"  Step 1 complete ({time.perf_counter() - step_start:.1f}s)")
+        except Exception as e:
+            st.write(f"  Step 1 failed: {e}")
+            logger.exception("train_all step 1 (DDL) failed: %s", e)
+
+        st.write("**Step 2/4:** Building schema plan...")
+        step_start = time.perf_counter()
+        try:
+            training_plan()
+            st.write(f"  Step 2 complete ({time.perf_counter() - step_start:.1f}s)")
+        except Exception as e:
+            st.write(f"  Step 2 failed: {e}")
+            logger.exception("train_all step 2 (Plan) failed: %s", e)
+
+        st.write("**Step 3/4:** Auto-enhancing schema...")
+        step_start = time.perf_counter()
+        try:
+            auto_enhance_schema(clear_existing=True)
+            st.write(f"  Step 3 complete ({time.perf_counter() - step_start:.1f}s)")
+        except Exception as e:
+            st.write(f"  Step 3 failed: {e}")
+            logger.exception("train_all step 3 (Auto-Enhance) failed: %s", e)
+
+        st.write("**Step 4/4:** Generating AI documentation (LLM-powered, may take a few minutes)...")
+        step_start = time.perf_counter()
+        try:
+            train_ai_documentation()
+            st.write(f"  Step 4 complete ({time.perf_counter() - step_start:.1f}s)")
+        except Exception as e:
+            st.write(f"  Step 4 failed: {e}")
+            logger.exception("train_all step 4 (AI Docs) failed: %s", e)
+
+        total_elapsed = time.perf_counter() - overall_start
+        status.update(label=f"Training pipeline complete! ({total_elapsed:.1f}s total)", state="complete")
+
+
+def refresh_stats():
+    """Re-run only the auto-enhance step to refresh column statistics and sample values.
+
+    Use this when data has changed but schema (tables/columns) has not.
+    Faster than Train All because it skips DDL, Plan, and AI documentation steps.
+    """
+    with st.status("Refreshing data statistics...", expanded=True) as status:
+        start = time.perf_counter()
+        try:
+            auto_enhance_schema(clear_existing=True)
+            elapsed = time.perf_counter() - start
+            status.update(label=f"Stats refresh complete! ({elapsed:.1f}s)", state="complete")
+        except Exception as e:
+            logger.exception("refresh_stats failed: %s", e)
+            status.update(label=f"Stats refresh failed: {e}", state="error")
+
+
 def train_ddl_describe_to_rag(table: str, ddl: list):
     """
     Generate statistical profiles for table columns and train RAG model with the insights.
@@ -2891,13 +4051,29 @@ def _analyze_boolean_column(column_data: pd.Series, non_null_count: int) -> list
 
 # Train Vanna on database question/query pairs from file
 def train_file():
+    """DEPRECATED: Use CSV import instead. Loads hardcoded demo Q&A from training_data.json."""
+    import warnings
+
+    warnings.warn(
+        "train_file() is deprecated. Use the CSV import feature instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
+        from utils.security_validator import security_validator
+
         vanna_service = VannaService.from_streamlit_session()
 
         # Load training queries from JSON
         training_file = Path(__file__).parent / "config" / "training_data.json"
         with open(training_file, "r") as f:
             training_data = json.load(f)
+
+        # Validate the entire file against forbidden references
+        is_valid, violations = security_validator.validate_training_data_file(training_data)
+        if not is_valid:
+            logger.warning("Training data file contains forbidden references: %s", violations)
+            st.warning(f"Some training entries were blocked: {len(violations)} violation(s)")
 
         # Extract the sample queries
         sample_queries = training_data.get("sample_queries", [])
