@@ -131,6 +131,17 @@ def test_is_oidc_mode_returns_false_when_mode_is_local():
         assert is_oidc_mode() is False
 
 
+def test_is_oidc_mode_returns_false_when_auth_section_is_not_a_dict():
+    """Misconfigured auth = 'string' (not a TOML table) → local mode, no crash."""
+    from unittest.mock import patch
+
+    from utils.okta_auth import is_oidc_mode
+
+    with patch("streamlit.secrets", new={"auth": "oidc"}):
+        # Misconfiguration: auth is a string instead of a section. Should not crash.
+        assert is_oidc_mode() is False
+
+
 def _claims(sub="okta-sub-1", email="alice@example.com", groups=None, **extra):
     """Build a fake OIDC claims dict (the shape st.user.to_dict() returns)."""
     base = {

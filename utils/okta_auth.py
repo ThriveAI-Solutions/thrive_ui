@@ -59,10 +59,15 @@ def is_oidc_mode() -> bool:
     """True iff secrets.toml has [auth].mode == 'oidc'.
 
     Any other value, or a missing [auth] section, means local mode.
+    A misconfigured non-dict auth value (e.g. `auth = "oidc"` instead of
+    `[auth]\nmode = "oidc"`) is also treated as local mode rather than
+    crashing.
     """
     import streamlit as st
 
     auth_section = st.secrets.get("auth", {}) if hasattr(st, "secrets") else {}
+    if not isinstance(auth_section, dict):
+        return False
     return auth_section.get("mode") == "oidc"
 
 
