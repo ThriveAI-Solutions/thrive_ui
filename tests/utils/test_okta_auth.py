@@ -187,7 +187,6 @@ def test_sync_okta_user_to_db_matches_existing_by_sub(in_memory_orm_session):
 
 def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_session):
     """Pre-provisioned row (email set, sub NULL) gets sub stamped on first login."""
-    from orm.functions import create_user
     from orm.models import User, UserRole
     from utils.okta_auth import sync_okta_user_to_db
 
