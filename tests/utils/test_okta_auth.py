@@ -47,3 +47,56 @@ def test_in_memory_orm_session_fixture_seeds_user_roles(in_memory_orm_session):
     with in_memory_orm_session() as session:
         names = {r.role_name for r in session.query(UserRole).all()}
         assert names == {"Admin", "Doctor", "Nurse", "Patient"}
+
+
+def test_role_id_from_groups_admin_wins(in_memory_orm_session):
+    """When user is in admin and doctor groups, ADMIN role is selected."""
+    from utils.okta_auth import role_id_from_groups
+
+    with in_memory_orm_session() as session:
+        role_id = role_id_from_groups(["thriveai-admin", "thriveai-doctor"], session)
+
+    from orm.models import UserRole
+
+    with in_memory_orm_session() as session:
+        admin_role = session.query(UserRole).filter_by(role_name="Admin").one()
+        # role_id_from_groups must return the Admin role id from this DB.
+        # Note: across two separate `with` blocks above, IDs are stable for the
+        # same fixture instance — both yield the same engine.
+        assert role_id == admin_role.id
+
+
+def test_role_id_from_groups_no_match_defaults_to_doctor(in_memory_orm_session):
+    """No matching group → default DOCTOR."""
+    from orm.models import UserRole
+    from utils.okta_auth import role_id_from_groups
+
+    with in_memory_orm_session() as session:
+        role_id = role_id_from_groups(["random-group", "another-group"], session)
+        doctor_role = session.query(UserRole).filter_by(role_name="Doctor").one()
+
+    assert role_id == doctor_role.id
+
+
+def test_role_id_from_groups_empty_list_defaults_to_doctor(in_memory_orm_session):
+    """Empty groups claim → default DOCTOR."""
+    from orm.models import UserRole
+    from utils.okta_auth import role_id_from_groups
+
+    with in_memory_orm_session() as session:
+        role_id = role_id_from_groups([], session)
+        doctor_role = session.query(UserRole).filter_by(role_name="Doctor").one()
+
+    assert role_id == doctor_role.id
+
+
+def test_role_id_from_groups_nurse_alone(in_memory_orm_session):
+    """thriveai-nurse alone → Nurse role."""
+    from orm.models import UserRole
+    from utils.okta_auth import role_id_from_groups
+
+    with in_memory_orm_session() as session:
+        role_id = role_id_from_groups(["thriveai-nurse"], session)
+        nurse_role = session.query(UserRole).filter_by(role_name="Nurse").one()
+
+    assert role_id == nurse_role.id
