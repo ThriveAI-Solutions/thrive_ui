@@ -178,6 +178,27 @@ class User(Base):
         }
 
 
+class Conversation(Base):
+    """Represents a named conversation thread for a user."""
+
+    __tablename__ = "thrive_conversation"
+    __table_args__ = (
+        Index("ix_thrive_conversation_user_id", "user_id"),
+        Index("ix_thrive_conversation_updated_at", "updated_at"),
+    )
+
+    id = Column(String(36), primary_key=True)  # UUID string
+    user_id = Column(Integer, ForeignKey("thrive_user.id"), nullable=False)
+    title = Column(String(255), nullable=False, default="New Conversation")
+    is_archived = Column(Boolean, default=False)
+    created_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id])
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+
 class Message(Base):
     __tablename__ = "thrive_message"
     __table_args__ = (
@@ -189,6 +210,7 @@ class Message(Base):
     )
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("thrive_user.id"))
+    conversation_id = Column(String(36), ForeignKey("thrive_conversation.id"), nullable=True)
     group_id = Column(String(50))  # UUID to group messages in the same flow
     role = Column(String(50), nullable=False)
     content = Column(String, nullable=False)
@@ -209,6 +231,8 @@ class Message(Base):
     user = relationship("User", back_populates="messages", foreign_keys=[user_id])
     # ORM relationship for the reviewer (admin who approved/rejected)
     reviewer = relationship("User", foreign_keys=[reviewed_by])
+    # ORM relationship to conversation thread
+    conversation = relationship("Conversation", back_populates="messages", foreign_keys=[conversation_id])
 
     def __init__(
         self,
@@ -221,6 +245,7 @@ class Message(Base):
         elapsed_time: Decimal = None,
         user_id: int = None,
         group_id: str = None,
+        conversation_id: str = None,
     ):
         # Try to get user_id from session_state if not provided directly
         if user_id is None:
@@ -240,6 +265,7 @@ class Message(Base):
 
         self.user_id = user_id
         self.group_id = group_id
+        self.conversation_id = conversation_id
         self.role = role.value
         self.content = content_to_json(type.value, content)
         self.type = type.value

@@ -4,7 +4,12 @@ import time
 import pandas as pd
 import streamlit as st
 
-from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
+from orm.functions import (
+    get_recent_messages,
+    load_messages_for_conversation,
+    save_user_settings,
+    set_user_preferences_in_session_state,
+)
 from utils.chat_bot_helper import (
     get_message_group_css,
     get_unique_messages,
@@ -17,6 +22,7 @@ from utils.chat_bot_helper import (
 from utils.communicate import listen
 from utils.enums import RoleType, ThemeType
 from utils.magic_functions import is_magic_do_magic
+from views.conversation_sidebar import ensure_active_conversation, render_conversation_sidebar
 
 
 def get_themed_asset_path(asset_name):
@@ -54,9 +60,23 @@ logger = logging.getLogger(__name__)
 
 set_user_preferences_in_session_state()
 
-# Initialize session state variables
+# Ensure the user has an active conversation thread
+ensure_active_conversation()
+
+# Initialize session state variables — scoped to the active conversation
 if "messages" not in st.session_state or st.session_state.messages == []:
-    st.session_state.messages = get_recent_messages()
+    conversation_id = st.session_state.get("conversation_id")
+    if conversation_id:
+        import json as _json
+
+        _user_id_str = st.session_state.cookies.get("user_id") if hasattr(st.session_state, "cookies") else None
+        _user_id = _json.loads(_user_id_str) if _user_id_str else None
+        if _user_id:
+            st.session_state.messages = load_messages_for_conversation(conversation_id, _user_id)
+        else:
+            st.session_state.messages = get_recent_messages()
+    else:
+        st.session_state.messages = get_recent_messages()
 if st.session_state.messages is None:
     st.session_state.messages = []
 
@@ -76,6 +96,9 @@ if len(st.session_state.messages) > max_messages:
 
 
 st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
+
+# Conversation thread sidebar
+render_conversation_sidebar()
 
 # LLM Selection UI
 with st.sidebar.expander("🤖 LLM Selection", expanded=False):

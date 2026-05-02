@@ -452,6 +452,22 @@ def set_question(question: str, render=True):
             st.session_state["show_failed_sql_open"] = False
         except Exception:
             pass
+
+        # Auto-title the conversation from the first user message
+        try:
+            conv_id = st.session_state.get("conversation_id")
+            if conv_id and not is_followup_command(question):
+                # Only auto-title if there are no existing user messages (first message)
+                existing_user_msgs = [
+                    m for m in (st.session_state.get("messages") or []) if getattr(m, "role", None) == RoleType.USER.value
+                ]
+                if not existing_user_msgs:
+                    from views.conversation_sidebar import auto_title_conversation
+
+                    auto_title_conversation(conv_id, question)
+        except Exception:
+            pass
+
         add_message(Message(RoleType.USER, question, MessageType.TEXT, group_id=group_id), render)
 
 
@@ -1125,8 +1141,24 @@ def add_message(message: Message, render=True):
     if message.group_id is None:
         message.group_id = get_current_group_id()
 
+    # Attach conversation_id from session state if not already set
+    if message.conversation_id is None:
+        conversation_id = st.session_state.get("conversation_id")
+        if conversation_id:
+            message.conversation_id = conversation_id
+
     message = message.save()
     st.session_state.messages.append(message)
+
+    # Touch the conversation to update its updated_at timestamp
+    try:
+        conv_id = st.session_state.get("conversation_id")
+        if conv_id:
+            from orm.functions import touch_conversation
+
+            touch_conversation(conv_id)
+    except Exception:
+        pass
 
     # Manage session state memory by keeping only the most recent messages
     from utils.config_helper import get_max_session_messages
