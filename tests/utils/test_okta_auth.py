@@ -129,3 +129,133 @@ def test_is_oidc_mode_returns_false_when_mode_is_local():
 
     with patch("streamlit.secrets", new={"auth": {"mode": "local"}}):
         assert is_oidc_mode() is False
+
+
+def _claims(sub="okta-sub-1", email="alice@example.com", groups=None, **extra):
+    """Build a fake OIDC claims dict (the shape st.user.to_dict() returns)."""
+    base = {
+        "sub": sub,
+        "email": email,
+        "email_verified": True,
+        "given_name": "Alice",
+        "family_name": "Anderson",
+        "groups": groups if groups is not None else ["thriveai-doctor"],
+    }
+    base.update(extra)
+    return base
+
+
+def test_sync_okta_user_to_db_jit_creates_new_user(in_memory_orm_session):
+    """First-time login: row is JIT-created with default DOCTOR role."""
+    from orm.models import RoleTypeEnum, User
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        user = sync_okta_user_to_db(_claims(groups=["unrelated-group"]), session)
+
+        assert user.id is not None
+        assert user.okta_sub == "okta-sub-1"
+        assert user.email == "alice@example.com"
+        assert user.first_name == "Alice"
+        assert user.last_name == "Anderson"
+        assert user.password is None
+        assert user.role.role == RoleTypeEnum.DOCTOR  # default fallback
+
+        # Exactly one User row created.
+        assert session.query(User).count() == 1
+
+
+def test_sync_okta_user_to_db_matches_existing_by_sub(in_memory_orm_session):
+    """Second login by the same sub reuses the existing row."""
+    from orm.models import User
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        first = sync_okta_user_to_db(_claims(), session)
+        first_id = first.id
+
+        # Same sub, but the email has changed at the IdP. We still match
+        # by sub and accept the new email on the row.
+        updated = sync_okta_user_to_db(
+            _claims(email="alice.new@example.com"), session
+        )
+
+        assert updated.id == first_id
+        assert updated.email == "alice.new@example.com"
+        assert session.query(User).count() == 1
+
+
+def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_session):
+    """Pre-provisioned row (email set, sub NULL) gets sub stamped on first login."""
+    from orm.functions import create_user
+    from orm.models import User, UserRole
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        admin_role = session.query(UserRole).filter_by(role_name="Admin").one()
+
+        # Manually insert a pre-provisioned row with email set, sub NULL,
+        # admin role (i.e. an admin pre-created this user expecting them to log in).
+        pre = User(
+            username="alice@example.com",
+            password=None,
+            email="alice@example.com",
+            okta_sub=None,
+            first_name="Alice",
+            last_name="Anderson",
+            user_role_id=admin_role.id,
+        )
+        session.add(pre)
+        session.commit()
+        pre_id = pre.id
+
+        # Now Alice logs in. Her group claim says doctor, but admin pre-set
+        # her role. Per spec §6, Okta is source of truth for OIDC users —
+        # her role gets refreshed from the claim on every login.
+        user = sync_okta_user_to_db(
+            _claims(groups=["thriveai-doctor"]), session
+        )
+
+        assert user.id == pre_id
+        assert user.okta_sub == "okta-sub-1"  # sub now stamped onto pre row
+        assert session.query(User).count() == 1
+
+
+def test_sync_okta_user_to_db_role_updates_on_subsequent_login(in_memory_orm_session):
+    """If groups change between logins, the role updates."""
+    from orm.models import RoleTypeEnum
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        # First login as doctor.
+        user = sync_okta_user_to_db(_claims(groups=["thriveai-doctor"]), session)
+        assert user.role.role == RoleTypeEnum.DOCTOR
+
+        # User is later promoted to admin in Okta. Next login sees the new group.
+        user = sync_okta_user_to_db(_claims(groups=["thriveai-admin"]), session)
+        assert user.role.role == RoleTypeEnum.ADMIN
+
+
+def test_sync_okta_user_to_db_email_match_is_case_insensitive(in_memory_orm_session):
+    """Existing row with email 'Alice@Example.com' matches claim 'alice@example.com'."""
+    from orm.models import User, UserRole
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        doctor_role = session.query(UserRole).filter_by(role_name="Doctor").one()
+        pre = User(
+            username="alice@example.com",
+            password=None,
+            email="Alice@Example.com",
+            okta_sub=None,
+            first_name="A",
+            last_name="A",
+            user_role_id=doctor_role.id,
+        )
+        session.add(pre)
+        session.commit()
+
+        user = sync_okta_user_to_db(_claims(email="alice@example.com"), session)
+        assert user.id == pre.id
+        assert user.okta_sub == "okta-sub-1"
+        assert session.query(User).count() == 1

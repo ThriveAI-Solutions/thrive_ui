@@ -66,3 +66,72 @@ def is_oidc_mode() -> bool:
 
     auth_section = st.secrets.get("auth", {}) if hasattr(st, "secrets") else {}
     return auth_section.get("mode") == "oidc"
+
+
+def sync_okta_user_to_db(claims: dict, session: SqlSession):
+    """Look up or JIT-create a User row matching the OIDC claims.
+
+    Args:
+        claims: OIDC ID-token claims dict. Must include `sub`. Should
+            include `email`, `given_name`, `family_name`, and `groups`.
+        session: Active SQLAlchemy session.
+
+    Returns:
+        The User row, with role refreshed from the group claim.
+    """
+    from sqlalchemy import func
+
+    from orm.models import User
+
+    sub = claims.get("sub")
+    if not sub:
+        raise ValueError("OIDC claims missing required 'sub' field")
+    email = (claims.get("email") or "").strip()
+    given_name = claims.get("given_name") or ""
+    family_name = claims.get("family_name") or ""
+    groups = claims.get("groups") or []
+
+    target_role_id = role_id_from_groups(groups, session)
+
+    # 1. Match by okta_sub (canonical).
+    user = session.query(User).filter(User.okta_sub == sub).one_or_none()
+
+    # 2. Bootstrap match by email (case-insensitive) and stamp sub.
+    if user is None and email:
+        user = (
+            session.query(User)
+            .filter(func.lower(User.email) == email.lower())
+            .one_or_none()
+        )
+        if user is not None:
+            user.okta_sub = sub
+
+    # 3. JIT-create.
+    if user is None:
+        user = User(
+            username=email or sub,         # admin can rename later
+            password=None,                 # OIDC-only user
+            email=email or None,
+            okta_sub=sub,
+            first_name=given_name,
+            last_name=family_name,
+            user_role_id=target_role_id,
+        )
+        session.add(user)
+        logger.info("JIT-created OIDC user sub=%s email=%s", sub, email)
+    else:
+        # Existing user: refresh attributes from claims. Per spec §6,
+        # Okta is source of truth for OIDC users — role gets overwritten.
+        if email and user.email != email:
+            user.email = email
+        if given_name and user.first_name != given_name:
+            user.first_name = given_name
+        if family_name and user.last_name != family_name:
+            user.last_name = family_name
+        user.user_role_id = target_role_id
+
+    session.commit()
+    session.refresh(user)
+    # Force-load the role relationship so the caller can read user.role.
+    _ = user.role
+    return user
