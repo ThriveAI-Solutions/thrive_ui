@@ -125,7 +125,12 @@ class User(Base):
     username = Column(String(50), nullable=False, unique=True)
     first_name = Column(String(50), nullable=False)
     last_name = Column(String(50), nullable=False)
-    password = Column(String(255), nullable=False)
+    password = Column(String(255), nullable=True)  # NULL for OIDC-only users
+    # OIDC fields (NULL for local-only users; populated for users who
+    # authenticate via Okta SSO). See
+    # docs/superpowers/specs/2026-05-01-okta-oidc-integration-design.md §5.
+    okta_sub = Column(String(255), nullable=True, unique=True)
+    email = Column(String(320, collation="NOCASE"), nullable=True, unique=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     show_sql = Column(Boolean, default=True)
