@@ -161,3 +161,140 @@ def populate_session_state_from_user(user) -> None:
         set_user_preferences_in_session_state()
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("set_user_preferences_in_session_state failed: %s", exc)
+
+
+def handle_oidc_auth() -> None:
+    """OIDC entry point. Called from utils/auth.check_authenticate when in OIDC mode.
+
+    If the user is not logged in, render a single SSO button and stop the page.
+    If the user is logged in, sync the User row, populate session state, and
+    render the sidebar welcome banner + Log Out button (replacing what
+    _handle_local_auth does in the local path).
+    """
+    import streamlit as st
+
+    if not getattr(st.user, "is_logged_in", False):
+        st.markdown(
+            """
+            <style>
+                [data-testid="stSidebarCollapsedControl"], [data-testid="stSidebar"] {
+                    display: none
+                }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.title("🔓 Sign in to HEALTHeINTELLIGENCE")
+        if st.button("Sign in with HEALTHeCOMMUNITY (Okta)", type="primary"):
+            st.login()  # uses [auth] config; for multi-provider use st.login("okta")
+        st.stop()
+        return  # for tests where st.stop is mocked
+
+    # Logged in. Materialize claims and sync.
+    claims = st.user.to_dict() if hasattr(st.user, "to_dict") else {
+        "sub": getattr(st.user, "sub", None),
+        "email": getattr(st.user, "email", None),
+        "email_verified": getattr(st.user, "email_verified", None),
+        "given_name": getattr(st.user, "given_name", ""),
+        "family_name": getattr(st.user, "family_name", ""),
+        "groups": getattr(st.user, "groups", []),
+    }
+
+    from orm.models import SessionLocal
+
+    with SessionLocal() as session:
+        user = sync_okta_user_to_db(claims, session)
+        populate_session_state_from_user(user)
+        # Cache attributes we need for the sidebar before the session closes.
+        display_name = f"{user.first_name} {user.last_name}".strip()
+        username = user.username
+        user_id = user.id
+
+    # Reuse existing login logging.
+    try:
+        from orm.logging_functions import log_login
+
+        log_login(user_id=user_id, username=username, success=True)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to log OIDC login for user %s: %s", username, exc)
+
+    # Render sidebar welcome banner + Log Out button. This mirrors the local
+    # path in utils/auth.py:_handle_local_auth so the user gets the same UI.
+    cols = st.sidebar.columns([0.7, 0.3], vertical_alignment="bottom")
+    with cols[0]:
+        st.title(f"Welcome {display_name}")
+    with cols[1]:
+        if st.button("Log Out"):
+            handle_oidc_logout()
+
+
+def handle_oidc_logout() -> None:
+    """Logout for OIDC mode.
+
+    1. Invalidate VannaService cache for the current user.
+    2. Clear app session state to match local-mode logout shape.
+    3. Clear the mirrored cookies set in populate_session_state_from_user.
+    4. Emit a meta-refresh redirect to auth.post_logout_redirect_url so the
+       browser navigates to the Portal as the page tears down.
+    5. Call st.logout() to drop Streamlit's auth cookie.
+
+    The redirect is best-effort — if browser timing or Streamlit's rerun
+    suppresses the meta-refresh, the user lands on the SSO button page and
+    can navigate manually.
+    """
+    import json
+
+    import streamlit as st
+
+    # 1. Invalidate VannaService cache while we still have the user identity.
+    # Use bracket access on session_state so this works against both Streamlit's
+    # SessionStateProxy and tests that patch session_state with a plain dict.
+    try:
+        from utils.vanna_calls import VannaService
+
+        cookies = st.session_state["cookies"] if "cookies" in st.session_state else None
+        user_id_str = cookies.get("user_id") if cookies is not None else None
+        user_role = st.session_state.get("user_role")
+        if user_id_str and user_role is not None:
+            # cookies["user_id"] is JSON-encoded for compat with local mode;
+            # tolerate both raw and JSON-encoded values.
+            try:
+                user_id = json.loads(user_id_str)
+            except (TypeError, ValueError):
+                user_id = user_id_str
+            VannaService.invalidate_cache_for_user(str(user_id), user_role)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to invalidate VannaService cache on OIDC logout: %s", exc)
+
+    # 2. Clear app state.
+    st.session_state["messages"] = []
+    st.session_state["selected_llm_provider"] = None
+    st.session_state["selected_llm_model"] = None
+    if "_vn_instance" in st.session_state:
+        st.session_state["_vn_instance"] = None
+
+    # 3. Clear mirrored cookies.
+    try:
+        cookies = st.session_state["cookies"] if "cookies" in st.session_state else None
+        if cookies is not None:
+            cookies["user_id"] = ""
+            cookies["role_name"] = ""
+            if hasattr(cookies, "save"):
+                cookies.save()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to clear mirrored cookies on OIDC logout: %s", exc)
+
+    # 4. Emit a meta-refresh redirect to the post-logout URL.
+    redirect_url = (
+        st.secrets.get("auth", {}).get("post_logout_redirect_url")
+        if hasattr(st, "secrets")
+        else None
+    )
+    if redirect_url:
+        st.markdown(
+            f'<meta http-equiv="refresh" content="0; url={redirect_url}">',
+            unsafe_allow_html=True,
+        )
+
+    # 5. Drop Streamlit's auth cookie.
+    st.logout()

@@ -295,3 +295,194 @@ def test_populate_session_state_from_user_writes_expected_keys(in_memory_orm_ses
     assert fake_cookies["role_name"] == "Admin"
     assert fake_session_state["user_role"] == 0  # ADMIN
     assert fake_session_state["username"] == "Alice Anderson"
+
+
+def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_session):
+    """If st.user.is_logged_in is False, render a login button and stop the page."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from utils.okta_auth import handle_oidc_auth
+
+    fake_user = SimpleNamespace(is_logged_in=False)
+    button_mock = MagicMock(return_value=False)
+    login_mock = MagicMock()
+    stop_mock = MagicMock(side_effect=SystemExit)
+
+    with patch("streamlit.user", fake_user), \
+         patch("streamlit.button", button_mock), \
+         patch("streamlit.login", login_mock), \
+         patch("streamlit.stop", stop_mock), \
+         patch("streamlit.title"), \
+         patch("streamlit.markdown"):
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+
+    button_mock.assert_called_once()  # SSO button rendered
+    login_mock.assert_not_called()    # not clicked yet
+    stop_mock.assert_called_once()
+
+
+def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
+    """If the user clicks the SSO button, st.login() is called."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from utils.okta_auth import handle_oidc_auth
+
+    fake_user = SimpleNamespace(is_logged_in=False)
+    # Button returns True meaning the user clicked it.
+    button_mock = MagicMock(return_value=True)
+    login_mock = MagicMock()
+
+    with patch("streamlit.user", fake_user), \
+         patch("streamlit.button", button_mock), \
+         patch("streamlit.login", login_mock), \
+         patch("streamlit.stop", MagicMock(side_effect=SystemExit)), \
+         patch("streamlit.title"), \
+         patch("streamlit.markdown"):
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+
+    login_mock.assert_called_once()
+
+
+def test_handle_oidc_auth_when_logged_in_runs_sync_and_populates_state(
+    in_memory_orm_session,
+):
+    """If logged in, sync the user and populate session state, and draw sidebar."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    fake_user = SimpleNamespace(
+        is_logged_in=True,
+        sub="okta-sub-99",
+        email="bob@example.com",
+        given_name="Bob",
+        family_name="Brown",
+        groups=["thriveai-doctor"],
+    )
+
+    # st.user supports .to_dict(); add it as a method.
+    fake_user.to_dict = lambda: {
+        "sub": "okta-sub-99",
+        "email": "bob@example.com",
+        "email_verified": True,
+        "given_name": "Bob",
+        "family_name": "Brown",
+        "groups": ["thriveai-doctor"],
+    }
+
+    fake_session_state = {"cookies": MagicMock()}
+    sidebar_mock = MagicMock()
+    # st.sidebar.columns returns a list of column-context-managers.
+    cm1, cm2 = MagicMock(), MagicMock()
+    cm1.__enter__ = MagicMock(return_value=cm1)
+    cm1.__exit__ = MagicMock(return_value=False)
+    cm2.__enter__ = MagicMock(return_value=cm2)
+    cm2.__exit__ = MagicMock(return_value=False)
+    sidebar_mock.columns.return_value = [cm1, cm2]
+
+    button_mock = MagicMock(return_value=False)  # logout not clicked
+
+    with patch("streamlit.user", fake_user), \
+         patch("streamlit.session_state", fake_session_state), \
+         patch("streamlit.sidebar", sidebar_mock), \
+         patch("streamlit.title"), \
+         patch("streamlit.button", button_mock), \
+         patch("orm.functions.set_user_preferences_in_session_state", MagicMock()):
+        from utils.okta_auth import handle_oidc_auth
+
+        handle_oidc_auth()
+
+    # cookies["role_name"] was written (sync + populate ran).
+    fake_session_state["cookies"].__setitem__.assert_any_call("role_name", "Doctor")
+    # Sidebar columns were created (welcome + logout button rendered).
+    sidebar_mock.columns.assert_called_once()
+    # Logout button was rendered (returned False, so logout did not fire).
+    button_mock.assert_called()
+
+
+def test_handle_oidc_auth_logout_button_calls_handle_oidc_logout(in_memory_orm_session):
+    """Clicking the sidebar Log Out button calls handle_oidc_logout."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    fake_user = SimpleNamespace(is_logged_in=True)
+    fake_user.to_dict = lambda: {
+        "sub": "okta-sub-99",
+        "email": "bob@example.com",
+        "email_verified": True,
+        "given_name": "Bob",
+        "family_name": "Brown",
+        "groups": ["thriveai-doctor"],
+    }
+
+    fake_session_state = {"cookies": MagicMock()}
+    sidebar_mock = MagicMock()
+    cm1, cm2 = MagicMock(), MagicMock()
+    for cm in (cm1, cm2):
+        cm.__enter__ = MagicMock(return_value=cm)
+        cm.__exit__ = MagicMock(return_value=False)
+    sidebar_mock.columns.return_value = [cm1, cm2]
+
+    button_mock = MagicMock(return_value=True)  # user clicked Log Out
+    logout_mock = MagicMock()
+
+    with patch("streamlit.user", fake_user), \
+         patch("streamlit.session_state", fake_session_state), \
+         patch("streamlit.sidebar", sidebar_mock), \
+         patch("streamlit.title"), \
+         patch("streamlit.button", button_mock), \
+         patch("utils.okta_auth.handle_oidc_logout", logout_mock), \
+         patch("orm.functions.set_user_preferences_in_session_state", MagicMock()):
+        from utils.okta_auth import handle_oidc_auth
+
+        handle_oidc_auth()
+
+    logout_mock.assert_called_once()
+
+
+def test_handle_oidc_logout_clears_state_and_calls_st_logout(in_memory_orm_session):
+    """Logout clears VannaService cache and session state, emits redirect, calls st.logout()."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {
+        "cookies": MagicMock(),
+        "messages": ["msg1"],
+        "_vn_instance": MagicMock(),
+        "selected_llm_provider": "anthropic",
+        "selected_llm_model": "claude-3",
+        "user_role": 1,
+    }
+    fake_session_state["cookies"].get.return_value = '42'
+
+    logout_mock = MagicMock()
+    invalidate_mock = MagicMock()
+    markdown_mock = MagicMock()
+
+    with patch("streamlit.session_state", fake_session_state), \
+         patch("streamlit.logout", logout_mock), \
+         patch("streamlit.markdown", markdown_mock), \
+         patch("streamlit.secrets", new={"auth": {"post_logout_redirect_url": "https://portal.example/"}}), \
+         patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", invalidate_mock):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
+
+    invalidate_mock.assert_called_once_with("42", 1)
+    logout_mock.assert_called_once()
+    assert fake_session_state["messages"] == []
+    assert fake_session_state["_vn_instance"] is None
+    assert fake_session_state["selected_llm_provider"] is None
+    assert fake_session_state["selected_llm_model"] is None
+    # Redirect HTML was emitted before st.logout().
+    redirect_call_found = any(
+        "https://portal.example/" in str(call)
+        for call in markdown_mock.call_args_list
+    )
+    assert redirect_call_found, "expected a redirect markdown to the post_logout_redirect_url"
