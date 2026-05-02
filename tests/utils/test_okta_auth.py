@@ -258,3 +258,40 @@ def test_sync_okta_user_to_db_email_match_is_case_insensitive(in_memory_orm_sess
         assert user.id == pre.id
         assert user.okta_sub == "okta-sub-1"
         assert session.query(User).count() == 1
+
+
+def test_populate_session_state_from_user_writes_expected_keys(in_memory_orm_session):
+    """After population, session state mirrors what local-mode login produces."""
+    import json
+    from unittest.mock import patch
+
+    from utils.okta_auth import populate_session_state_from_user, sync_okta_user_to_db
+
+    fake_session_state = {}
+    fake_cookies = {}
+
+    class FakeCookies:
+        def get(self, key):
+            return fake_cookies.get(key)
+
+        def __setitem__(self, key, value):
+            fake_cookies[key] = value
+
+        def __getitem__(self, key):
+            return fake_cookies[key]
+
+        def save(self):
+            pass
+
+    fake_session_state["cookies"] = FakeCookies()
+
+    with in_memory_orm_session() as session:
+        user = sync_okta_user_to_db(_claims(groups=["thriveai-admin"]), session)
+
+    with patch("streamlit.session_state", fake_session_state):
+        populate_session_state_from_user(user)
+
+    assert fake_cookies["user_id"] == json.dumps(user.id)
+    assert fake_cookies["role_name"] == "Admin"
+    assert fake_session_state["user_role"] == 0  # ADMIN
+    assert fake_session_state["username"] == "Alice Anderson"

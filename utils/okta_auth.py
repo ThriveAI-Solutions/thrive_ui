@@ -135,3 +135,29 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
     # Force-load the role relationship so the caller can read user.role.
     _ = user.role
     return user
+
+
+def populate_session_state_from_user(user) -> None:
+    """Mirror a User row into session state in the shape downstream code expects.
+
+    After this returns, the app behaves identically to a local-mode login:
+    cookies['user_id'], cookies['role_name'], session_state.user_role,
+    session_state.username, and all preference flags are populated.
+    """
+    import json
+
+    import streamlit as st
+
+    from orm.functions import set_user_preferences_in_session_state
+
+    st.session_state["cookies"]["user_id"] = json.dumps(user.id)
+    st.session_state["cookies"]["role_name"] = user.role.role_name
+    st.session_state["user_role"] = user.role.role.value
+    st.session_state["username"] = f"{user.first_name} {user.last_name}".strip()
+
+    # Reuse the existing preference loader; it reads cookies['user_id'] and
+    # populates the same set of session-state keys local-mode login does.
+    try:
+        set_user_preferences_in_session_state()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("set_user_preferences_in_session_state failed: %s", exc)
