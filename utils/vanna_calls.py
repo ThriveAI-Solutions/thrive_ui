@@ -940,9 +940,12 @@ class VannaService:
             if sql_response and not sql_response.strip().upper().startswith(
                 ("SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "EXPLAIN")
             ):
-                # Response is not SQL — likely an error message from the API
+                # Response is not SQL — preserve the LLM's actual response for display
                 logger.warning("LLM returned non-SQL response: %s", sql_response[:200])
-                st.error(sql_response)
+                try:
+                    st.session_state["last_llm_non_sql_response"] = sql_response
+                except Exception:
+                    pass
                 return None, 0
 
             response = _self.check_references(sql_response)

@@ -1635,18 +1635,32 @@ def normal_message_flow(my_question: str):
 
         st.stop()
     else:
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                "I wasn't able to generate SQL for that question",
-                MessageType.ERROR,
-                final_sql,
-                my_question,
-                group_id=get_current_group_id(),
+        # Show the LLM's actual response if it gave one, otherwise use generic message
+        llm_response = st.session_state.pop("last_llm_non_sql_response", None)
+        if llm_response:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    llm_response,
+                    MessageType.TEXT,
+                    final_sql,
+                    my_question,
+                    group_id=get_current_group_id(),
+                )
             )
-        )
-        if st.session_state.get("llm_fallback", True):
+        elif st.session_state.get("llm_fallback", True):
             call_llm(my_question)
+        else:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    "I wasn't able to generate SQL for that question",
+                    MessageType.ERROR,
+                    final_sql,
+                    my_question,
+                    group_id=get_current_group_id(),
+                )
+            )
 
         # Clear the question from session state after error processing
         st.session_state.my_question = None
