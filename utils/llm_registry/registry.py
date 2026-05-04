@@ -1,14 +1,14 @@
 """Central registry for LLM providers."""
 
-import logging
 from functools import lru_cache
 from typing import Dict
 from utils.llm_registry.base import LLMProvider
 from utils.llm_registry.providers.ollama import OllamaProvider
 from utils.llm_registry.providers.openai import OpenAIProvider
 from utils.llm_registry.models import LLMProviderConfig, LLMModelInfo
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LLMProviderRegistry:

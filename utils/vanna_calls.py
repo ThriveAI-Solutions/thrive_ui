@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 import time
 from dataclasses import dataclass
@@ -23,9 +22,10 @@ from vanna.legacy.vannadb import VannaDB_VectorStore
 
 from utils.chromadb_vector import ThriveAI_ChromaDB
 from utils.milvus_vector import ThriveAI_Milvus
+from utils.quick_logger import calculate_process_performance, get_logger, pvlog, set_start_time
 from utils.thriveai_ollama import ThriveAI_Ollama
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _get_user_id_from_session() -> int | None:
@@ -157,10 +157,12 @@ class MyVannaCloudChromaDB(ThriveAI_ChromaDB):
                 "Vanna-Key": self._api_key,
                 "Vanna-Org": self._model,
             },
-            data=json.dumps({
-                "method": "submit_prompt",
-                "params": params,
-            }),
+            data=json.dumps(
+                {
+                    "method": "submit_prompt",
+                    "params": params,
+                }
+            ),
         )
         d = response.json()
         if "result" not in d:
@@ -962,10 +964,15 @@ class VannaService:
                 sql_response = _self.vn.generate_sql(question=augmented_question)
 
             # Surface LLM API errors instead of silently treating them as bad SQL
-            if sql_response and not sql_response.strip().upper().startswith(("SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "EXPLAIN")):
-                # Response is not SQL — likely an error message from the API
+            if sql_response and not sql_response.strip().upper().startswith(
+                ("SELECT", "WITH", "INSERT", "UPDATE", "DELETE", "CREATE", "ALTER", "DROP", "EXPLAIN")
+            ):
+                # Response is not SQL — preserve the LLM's actual response for display
                 logger.warning("LLM returned non-SQL response: %s", sql_response[:200])
-                st.error(sql_response)
+                try:
+                    st.session_state["last_llm_non_sql_response"] = sql_response
+                except Exception:
+                    pass
                 return None, 0
 
             response = _self.check_references(sql_response)
@@ -1741,8 +1748,18 @@ class VannaService:
         full_table = f'"{schema_name}"."{table_name}"'
 
         numeric_types = {
-            "int", "integer", "bigint", "smallint", "tinyint", "decimal",
-            "numeric", "float", "real", "double precision", "money", "smallmoney",
+            "int",
+            "integer",
+            "bigint",
+            "smallint",
+            "tinyint",
+            "decimal",
+            "numeric",
+            "float",
+            "real",
+            "double precision",
+            "money",
+            "smallmoney",
         }
         if data_type.lower() in numeric_types:
             return f"""
@@ -1768,9 +1785,14 @@ class VannaService:
             """
 
         temporal_types = {
-            "date", "datetime", "datetime2", "timestamp",
-            "timestamp without time zone", "timestamp with time zone",
-            "time", "smalldatetime",
+            "date",
+            "datetime",
+            "datetime2",
+            "timestamp",
+            "timestamp without time zone",
+            "timestamp with time zone",
+            "time",
+            "smalldatetime",
         }
         if data_type.lower() in temporal_types:
             return f"""
@@ -1893,8 +1915,7 @@ class VannaService:
                     {
                         "level": "CRITICAL",
                         "message": (
-                            f"stored as {data_type} not DATE "
-                            f"-- use string comparison: WHERE col >= '{date_example}'"
+                            f"stored as {data_type} not DATE -- use string comparison: WHERE col >= '{date_example}'"
                         ),
                     }
                 )
@@ -2136,9 +2157,7 @@ class VannaService:
         return query
 
     @staticmethod
-    def _find_join_paths(
-        relationships: list[dict[str, str]], tables: set[str], max_depth: int = 3
-    ) -> list[str]:
+    def _find_join_paths(relationships: list[dict[str, str]], tables: set[str], max_depth: int = 3) -> list[str]:
         """Find multi-hop JOIN paths between tables using BFS and generate documentation.
 
         Args:
@@ -2210,11 +2229,7 @@ class VannaService:
                             f"{rel['parent_table']}.{rel['parent_column']} = "
                             f"{rel['referenced_table']}.{rel['referenced_column']}"
                         )
-                    path_doc = (
-                        f"To connect {source} to {target}, use a multi-step JOIN: "
-                        + " then ".join(steps)
-                        + "."
-                    )
+                    path_doc = f"To connect {source} to {target}, use a multi-step JOIN: " + " then ".join(steps) + "."
                     docs.append(path_doc)
 
         return docs
@@ -2353,12 +2368,12 @@ def remove_from_file_training(new_entry: dict):
             with training_file_path.open("w") as file:
                 json.dump(training_data, file, indent=4)
 
-            logging.info("Entry removed from training_data.json")
+            pvlog("info", "Entry removed from training_data.json", logger=logger)
         else:
-            logging.warning("Entry not found, nothing removed from training_data.json")
+            pvlog("warning", "Entry not found, nothing removed from training_data.json", logger=logger)
     except Exception as e:
         st.error(f"Error removing entry from training_data.json: {e}")
-        logging.exception("Error removing entry from training_data.json: %s", e)
+        logger.exception("Error removing entry from training_data.json: %s", e)
 
 
 def write_to_file_and_training(new_entry: dict):
@@ -2383,9 +2398,9 @@ def write_to_file_and_training(new_entry: dict):
             with training_file_path.open("w") as file:
                 json.dump(training_data, file, indent=4)
 
-            logging.info("New entry added to training_data.json")
+            pvlog("info", "New entry added to training_data.json", logger=logger)
         else:
-            logging.info("Duplicate entry found. No new entry added.")
+            pvlog("info", "Duplicate entry found. No new entry added.", logger=logger)
     except Exception as e:
         st.error(f"Error writing to training_data.json: {e}")
         logger.exception("%s", e)
@@ -3046,9 +3061,7 @@ def _get_random_sample_data(conn, schema_name: str, table_name: str, limit: int 
 
         safe_schema = psycopg2_sql.Identifier(schema_name)
         safe_table = psycopg2_sql.Identifier(table_name)
-        query = psycopg2_sql.SQL("SELECT * FROM {}.{} ORDER BY RANDOM() LIMIT %s").format(
-            safe_schema, safe_table
-        )
+        query = psycopg2_sql.SQL("SELECT * FROM {}.{} ORDER BY RANDOM() LIMIT %s").format(safe_schema, safe_table)
         df = pd.read_sql_query(query.as_string(conn), conn, params=(limit,))
         return df
     except Exception as e:
@@ -3184,7 +3197,7 @@ def train_ai_documentation():
         # Process each table
         for i, table_name in enumerate(tables):
             try:
-                status_text.text(f"Processing {table_name}... ({i+1}/{total_tables})")
+                status_text.text(f"Processing {table_name}... ({i + 1}/{total_tables})")
                 progress_bar.progress((i + 1) / total_tables)
 
                 # Get DDL for context
@@ -3197,10 +3210,7 @@ def train_ai_documentation():
                 user_prompt = _build_ai_documentation_prompt(schema_name, table_name, ddl, sample_df)
 
                 # Call LLM to generate documentation
-                documentation = vanna_service.submit_prompt(
-                    AI_DOCUMENTATION_SYSTEM_PROMPT,
-                    user_prompt
-                )
+                documentation = vanna_service.submit_prompt(AI_DOCUMENTATION_SYSTEM_PROMPT, user_prompt)
 
                 # Validate LLM response
                 if not documentation:
@@ -3315,17 +3325,19 @@ def auto_enhance_schema(clear_existing: bool = True):
                         for _, row in training_data.iterrows():
                             content = str(row.get("content", ""))
                             if (
-                                content.startswith((
-                                    "Column statistics for ",
-                                    "Implicit relationship",
-                                    "Primary key on ",
-                                    "Unique index ",
-                                    "Index '",
-                                    "Foreign key relationship: ",
-                                    "To connect ",
-                                    "Central tables with many relationships",
-                                    "View '",
-                                ))
+                                content.startswith(
+                                    (
+                                        "Column statistics for ",
+                                        "Implicit relationship",
+                                        "Primary key on ",
+                                        "Unique index ",
+                                        "Index '",
+                                        "Foreign key relationship: ",
+                                        "To connect ",
+                                        "Central tables with many relationships",
+                                        "View '",
+                                    )
+                                )
                                 or (content.startswith("TABLE: ") and "." in content[:60])
                                 or (content.startswith("Column ") and "." in content[:80] and " has " in content[:200])
                             ):
@@ -3458,31 +3470,37 @@ def auto_enhance_schema(clear_existing: bool = True):
                         if df_rels is not None and not df_rels.empty:
                             for _, rel in df_rels.iterrows():
                                 tname = rel["parent_table"]
-                                table_rels.setdefault(tname, []).append({
-                                    "parent_column": rel["parent_column"],
-                                    "referenced_table": rel["referenced_table"],
-                                    "referenced_column": rel["referenced_column"],
-                                })
+                                table_rels.setdefault(tname, []).append(
+                                    {
+                                        "parent_column": rel["parent_column"],
+                                        "referenced_table": rel["referenced_table"],
+                                        "referenced_column": rel["referenced_column"],
+                                    }
+                                )
                     except Exception:
                         pass
 
                     for rel in implicit_rels:
                         tname = rel["parent_table"]
-                        table_rels.setdefault(tname, []).append({
-                            "parent_column": rel["parent_column"],
-                            "referenced_table": rel["referenced_table"],
-                            "referenced_column": rel["referenced_column"],
-                        })
+                        table_rels.setdefault(tname, []).append(
+                            {
+                                "parent_column": rel["parent_column"],
+                                "referenced_table": rel["referenced_table"],
+                                "referenced_column": rel["referenced_column"],
+                            }
+                        )
 
                     try:
                         if df_indexes is not None and not df_indexes.empty:
                             for _, idx in df_indexes.iterrows():
                                 tname = idx["table_name"]
-                                table_indexes.setdefault(tname, []).append({
-                                    "columns": idx["columns"],
-                                    "is_primary_key": idx.get("is_primary_key", False),
-                                    "is_unique": idx.get("is_unique", False),
-                                })
+                                table_indexes.setdefault(tname, []).append(
+                                    {
+                                        "columns": idx["columns"],
+                                        "is_primary_key": idx.get("is_primary_key", False),
+                                        "is_unique": idx.get("is_unique", False),
+                                    }
+                                )
                     except Exception:
                         pass
 
@@ -3605,7 +3623,9 @@ def auto_enhance_schema(clear_existing: bool = True):
                             except Exception as mismatch_err:
                                 logger.debug(
                                     "Could not detect type mismatches for %s.%s: %s",
-                                    table_name, col_name, mismatch_err,
+                                    table_name,
+                                    col_name,
+                                    mismatch_err,
                                 )
 
                             collected_columns.append(col_info)
@@ -3644,12 +3664,14 @@ def auto_enhance_schema(clear_existing: bool = True):
                 all_rels_for_paths: list[dict[str, str]] = []
                 if df_rels is not None and not df_rels.empty:
                     for _, rel in df_rels.iterrows():
-                        all_rels_for_paths.append({
-                            "parent_table": rel["parent_table"],
-                            "parent_column": rel["parent_column"],
-                            "referenced_table": rel["referenced_table"],
-                            "referenced_column": rel["referenced_column"],
-                        })
+                        all_rels_for_paths.append(
+                            {
+                                "parent_table": rel["parent_table"],
+                                "parent_column": rel["parent_column"],
+                                "referenced_table": rel["referenced_table"],
+                                "referenced_column": rel["referenced_column"],
+                            }
+                        )
                 if "implicit_rels" in dir() and implicit_rels:
                     all_rels_for_paths.extend(implicit_rels)
 
@@ -3705,7 +3727,10 @@ def auto_enhance_schema(clear_existing: bool = True):
                 + results["views_documented"]
             )
             if results["errors"]:
-                status.update(label=f"Auto-enhance completed with {len(results['errors'])} error(s). {total_items} items added.", state="error")
+                status.update(
+                    label=f"Auto-enhance completed with {len(results['errors'])} error(s). {total_items} items added.",
+                    state="error",
+                )
             else:
                 status.update(label=f"Auto-enhance complete! {total_items} training items added.", state="complete")
 
@@ -3737,7 +3762,9 @@ def train_all():
     Provides st.status progress showing 4 sequential steps with elapsed time per step.
     """
     with st.status("Running full training pipeline...", expanded=True) as status:
+        perf_start = set_start_time()
         overall_start = time.perf_counter()
+        pvlog("info", "Step 1 - Starting full training pipeline", logger=logger, step=1)
 
         st.write("**Step 1/4:** Training DDL structures...")
         step_start = time.perf_counter()
@@ -3776,6 +3803,7 @@ def train_all():
             logger.exception("train_all step 4 (AI Docs) failed: %s", e)
 
         total_elapsed = time.perf_counter() - overall_start
+        calculate_process_performance("train_all", perf_start, logger=logger)
         status.update(label=f"Training pipeline complete! ({total_elapsed:.1f}s total)", state="complete")
 
 

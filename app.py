@@ -1,9 +1,8 @@
-import logging
-
 import streamlit as st
 
 from utils.discord_logging import add_discord_handler_if_configured, initialize_discord_logging_after_streamlit
 from utils.logging_config import setup_logging
+from utils.quick_logger import INFO, get_logger
 
 # Set the page configuration to wide mode
 st.set_page_config(layout="wide")
@@ -14,17 +13,17 @@ from utils.auth import check_authenticate
 # setup logging
 setup_logging(debug=True)
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Initialize Discord logging after Streamlit is ready
 
 # add_discord_handler_if_configured(logger)
 
 # silence watchdog warnings
-logging.getLogger("fsevents").setLevel(logging.INFO)
-logging.getLogger("chromadb").setLevel(logging.INFO)
-logging.getLogger("httpcore").setLevel(logging.INFO)
-logging.getLogger("httpx").setLevel(logging.INFO)
+get_logger("fsevents").setLevel(INFO)
+get_logger("chromadb").setLevel(INFO)
+get_logger("httpcore").setLevel(INFO)
+get_logger("httpx").setLevel(INFO)
 
 # Initialize the cookie manager
 st.session_state.cookies = EncryptedCookieManager(

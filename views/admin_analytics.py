@@ -1,6 +1,5 @@
 import datetime as dt
 import json
-import math
 
 import pandas as pd
 import plotly.express as px
@@ -226,7 +225,7 @@ def _render_overview_tab(days_int: int):
         mdf["date"] = pd.to_datetime(mdf["date"])
         fig = px.line(mdf, x="date", y="count", color="metric", markers=True)
         fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), legend_title_text="")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Conversion over time
         start = (pd.Timestamp.today().normalize() - pd.Timedelta(days=days_int - 1)).date()
@@ -242,7 +241,7 @@ def _render_overview_tab(days_int: int):
         conv_df["date"] = pd.to_datetime(conv_df["date"])
         cfig = px.line(conv_df, x="date", y="conversion", title="Conversion (results/questions) over time")
         cfig.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-        st.plotly_chart(cfig, use_container_width=True)
+        st.plotly_chart(cfig, width="stretch")
 
     st.divider()
 
@@ -281,7 +280,7 @@ def _render_overview_tab(days_int: int):
             for t in ["sql", "summary", "chart", "dataframe"]
         ]
     )
-    st.dataframe(pt_df, use_container_width=True, hide_index=True)
+    st.dataframe(pt_df, width="stretch", hide_index=True)
 
     # Distribution
     with SessionLocal() as session:
@@ -297,7 +296,7 @@ def _render_overview_tab(days_int: int):
         hist = pd.DataFrame({"elapsed": arr})
         fig2 = px.histogram(hist, x="elapsed", nbins=40, title="Elapsed time distribution (s)")
         fig2.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
     st.divider()
 
@@ -318,7 +317,7 @@ def _render_overview_tab(days_int: int):
         top_df = pd.DataFrame(top_rows, columns=["User", "Questions"])
         bar = px.bar(top_df, x="Questions", y="User", orientation="h")
         bar.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(bar, use_container_width=True)
+        st.plotly_chart(bar, width="stretch")
 
     st.divider()
 
@@ -386,7 +385,7 @@ def _render_overview_tab(days_int: int):
         )
     if latest_rows:
         ldf = pd.DataFrame(latest_rows)
-        st.dataframe(ldf, use_container_width=True, hide_index=True)
+        st.dataframe(ldf, width="stretch", hide_index=True)
 
     st.divider()
 
@@ -410,7 +409,7 @@ def _render_overview_tab(days_int: int):
         audf = pd.DataFrame(rows, columns=["User", "Questions", "DataFrames", "Summaries", "Charts", "Errors"])
         st.dataframe(
             audf.sort_values(["Questions", "Errors"], ascending=[False, True]),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -439,7 +438,9 @@ def _render_llm_tab(days_int: int):
         _kpi_card("Avg RAG Items", f"{avg_rag:.1f}")
     with k5:
         # Success rate placeholder - would need error correlation
-        _kpi_card("DDL/Doc/Ex", f"{stats['avg_ddl_count']:.1f}/{stats['avg_doc_count']:.1f}/{stats['avg_example_count']:.1f}")
+        _kpi_card(
+            "DDL/Doc/Ex", f"{stats['avg_ddl_count']:.1f}/{stats['avg_doc_count']:.1f}/{stats['avg_example_count']:.1f}"
+        )
 
     st.divider()
 
@@ -454,14 +455,14 @@ def _render_llm_tab(days_int: int):
             provider_agg = provider_df.groupby("provider")["count"].sum().reset_index()
             fig = px.bar(provider_agg, x="count", y="provider", orientation="h", title="Queries by Provider")
             fig.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         with col2:
             # Model table
             st.dataframe(
                 provider_df[["provider", "model", "count", "avg_latency"]].rename(
                     columns={"count": "Queries", "avg_latency": "Avg Latency (ms)"}
                 ),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
     else:
@@ -477,12 +478,12 @@ def _render_llm_tab(days_int: int):
         ot_df["date"] = pd.to_datetime(ot_df["date"])
         fig = px.line(ot_df, x="date", y="avg_latency", markers=True, title="Average Latency (ms) Over Time")
         fig.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Query volume
         fig2 = px.bar(ot_df, x="date", y="queries", title="Query Volume Over Time")
         fig2.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
     else:
         st.info("No LLM time series data available yet.")
 
@@ -503,7 +504,10 @@ def _render_llm_tab(days_int: int):
                 with col2:
                     st.metric("Tokens", item["total_tokens"] or "N/A")
                 with col3:
-                    st.metric("RAG Items", f"{item['ddl_count'] or 0}D/{item['doc_count'] or 0}Doc/{item['example_count'] or 0}Ex")
+                    st.metric(
+                        "RAG Items",
+                        f"{item['ddl_count'] or 0}D/{item['doc_count'] or 0}Doc/{item['example_count'] or 0}Ex",
+                    )
 
                 st.markdown("**Question:**")
                 st.info(item["question"])
@@ -594,7 +598,7 @@ def _render_activity_tab(days_int: int):
             title="Logins vs Failed Logins Over Time",
         )
         fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("No login activity data available yet.")
 
@@ -609,11 +613,11 @@ def _render_activity_tab(days_int: int):
             type_df = pd.DataFrame(by_type)
             fig = px.pie(type_df, values="count", names="activity_type", title="Activity Distribution")
             fig.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         with col2:
             st.dataframe(
                 type_df.rename(columns={"activity_type": "Activity Type", "count": "Count"}),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
     else:
@@ -629,7 +633,7 @@ def _render_activity_tab(days_int: int):
         # Format for display
         display_df = activity_df[["created_at", "username", "activity_type", "description", "ip_address"]].copy()
         display_df.columns = ["Timestamp", "User", "Type", "Description", "IP Address"]
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        st.dataframe(display_df, width="stretch", hide_index=True)
 
         # Show details for settings changes
         settings_changes = [a for a in recent if a["old_value"] or a["new_value"]]
@@ -692,7 +696,7 @@ def _render_errors_tab(days_int: int):
         pivot_df = ot_df.pivot(index="date", columns="category", values="count").fillna(0).reset_index()
         fig = px.area(pivot_df, x="date", y=pivot_df.columns[1:], title="Errors Over Time by Category")
         fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Category")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("No error time series data available yet.")
 
@@ -707,7 +711,7 @@ def _render_errors_tab(days_int: int):
             cat_df = pd.DataFrame(list(by_category.items()), columns=["Category", "Count"])
             fig = px.bar(cat_df, x="Count", y="Category", orientation="h")
             fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No category data available.")
 
@@ -726,7 +730,7 @@ def _render_errors_tab(days_int: int):
                 color_discrete_map=color_map,
             )
             fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No severity data available.")
 
@@ -742,7 +746,7 @@ def _render_errors_tab(days_int: int):
                 f":{severity_color}[{error['severity'].upper()}] **{error['category']}** - {error['error_type']} - {error['created_at'].strftime('%Y-%m-%d %H:%M')}",
                 expanded=False,
             ):
-                st.markdown(f"**Error Message:**")
+                st.markdown("**Error Message:**")
                 st.error(error["error_message"][:500] if error["error_message"] else "No message")
 
                 if error["question"]:
@@ -799,11 +803,11 @@ def _render_audit_tab(days_int: int):
             type_df = pd.DataFrame(by_type)
             fig = px.pie(type_df, values="count", names="action_type", title="Actions by Type")
             fig.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         with col2:
             st.dataframe(
                 type_df.rename(columns={"action_type": "Action Type", "count": "Count"}),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
     else:

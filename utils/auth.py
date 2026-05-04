@@ -1,14 +1,36 @@
-import logging
 from datetime import datetime, timedelta
 
 import streamlit as st
 
+import utils.okta_auth as okta_auth
 from orm.functions import set_user_preferences_in_session_state, verify_user_credentials
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def check_authenticate():
+    """Dispatcher: route to OIDC handler or existing local-cookie path.
+
+    The mode is determined by `[auth].mode` in secrets.toml. Absent or
+    `mode = "local"` → existing username/password flow. `mode = "oidc"`
+    → Streamlit-native OIDC via st.login() / st.user.
+
+    Both paths leave session state in the same shape (cookies['user_id'],
+    cookies['role_name'], session_state.user_role, session_state.username,
+    plus all preference flags).
+
+    Note: imports utils.okta_auth as a module (not the names) so test
+    mocks of utils.okta_auth.handle_oidc_auth are visible at call time.
+    """
+    if okta_auth.is_oidc_mode():
+        okta_auth.handle_oidc_auth()
+    else:
+        _handle_local_auth()
+
+
+def _handle_local_auth():
+    """Existing local-cookie auth path. Behavior unchanged from pre-OIDC."""
     try:
         user_id = st.session_state.cookies.get("user_id")
         expiry_date_str = st.session_state.cookies.get("expiry_date")
@@ -16,10 +38,8 @@ def check_authenticate():
             expiry_date = datetime.fromisoformat(expiry_date_str)
             user = set_user_preferences_in_session_state()
 
-            # Ensure VannaService instance is cleared when switching users
-            # This prevents the previous user's LLM selection from being displayed
+            # Ensure VannaService instance is cleared when switching users.
             if "_vn_instance" in st.session_state and st.session_state._vn_instance is not None:
-                # Check if the cached instance is for a different user
                 import json
 
                 cached_user_id = getattr(st.session_state._vn_instance, "user_id", None)
@@ -34,7 +54,7 @@ def check_authenticate():
                 with cols[1]:
                     logout = st.button("Log Out")
                     if logout:
-                        # Invalidate VannaService cache for this user
+                        # Invalidate VannaService cache for this user.
                         from utils.vanna_calls import VannaService
                         import json
 
@@ -43,15 +63,12 @@ def check_authenticate():
                         if user_id_for_cache and user_role is not None:
                             VannaService.invalidate_cache_for_user(str(user_id_for_cache), user_role)
 
-                        # Clear cookies
+                        # Clear cookies.
                         st.session_state.cookies["user_id"] = ""
                         st.session_state.cookies["expiry_date"] = ""
-                        # TODO: This doesnt work, how to delete cookies?
-                        # del st.session_state.cookies["user_id"]
-                        # del st.session_state.cookies["expiry_date"]
                         st.session_state.cookies.save()
 
-                        # Clear session state (including LLM preferences and VannaService instance)
+                        # Clear session state.
                         st.session_state.messages = []
                         st.session_state.selected_llm_provider = None
                         st.session_state.selected_llm_model = None
@@ -60,17 +77,17 @@ def check_authenticate():
 
                         st.rerun()
             else:
-                show_login()
+                _show_local_login()
         else:
-            show_login()
+            _show_local_login()
     except Exception as e:
         st.error(f"Error checking authentication: {e}")
         logger.error(f"Error checking authentication: {e}")
 
 
-def show_login():
+def _show_local_login():
+    """Render the local username/password login form."""
     try:
-        # --- HIDE LOGIN NAVIGATION ---
         st.markdown(
             """
         <style>
@@ -81,7 +98,6 @@ def show_login():
         """,
             unsafe_allow_html=True,
         )
-        # --- HIDE LOGIN NAVIGATION ---
         st.title("🔓 Log In")
 
         with st.form("login_form"):
@@ -90,7 +106,7 @@ def show_login():
             submit_button = st.form_submit_button("Login", type="primary")
 
             if submit_button:
-                if verify_user_credentials(username, password):  # sets user_id in cookies
+                if verify_user_credentials(username, password):
                     expiry_date = datetime.now() + timedelta(hours=8)
                     st.session_state.cookies["expiry_date"] = expiry_date.isoformat()
                     st.session_state.cookies.save()
@@ -101,3 +117,7 @@ def show_login():
     except Exception as e:
         st.error(f"Error showing login: {e}")
         logger.error(f"Error showing login: {e}")
+
+
+# Backwards-compat alias: external imports of show_login still work.
+show_login = _show_local_login

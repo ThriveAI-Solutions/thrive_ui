@@ -1,6 +1,7 @@
 """
 utils.logging_config
-Standard-library logging configured *once* for the whole app.
+Standard-library logging configured *once* for the whole app,
+now using quick_logger for unified traceability.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import logging.config
 from pathlib import Path
 
 from .discord_logging import add_discord_handler_if_configured
+from .quick_logger import pvlog, set_speaking_log
 
 LOG_DIR = Path(__file__).with_name("logs")
 LOG_DIR.mkdir(exist_ok=True)
@@ -53,7 +55,7 @@ def _dict_config(debug: bool = False) -> dict:
                 "backupCount": 14,
                 "encoding": "utf-8",
             },
-            # separate error log (10 MB rotation)
+            # separate error log (10 MB rotation)
             "file.error": {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "ERROR",
@@ -85,10 +87,14 @@ def _dict_config(debug: bool = False) -> dict:
 def setup_logging(*, debug: bool = False) -> None:
     """
     Configure logging.  Call exactly once, early in the main process.
+    Initializes quick_logger with text-to-speech disabled.
     """
     logging.config.dictConfig(_dict_config(debug))
 
-    # Discord handler will be added later when Streamlit secrets are available
-    print("Basic logging configuration complete - Discord handler will be added when secrets are available")
+    # Disable text-to-speech — not needed in production
+    set_speaking_log(False)
 
-    logging.getLogger(__name__).debug("Logging configured (debug=%s)", debug)
+    # Discord handler will be added later when Streamlit secrets are available
+    pvlog("info", "Basic logging configuration complete - Discord handler will be added when secrets are available")
+
+    pvlog("debug", f"Logging configured (debug={debug})")

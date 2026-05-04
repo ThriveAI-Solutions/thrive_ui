@@ -6,11 +6,12 @@ Loads forbidden references from the existing JSON config file.
 """
 
 import json
-import logging
 import re
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SecurityValidator:

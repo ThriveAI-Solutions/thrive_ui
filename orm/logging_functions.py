@@ -8,7 +8,6 @@ This module provides functions to log:
 """
 
 import json
-import logging
 import traceback
 from datetime import datetime, timedelta
 from typing import Any
@@ -24,8 +23,9 @@ from orm.models import (
     SessionLocal,
     UserActivity,
 )
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ============== LLM Context Logging ==============
@@ -584,9 +584,7 @@ def get_llm_stats(days: int = 30) -> dict:
             base = session.query(LLMContext).filter(LLMContext.created_at >= since)
             total = base.count() or 0
             avg_latency = (
-                session.query(sqla_func.avg(LLMContext.total_time_ms))
-                .filter(LLMContext.created_at >= since)
-                .scalar()
+                session.query(sqla_func.avg(LLMContext.total_time_ms)).filter(LLMContext.created_at >= since).scalar()
                 or 0
             )
             avg_tokens = (
@@ -596,21 +594,13 @@ def get_llm_stats(days: int = 30) -> dict:
                 or 0
             )
             avg_ddl = (
-                session.query(sqla_func.avg(LLMContext.ddl_count))
-                .filter(LLMContext.created_at >= since)
-                .scalar()
-                or 0
+                session.query(sqla_func.avg(LLMContext.ddl_count)).filter(LLMContext.created_at >= since).scalar() or 0
             )
             avg_doc = (
-                session.query(sqla_func.avg(LLMContext.doc_count))
-                .filter(LLMContext.created_at >= since)
-                .scalar()
-                or 0
+                session.query(sqla_func.avg(LLMContext.doc_count)).filter(LLMContext.created_at >= since).scalar() or 0
             )
             avg_example = (
-                session.query(sqla_func.avg(LLMContext.example_count))
-                .filter(LLMContext.created_at >= since)
-                .scalar()
+                session.query(sqla_func.avg(LLMContext.example_count)).filter(LLMContext.created_at >= since).scalar()
                 or 0
             )
             return {
@@ -652,10 +642,7 @@ def get_llm_over_time(days: int = 30) -> list[dict]:
                 .order_by(date_expr)
                 .all()
             )
-            return [
-                {"date": r.date, "queries": r.queries, "avg_latency": float(r.avg_latency or 0)}
-                for r in results
-            ]
+            return [{"date": r.date, "queries": r.queries, "avg_latency": float(r.avg_latency or 0)} for r in results]
     except Exception as e:
         logger.warning("Failed to get LLM over time: %s", e)
         return []
@@ -797,9 +784,9 @@ def get_activity_over_time(days: int = 30) -> list[dict]:
             results = (
                 session.query(
                     date_expr.label("date"),
-                    sqla_func.sum(
-                        case((UserActivity.activity_type == ActivityType.LOGIN.value, 1), else_=0)
-                    ).label("logins"),
+                    sqla_func.sum(case((UserActivity.activity_type == ActivityType.LOGIN.value, 1), else_=0)).label(
+                        "logins"
+                    ),
                     sqla_func.sum(
                         case((UserActivity.activity_type == ActivityType.LOGIN_FAILED.value, 1), else_=0)
                     ).label("failed_logins"),
@@ -877,12 +864,7 @@ def get_error_stats(days: int = 7) -> dict:
         with SessionLocal() as session:
             from sqlalchemy import func as sqla_func
 
-            total = (
-                session.query(sqla_func.count(ErrorLog.id))
-                .filter(ErrorLog.created_at >= since)
-                .scalar()
-                or 0
-            )
+            total = session.query(sqla_func.count(ErrorLog.id)).filter(ErrorLog.created_at >= since).scalar() or 0
             critical = (
                 session.query(sqla_func.count(ErrorLog.id))
                 .filter(
@@ -896,9 +878,7 @@ def get_error_stats(days: int = 7) -> dict:
                 session.query(sqla_func.count(ErrorLog.id))
                 .filter(
                     ErrorLog.created_at >= since,
-                    ErrorLog.category.in_(
-                        [ErrorCategory.SQL_GENERATION.value, ErrorCategory.SQL_EXECUTION.value]
-                    ),
+                    ErrorLog.category.in_([ErrorCategory.SQL_GENERATION.value, ErrorCategory.SQL_EXECUTION.value]),
                 )
                 .scalar()
                 or 0
@@ -1015,12 +995,7 @@ def get_admin_action_stats(days: int = 30) -> dict:
         with SessionLocal() as session:
             from sqlalchemy import func as sqla_func
 
-            total = (
-                session.query(sqla_func.count(AdminAction.id))
-                .filter(AdminAction.created_at >= since)
-                .scalar()
-                or 0
-            )
+            total = session.query(sqla_func.count(AdminAction.id)).filter(AdminAction.created_at >= since).scalar() or 0
             user_changes = (
                 session.query(sqla_func.count(AdminAction.id))
                 .filter(

@@ -1,11 +1,11 @@
-import logging
-
 import pyperclip
 import pyttsx3
 import speech_recognition as sr
 import streamlit as st
 
-logger = logging.getLogger(__name__)
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def copy_to_clipboard(text: str):

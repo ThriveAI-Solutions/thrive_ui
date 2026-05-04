@@ -1,6 +1,5 @@
 import hashlib
 import io
-import logging
 
 import pandas as pd
 import streamlit as st
@@ -35,9 +34,11 @@ user_role = st.session_state.get("user_role", RoleTypeEnum.PATIENT.value)
 # Don't get training data at module load time - get it when rendering the page
 # df = vn.get_training_data()
 
-logging.debug(f"{st.session_state.to_dict()=}")
+from utils.quick_logger import get_logger, pvlog
 
-logger = logging.getLogger(__name__)
+pvlog("debug", f"{st.session_state.to_dict()=}")
+
+logger = get_logger(__name__)
 
 
 def import_users():
@@ -373,8 +374,8 @@ with tab1:
                 else:
                     st.error("Current password is incorrect.")
 
-with tab2:
-    if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
+if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
+    with tab2:
         # Training pipeline actions
         train_col1, train_col2, spacer = st.columns((0.20, 0.20, 0.60))
         with train_col1:
@@ -456,10 +457,9 @@ with tab2:
 
             # Apply filters
             if search_query:
-                mask = (
-                    display_df["Question"].astype(str).str.contains(search_query, case=False, na=False)
-                    | display_df["Content"].astype(str).str.contains(search_query, case=False, na=False)
-                )
+                mask = display_df["Question"].astype(str).str.contains(search_query, case=False, na=False) | display_df[
+                    "Content"
+                ].astype(str).str.contains(search_query, case=False, na=False)
                 display_df = display_df[mask]
             if type_filter:
                 display_df = display_df[display_df["Type"].isin(type_filter)]

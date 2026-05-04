@@ -1,0 +1,14 @@
+# Install once per clone so hooks run locally for everyone using this repo:
+#   uv sync && uv run pre-commit install
+#
+# Runs the project's locked Ruff (same as `uv run ruff format`) so formatter
+# output matches CI and teammates. Rules and options: pyproject.toml [tool.ruff].
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format (uv)
+        language: system
+        entry: uv run ruff format
+        types: [python]

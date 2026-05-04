@@ -1,11 +1,10 @@
 """OpenAI LLM provider with static model list."""
 
-import logging
-
 from utils.llm_registry.base import LLMProvider
 from utils.llm_registry.models import LLMModelInfo, LLMProviderHealth
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OpenAIProvider(LLMProvider):

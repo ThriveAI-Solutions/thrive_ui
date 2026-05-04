@@ -1,6 +1,5 @@
 import hashlib
 import json
-import logging
 import uuid
 
 import streamlit as st
@@ -9,8 +8,9 @@ from sqlalchemy.orm import joinedload
 
 from orm.models import Conversation, Message, SessionLocal, User, UserRole
 from utils.enums import MessageType, RoleType
+from utils.quick_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _get_current_user_id() -> int | None:

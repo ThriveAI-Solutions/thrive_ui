@@ -34,10 +34,12 @@ dependencies = [
     "typer>=0.15.0",
     "rich>=13.0.0",
     "pydantic-settings>=2.0.0",
+    "authlib>=1.6.11",
 ]
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.2.0",
     "pytest>=8.3.5",
     "pytest-cov>=6.2.1",
     "ruff>=0.11.9",
@@ -46,8 +48,11 @@ dev = [
 ]
 
 [tool.ruff]
-# Allow lines to be as long as 120.
+target-version = "py313"
 line-length = 120
+
+[tool.ruff.format]
+line-ending = "lf"
 
 [tool.uv.sources]
 ethical-guardrails-lib = { git = "https://github.com/ThriveAI-Solutions/ethical_guardrails_lib.git" }
