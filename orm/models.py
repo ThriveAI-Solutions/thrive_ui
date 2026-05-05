@@ -1,6 +1,8 @@
 import enum
 import json
+import os
 from decimal import Decimal
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -14,15 +16,31 @@ from utils.quick_logger import get_logger
 
 logger = get_logger(__name__)
 
-# Load database settings from st.secrets
-# db_settings = st.secrets["postgres"]
-db_settings = st.secrets.get("sqlite", {"database": "./pgDatabase/db.sqlite3"})
+_DEFAULT_SQLITE_PATH = "./pgDatabase/db.sqlite3"
 
-# Construct the database URL
-# DATABASE_URL = f"postgresql://{db_settings['user']}:{db_settings['password']}@{db_settings['host']}:{db_settings['port']}/{db_settings['database']}"
-DATABASE_URL = f"sqlite:///{db_settings['database']}"
 
-# Create the SQLAlchemy engine
+def _get_database_url() -> str:
+    """Resolve the SQLite URL.
+
+    Priority: THRIVE_SQLITE_PATH env var → `[sqlite].database` from Streamlit
+    secrets → hardcoded default. The env var takes priority so tests and the
+    alembic CLI can override the path even when secrets.toml is present.
+    """
+    override = os.environ.get("THRIVE_SQLITE_PATH")
+    if override:
+        return f"sqlite:///{override}"
+    # Narrow except: only the "no secrets file / no Streamlit runtime" case
+    # falls back to default. A TOML parse error or other surprise propagates
+    # so the dev sees it instead of silently booting against the wrong DB.
+    try:
+        db_settings = st.secrets.get("sqlite", {"database": _DEFAULT_SQLITE_PATH})
+    except (FileNotFoundError, AttributeError) as exc:
+        logger.debug("st.secrets unavailable (%s); using default DB path", exc)
+        db_settings = {"database": _DEFAULT_SQLITE_PATH}
+    return f"sqlite:///{db_settings['database']}"
+
+
+DATABASE_URL = _get_database_url()
 engine = create_engine(DATABASE_URL)
 
 # Create a configured "Session" class
@@ -560,10 +578,27 @@ def seed_initial_data(session):
     session.commit()
 
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+def init_db() -> None:
+    """Run pending Alembic migrations and seed default data. Idempotent.
 
-# Seed initial data
-db_session = SessionLocal()
-seed_initial_data(db_session)
-db_session.close()
+    Called once at app startup from `app.py`. Safe to call multiple times —
+    Alembic's upgrade is a no-op when the DB is already at head, and
+    `seed_initial_data` skips rows that already exist.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    if DATABASE_URL.startswith("sqlite:///"):
+        db_path = Path(DATABASE_URL.removeprefix("sqlite:///"))
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg = Config(str(repo_root / "alembic.ini"))
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    command.upgrade(cfg, "head")
+
+    session = SessionLocal()
+    try:
+        seed_initial_data(session)
+    finally:
+        session.close()

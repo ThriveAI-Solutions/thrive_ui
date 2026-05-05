@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from scripts.migrate_add_okta_columns import migrate
+from scripts.legacy_migrations.migrate_add_okta_columns import migrate
 
 
 def test_migration_creates_missing_unique_indexes_when_columns_exist(tmp_path):
@@ -73,7 +73,7 @@ def test_migration_username_widen_rolls_back_on_crash(tmp_path, monkeypatch):
     import re
     import sqlite3
 
-    from scripts import migrate_add_okta_columns
+    from scripts.legacy_migrations import migrate_add_okta_columns
 
     db_path = tmp_path / "legacy.sqlite3"
     with sqlite3.connect(db_path) as conn:
