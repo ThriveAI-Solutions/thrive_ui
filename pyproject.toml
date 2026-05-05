@@ -39,6 +39,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "alembic>=1.13",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
     "pytest-cov>=6.2.1",
@@ -50,6 +51,7 @@ dev = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
+extend-exclude = ["alembic/versions"]
 
 [tool.ruff.format]
 line-ending = "lf"

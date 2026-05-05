@@ -25,6 +25,29 @@ get_logger("chromadb").setLevel(INFO)
 get_logger("httpcore").setLevel(INFO)
 get_logger("httpx").setLevel(INFO)
 
+
+# Run pending DB migrations and seed defaults exactly once per process.
+# Streamlit reruns app.py on every interaction, so cache_resource pins this
+# to first boot. cache_resource does not cache exceptions, so we trap and
+# cache a sentinel ourselves to avoid hammering alembic on every rerun when
+# something is broken.
+@st.cache_resource
+def _bootstrap_db() -> Exception | None:
+    from orm.models import init_db
+
+    try:
+        init_db()
+    except Exception as exc:
+        logger.critical("Database initialization failed: %s", exc, exc_info=True)
+        return exc
+    return None
+
+
+_bootstrap_err = _bootstrap_db()
+if _bootstrap_err is not None:
+    st.error(f"Database initialization failed: {_bootstrap_err}")
+    st.stop()
+
 # Initialize the cookie manager
 st.session_state.cookies = EncryptedCookieManager(
     prefix="thrive_ai_",
