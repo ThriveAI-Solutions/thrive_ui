@@ -1,11 +1,12 @@
 import hashlib
 import json
+import uuid
 
 import streamlit as st
 from sqlalchemy import case, func
 from sqlalchemy.orm import joinedload
 
-from orm.models import Message, SessionLocal, User, UserRole
+from orm.models import Conversation, Message, SessionLocal, User, UserRole
 from utils.enums import MessageType, RoleType
 from utils.quick_logger import get_logger
 
@@ -781,3 +782,175 @@ def get_user_questions_page(user_id: int, page: int = 1, page_size: int = 50):
     except Exception as e:
         logger.error(f"Error fetching user questions page: {e}")
         return {"items": [], "total": 0}
+
+
+# ============== Conversation CRUD ==============
+
+
+def create_conversation(user_id: int, title: str = "New Conversation") -> Conversation | None:
+    """Create a new conversation thread for the given user.
+
+    Returns the created Conversation object, or None on failure.
+    """
+    try:
+        with SessionLocal() as session:
+            conversation = Conversation(
+                id=str(uuid.uuid4()),
+                user_id=user_id,
+                title=title[:255] if title else "New Conversation",
+            )
+            session.add(conversation)
+            session.commit()
+            session.refresh(conversation)
+            # Detach from session so caller can use it freely
+            session.expunge(conversation)
+            return conversation
+    except Exception as e:
+        logger.error("Error creating conversation: %s", e)
+        return None
+
+
+def get_user_conversations(user_id: int, include_archived: bool = False) -> list[Conversation]:
+    """Return all conversations for a user, ordered by most recently updated first."""
+    try:
+        with SessionLocal() as session:
+            query = session.query(Conversation).filter(Conversation.user_id == user_id)
+            if not include_archived:
+                query = query.filter(Conversation.is_archived == False)  # noqa: E712
+            conversations = query.order_by(Conversation.updated_at.desc()).all()
+            # Detach from session
+            for conv in conversations:
+                session.expunge(conv)
+            return conversations
+    except Exception as e:
+        logger.error("Error fetching conversations: %s", e)
+        return []
+
+
+def rename_conversation(conversation_id: str, new_title: str) -> bool:
+    """Rename a conversation thread."""
+    try:
+        with SessionLocal() as session:
+            conv = session.query(Conversation).filter(Conversation.id == conversation_id).first()
+            if not conv:
+                return False
+            conv.title = new_title[:255] if new_title else conv.title
+            session.commit()
+            return True
+    except Exception as e:
+        logger.error("Error renaming conversation: %s", e)
+        return False
+
+
+def archive_conversation(conversation_id: str) -> bool:
+    """Archive a conversation thread (soft delete)."""
+    try:
+        with SessionLocal() as session:
+            conv = session.query(Conversation).filter(Conversation.id == conversation_id).first()
+            if not conv:
+                return False
+            conv.is_archived = True
+            session.commit()
+            return True
+    except Exception as e:
+        logger.error("Error archiving conversation: %s", e)
+        return False
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """Permanently delete a conversation and all its messages."""
+    try:
+        with SessionLocal() as session:
+            conv = session.query(Conversation).filter(Conversation.id == conversation_id).first()
+            if not conv:
+                return False
+            # Delete associated messages first
+            session.query(Message).filter(Message.conversation_id == conversation_id).delete()
+            session.delete(conv)
+            session.commit()
+            return True
+    except Exception as e:
+        logger.error("Error deleting conversation: %s", e)
+        return False
+
+
+def load_messages_for_conversation(conversation_id: str, user_id: int) -> list[Message]:
+    """Load messages for a specific conversation thread, scoped to a user for security.
+
+    Returns messages ordered by creation time ascending.
+    """
+    try:
+        with SessionLocal() as session:
+            messages = (
+                session.query(Message)
+                .filter(
+                    Message.conversation_id == conversation_id,
+                    Message.user_id == user_id,
+                )
+                .order_by(Message.created_at.asc(), Message.id.asc())
+                .all()
+            )
+            # Detach from session
+            for msg in messages:
+                session.expunge(msg)
+            return messages
+    except Exception as e:
+        logger.error("Error loading messages for conversation: %s", e)
+        return []
+
+
+def get_successful_question_sql_pairs(conversation_id: str, user_id: int, limit: int = 3) -> list[dict]:
+    """Retrieve the last N successful (question, SQL) pairs from a conversation thread.
+
+    A successful pair is one where the assistant produced a SUMMARY or DATAFRAME message
+    (indicating SQL executed successfully). Returns dicts with 'question' and 'sql' keys,
+    ordered from oldest to newest within the returned window.
+    """
+    try:
+        with SessionLocal() as session:
+            # Find messages that have both a question and SQL query, with successful result types
+            success_types = [MessageType.SUMMARY.value, MessageType.DATAFRAME.value]
+            rows = (
+                session.query(Message.question, Message.query)
+                .filter(
+                    Message.conversation_id == conversation_id,
+                    Message.user_id == user_id,
+                    Message.role == RoleType.ASSISTANT.value,
+                    Message.type.in_(success_types),
+                    Message.question.isnot(None),
+                    Message.query.isnot(None),
+                    func.length(Message.question) > 0,
+                    func.length(Message.query) > 0,
+                )
+                .order_by(Message.created_at.desc(), Message.id.desc())
+                .limit(limit)
+                .all()
+            )
+            # Reverse so they are oldest-first (chronological order for context)
+            pairs = [{"question": r.question, "sql": r.query} for r in reversed(rows)]
+            # Deduplicate by question text (keep first occurrence)
+            seen = set()
+            unique_pairs = []
+            for pair in pairs:
+                if pair["question"] not in seen:
+                    seen.add(pair["question"])
+                    unique_pairs.append(pair)
+            return unique_pairs
+    except Exception as e:
+        logger.error("Error fetching question/SQL pairs: %s", e)
+        return []
+
+
+def touch_conversation(conversation_id: str) -> bool:
+    """Update the updated_at timestamp of a conversation to mark it as recently active."""
+    try:
+        with SessionLocal() as session:
+            conv = session.query(Conversation).filter(Conversation.id == conversation_id).first()
+            if not conv:
+                return False
+            conv.updated_at = func.now()
+            session.commit()
+            return True
+    except Exception as e:
+        logger.error("Error touching conversation: %s", e)
+        return False

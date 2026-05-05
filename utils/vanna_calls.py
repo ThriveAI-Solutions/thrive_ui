@@ -926,15 +926,42 @@ class VannaService:
                 doc_list = []
             retrieval_time_ms = int((time.perf_counter() - retrieval_start) * 1000)
 
+            # Inject thread-scoped conversation history for contextual SQL generation
+            augmented_question = question
+            try:
+                conv_id = st.session_state.get("conversation_id")
+                if conv_id:
+                    user_id = _get_user_id_from_session()
+                    if user_id:
+                        from orm.functions import get_successful_question_sql_pairs
+
+                        history_pairs = get_successful_question_sql_pairs(conv_id, user_id, limit=3)
+                        if history_pairs:
+                            context_lines = [
+                                "Previous successful queries in this conversation for context:"
+                            ]
+                            for pair in history_pairs:
+                                context_lines.append(
+                                    f"  Question: {pair['question']}\n  SQL: {pair['sql']}"
+                                )
+                            context_block = "\n".join(context_lines)
+                            augmented_question = f"{context_block}\n\nCurrent question: {question}"
+                            logger.info(
+                                "Injected %d conversation history pairs into SQL generation prompt",
+                                len(history_pairs),
+                            )
+            except Exception as ctx_err:
+                logger.warning("Failed to inject conversation context: %s", ctx_err)
+
             start_time = time.perf_counter()
             allow_see_data = _self.config["security"].get("allow_llm_to_see_data", False)
 
             if allow_see_data:
                 logger.info("Allowing LLM to see data")
-                sql_response = _self.vn.generate_sql(question=question, allow_llm_to_see_data=True)
+                sql_response = _self.vn.generate_sql(question=augmented_question, allow_llm_to_see_data=True)
             else:
                 logger.info("NOT allowing LLM to see data")
-                sql_response = _self.vn.generate_sql(question=question)
+                sql_response = _self.vn.generate_sql(question=augmented_question)
 
             # Surface LLM API errors instead of silently treating them as bad SQL
             if sql_response and not sql_response.strip().upper().startswith(
