@@ -1,7 +1,12 @@
 """AgenticRunner — owns the Pydantic AI Agent and tool registrations.
 
 Per spec §6: agent.iter() exposes node-level events for streaming.
-Per §12.4: hard cap of 7 tool calls and 30s wall-clock per run.
+Per §12.4: hard caps on tool count and wall-clock per run.
+
+Caps are tunable via secrets.toml:
+    [agent]
+    max_tool_calls = 7         # default
+    max_wall_clock_s = 120.0   # default; raise for slower local models
 """
 
 from __future__ import annotations
@@ -27,8 +32,26 @@ from agent.tools.get_patient_clinical_data import get_patient_clinical_data
 from agent.tools.search_knowledge_base import search_knowledge_base
 
 
-_MAX_TOOL_CALLS = 7
-_MAX_WALL_CLOCK_S = 30.0
+_DEFAULT_MAX_TOOL_CALLS = 7
+_DEFAULT_MAX_WALL_CLOCK_S = 120.0
+
+
+def _max_tool_calls() -> int:
+    try:
+        import streamlit as st
+
+        return int(st.secrets.get("agent", {}).get("max_tool_calls", _DEFAULT_MAX_TOOL_CALLS))
+    except Exception:
+        return _DEFAULT_MAX_TOOL_CALLS
+
+
+def _max_wall_clock_s() -> float:
+    try:
+        import streamlit as st
+
+        return float(st.secrets.get("agent", {}).get("max_wall_clock_s", _DEFAULT_MAX_WALL_CLOCK_S))
+    except Exception:
+        return _DEFAULT_MAX_WALL_CLOCK_S
 
 
 class AgenticRunner:
@@ -75,10 +98,12 @@ class AgenticRunner:
         """
         start = asyncio.get_event_loop().time()
         tool_count = 0
+        wall_clock_cap = _max_wall_clock_s()
+        tool_call_cap = _max_tool_calls()
 
         async with self._agent.iter(question, deps=deps) as run:
             async for node in run:
-                if asyncio.get_event_loop().time() - start > _MAX_WALL_CLOCK_S:
+                if asyncio.get_event_loop().time() - start > wall_clock_cap:
                     yield CapReachedEvent(reason="wall_clock")
                     break
 
@@ -88,7 +113,7 @@ class AgenticRunner:
                 tool_calls = getattr(node, "tool_calls", None) or []
                 for tc in tool_calls:
                     tool_count += 1
-                    if tool_count > _MAX_TOOL_CALLS:
+                    if tool_count > tool_call_cap:
                         yield CapReachedEvent(reason="tool_count")
                         return
                     yield ToolCallStarted(
