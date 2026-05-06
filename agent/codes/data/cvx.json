@@ -27,6 +27,5 @@
     {"code": "163", "display_name": "Meningococcal MenB", "is_active": true},
     {"code": "127", "display_name": "Pneumococcal conjugate PCV15", "is_active": true},
     {"code": "116", "display_name": "Rotavirus pentavalent", "is_active": true},
-    {"code": "119", "display_name": "Rotavirus monovalent", "is_active": true},
-    {"code": "52", "display_name": "Hepatitis A", "is_active": true}
+    {"code": "119", "display_name": "Rotavirus monovalent", "is_active": true}
 ]
