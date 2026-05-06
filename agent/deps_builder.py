@@ -1,16 +1,22 @@
 """Build AgentDeps from Streamlit session state.
 
 Called at the top of every agent run. Reads:
-- st.session_state.user (id, role)
+- st.session_state.cookies["user_id"] (JSON-encoded int) — see orm/functions.py
+- st.session_state.user_role (int value of RoleTypeEnum)
 - st.session_state.selected_patient_*
 - st.session_state.last_dataframe / last_sql
 - @st.cache_resource singletons for analytics_db, rag, sqlite_session
 
 Returns a fresh AgentDeps. Per spec §8.1: AgentDeps is per-run, not
 persisted; persistence lives in session_state.
+
+Note: this codebase shreds user attributes into individual session_state
+keys rather than storing a single User ORM object. We read those keys
+here rather than assuming a `user` object exists.
 """
 
 from __future__ import annotations
+import json
 from datetime import date, datetime
 from typing import Optional
 import uuid
@@ -19,6 +25,7 @@ import streamlit as st
 from agent.deps import AgentDeps, SelectedPatient
 from agent.audit import AuditLogger
 from agent.db.analytics_adapter import AnalyticsDbAdapter
+from orm.models import RoleTypeEnum
 
 
 @st.cache_resource
@@ -62,15 +69,51 @@ def _selected_patient_from_session() -> Optional[SelectedPatient]:
     )
 
 
+def _user_id_from_session() -> int:
+    """Read user_id from cookies (where login flow stores it).
+
+    Falls back to st.session_state.user_id for tests/dev that prefer the
+    direct key.
+    """
+    direct = st.session_state.get("user_id")
+    if direct is not None:
+        return int(direct)
+    cookies = st.session_state.get("cookies")
+    if cookies is not None:
+        raw = cookies.get("user_id")
+        if raw is not None:
+            try:
+                return int(json.loads(raw))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return int(raw)
+    raise RuntimeError(
+        "Cannot determine user_id — neither st.session_state.user_id nor "
+        "st.session_state.cookies['user_id'] is set. Is the user logged in?"
+    )
+
+
+def _user_role_from_session() -> RoleTypeEnum:
+    """Read user_role (int) from session and convert to enum.
+
+    orm/functions.py stores the enum's int value; we round-trip back to
+    the enum for type-safe consumption inside tools.
+    """
+    raw = st.session_state.get("user_role")
+    if raw is None:
+        raise RuntimeError("Cannot determine user_role — st.session_state.user_role is not set.")
+    return RoleTypeEnum(int(raw))
+
+
 def build_agent_deps(sqlite_session) -> AgentDeps:
-    user = st.session_state["user"]
+    user_id = _user_id_from_session()
+    user_role = _user_role_from_session()
     if "agent_session_id" not in st.session_state:
         st.session_state["agent_session_id"] = str(uuid.uuid4())
     session_id = st.session_state["agent_session_id"]
 
     return AgentDeps(
-        user_id=user.id,
-        user_role=user.role.role,
+        user_id=user_id,
+        user_role=user_role,
         session_id=session_id,
         selected_patient=_selected_patient_from_session(),
         last_dataframe=st.session_state.get("last_dataframe"),
@@ -82,7 +125,7 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
         audit_logger=AuditLogger(
             session=sqlite_session,
             session_id=session_id,
-            user_id=user.id,
-            user_role=int(user.role.role.value),
+            user_id=user_id,
+            user_role=int(user_role.value),
         ),
     )
