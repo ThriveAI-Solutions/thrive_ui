@@ -19,6 +19,7 @@ from agent.db.queries.clinical import demographics_sql, encounters_sql
 from agent.db.queries.labs import labs_sql
 from agent.db.queries.diagnoses import diagnoses_sql
 from agent.db.queries.medications import medications_sql
+from agent.db.queries.immunizations import immunizations_sql
 from agent.code_normalizer import normalize_token, variants_for
 
 
@@ -63,6 +64,13 @@ class MedicationsQuery(BaseModel):
     linked_diagnosis_codes: Optional[List[str]] = None
 
 
+class ImmunizationsQuery(BaseModel):
+    domain: Literal["immunizations"] = "immunizations"
+    cvx_codes: Optional[List[str]] = None
+    vaccine_text: Optional[str] = None
+    date_range: Optional[DateRange] = None
+
+
 PatientClinicalQuery = Annotated[
     Union[
         DemographicsQuery,
@@ -70,6 +78,7 @@ PatientClinicalQuery = Annotated[
         LabsQuery,
         DiagnosesQuery,
         MedicationsQuery,
+        ImmunizationsQuery,
     ],
     Field(discriminator="domain"),
 ]
@@ -150,8 +159,28 @@ class MedicationItem(BaseModel):
     number_of_refills: Optional[int]
 
 
+class ImmunizationItem(BaseModel):
+    item_type: Literal["immunization"] = "immunization"
+    source_id: str
+    cvx: Optional[str]
+    ndc: Optional[str]
+    vaccine: Optional[str]
+    manufacturer: Optional[str]
+    lot: Optional[str]
+    event_datetime: Optional[str]
+    location_name: Optional[str]
+    mvx_code: Optional[str]
+
+
 ClinicalItem = Annotated[
-    Union[DemographicsItem, EncounterItem, LabItem, DiagnosisItem, MedicationItem],
+    Union[
+        DemographicsItem,
+        EncounterItem,
+        LabItem,
+        DiagnosisItem,
+        MedicationItem,
+        ImmunizationItem,
+    ],
     Field(discriminator="item_type"),
 ]
 
@@ -371,6 +400,42 @@ def get_patient_clinical_data(
         ]
         return ClinicalResult(
             domain="medications",
+            items=items,
+            data_availability="data_present",
+        )
+
+    if isinstance(query, ImmunizationsQuery):
+        dr = query.date_range
+        sql, params = immunizations_sql(
+            source_id=source_id,
+            cvx_codes=query.cvx_codes,
+            vaccine_text=query.vaccine_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+        )
+        rows = adapter.fetch_all(sql, params)
+        if not rows:
+            return ClinicalResult(
+                domain="immunizations",
+                items=[],
+                data_availability="no_records_found",
+            )
+        items = [
+            ImmunizationItem(
+                source_id=r["source_id"],
+                cvx=r.get("cvx"),
+                ndc=r.get("ndc"),
+                vaccine=r.get("vaccine"),
+                manufacturer=r.get("manufacturer"),
+                lot=r.get("lot"),
+                event_datetime=str(r["event_datetime"]) if r.get("event_datetime") else None,
+                location_name=r.get("location_name"),
+                mvx_code=r.get("mvx_code"),
+            )
+            for r in rows
+        ]
+        return ClinicalResult(
+            domain="immunizations",
             items=items,
             data_availability="data_present",
         )

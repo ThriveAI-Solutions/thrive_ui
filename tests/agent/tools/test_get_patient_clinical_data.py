@@ -165,3 +165,25 @@ def test_medications_filtered_by_rxnorm(synthetic_db):
     result = get_patient_clinical_data(ctx, q)
     assert len(result.items) == 1
     assert result.items[0].med_name == "Azithromycin"
+
+
+from agent.tools.get_patient_clinical_data import ImmunizationsQuery, ImmunizationItem
+
+
+def test_immunizations_returns_two(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, ImmunizationsQuery())
+    assert result.domain == "immunizations"
+    assert result.data_availability == "data_present"
+    assert len(result.items) == 2
+    assert all(isinstance(i, ImmunizationItem) for i in result.items)
+
+
+def test_immunizations_filtered_by_cvx(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = ImmunizationsQuery(cvx_codes=["03"])
+    result = get_patient_clinical_data(ctx, q)
+    assert len(result.items) == 1
+    assert "Measles" in result.items[0].vaccine
