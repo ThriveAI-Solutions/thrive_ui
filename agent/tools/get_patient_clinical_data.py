@@ -20,6 +20,7 @@ from agent.db.queries.labs import labs_sql
 from agent.db.queries.diagnoses import diagnoses_sql
 from agent.db.queries.medications import medications_sql
 from agent.db.queries.immunizations import immunizations_sql
+from agent.db.queries.procedures import procedures_sql
 from agent.code_normalizer import normalize_token, variants_for
 
 
@@ -71,6 +72,13 @@ class ImmunizationsQuery(BaseModel):
     date_range: Optional[DateRange] = None
 
 
+class ProceduresQuery(BaseModel):
+    domain: Literal["procedures"] = "procedures"
+    date_range: Optional[DateRange] = None
+    cpt_codes: Optional[List[str]] = None
+    procedure_text: Optional[str] = None
+
+
 PatientClinicalQuery = Annotated[
     Union[
         DemographicsQuery,
@@ -79,6 +87,7 @@ PatientClinicalQuery = Annotated[
         DiagnosesQuery,
         MedicationsQuery,
         ImmunizationsQuery,
+        ProceduresQuery,
     ],
     Field(discriminator="domain"),
 ]
@@ -172,6 +181,19 @@ class ImmunizationItem(BaseModel):
     mvx_code: Optional[str]
 
 
+class ProcedureItem(BaseModel):
+    item_type: Literal["procedure"] = "procedure"
+    source: Literal["orders", "problems", "claims"]
+    source_id: str
+    code: Optional[str]
+    code_type: Optional[str]
+    description: Optional[str]
+    event_date: Optional[str]
+    place_of_service: Optional[str]
+    provider_npi: Optional[str]
+    facility_name: Optional[str]
+
+
 ClinicalItem = Annotated[
     Union[
         DemographicsItem,
@@ -180,6 +202,7 @@ ClinicalItem = Annotated[
         DiagnosisItem,
         MedicationItem,
         ImmunizationItem,
+        ProcedureItem,
     ],
     Field(discriminator="item_type"),
 ]
@@ -438,6 +461,52 @@ def get_patient_clinical_data(
             domain="immunizations",
             items=items,
             data_availability="data_present",
+        )
+
+    if isinstance(query, ProceduresQuery):
+        dr = query.date_range
+        sql, params = procedures_sql(
+            source_id=source_id,
+            cpt_codes=query.cpt_codes,
+            procedure_text=query.procedure_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+        )
+        rows = adapter.fetch_all(sql, params)
+        if not rows:
+            return ClinicalResult(
+                domain="procedures",
+                items=[],
+                data_availability="no_records_found",
+                reliability_note=(
+                    "Procedure coverage is split across federated_orders_v (CPT subset), "
+                    "federated_problems_v (ICD-10-PCS), and the claims feed (monthly refresh; "
+                    "may lag bi-weekly clinical data by up to 30 days)."
+                ),
+            )
+        items = [
+            ProcedureItem(
+                source=r["source"],
+                source_id=r["source_id"],
+                code=r.get("code"),
+                code_type=r.get("code_type"),
+                description=r.get("description"),
+                event_date=str(r["event_date"]) if r.get("event_date") else None,
+                place_of_service=r.get("place_of_service"),
+                provider_npi=r.get("provider_npi"),
+                facility_name=r.get("facility_name"),
+            )
+            for r in rows
+        ]
+        return ClinicalResult(
+            domain="procedures",
+            items=items,
+            data_availability="data_present",
+            reliability_note=(
+                "Procedure coverage is split across federated_orders_v (CPT subset), "
+                "federated_problems_v (ICD-10-PCS), and the claims feed (monthly refresh; "
+                "may lag bi-weekly clinical data by up to 30 days)."
+            ),
         )
 
     raise NotImplementedError(f"Unhandled domain: {query.domain}")

@@ -187,3 +187,32 @@ def test_immunizations_filtered_by_cvx(synthetic_db):
     result = get_patient_clinical_data(ctx, q)
     assert len(result.items) == 1
     assert "Measles" in result.items[0].vaccine
+
+
+from agent.tools.get_patient_clinical_data import ProceduresQuery, ProcedureItem
+
+
+def test_procedures_returns_three_sources(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, ProceduresQuery())
+    assert result.domain == "procedures"
+    assert result.data_availability == "data_present"
+    sources = {i.source for i in result.items}
+    assert sources == {"orders", "problems", "claims"}
+
+
+def test_procedures_carries_claims_freshness_note(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, ProceduresQuery())
+    assert result.reliability_note is not None
+    assert "claims" in result.reliability_note.lower()
+
+
+def test_procedures_filtered_by_cpt(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = ProceduresQuery(cpt_codes=["45378"])
+    result = get_patient_clinical_data(ctx, q)
+    assert len(result.items) == 1
