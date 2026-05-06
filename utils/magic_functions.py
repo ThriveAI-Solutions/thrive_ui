@@ -511,6 +511,10 @@ def is_magic_do_magic(question, previous_df=None):
         # Skip semantic classification for follow-up context (previous_df is set)
         # Also check feature flag
         semantic_enabled = st.secrets.get("features", {}).get("semantic_magic_enabled", True)
+        # In agentic mode, skip the LLM classifier — the agent handles natural language.
+        # Literal slash commands (handled in STEP 1 above) still work.
+        if st.session_state.get("agentic_mode", False):
+            semantic_enabled = False
         if previous_df is None and semantic_enabled:
             from utils.semantic_magic_service import SemanticMagicService
 

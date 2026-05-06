@@ -1170,8 +1170,11 @@ def add_acknowledgement():
 
 
 def normal_message_flow(my_question: str):
-    user = st.session_state.get("user")
-    if user is not None and getattr(user, "agentic_mode", False):
+    # Live source of truth for the toggle is st.session_state.agentic_mode —
+    # see views/chat_bot.py where the sidebar checkbox writes to it. The
+    # User ORM object is the persistence layer; reading user.agentic_mode
+    # here would see the stale value loaded at login.
+    if st.session_state.get("agentic_mode", False):
         from agent.runtime import run_agentic_message_flow
 
         return run_agentic_message_flow(my_question)
