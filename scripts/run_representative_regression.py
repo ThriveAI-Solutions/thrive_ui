@@ -2,13 +2,17 @@
 
 Phase 2 acceptance gate: ≥80% pass rate. Below 80% blocks merge.
 
+The LLM path is live (Ollama by default per secrets.toml). The data
+layer is the same in-memory SQLite synthetic mirror that the unit tests
+use — see `tests/agent/redshift_synthetic.sql`. The suite hardcodes
+`source_id='src-john-1962'`, the diabetic patient in that fixture, so
+running against prod Redshift would surface no records and fail the
+gate for the wrong reason.
+
 Usage:
     uv run python scripts/run_representative_regression.py
     uv run python scripts/run_representative_regression.py --suite path/to.yaml
-    RUN_CLOUD_EVAL=1 uv run python scripts/run_representative_regression.py
-
-The cloud path is an opt-in (Bedrock / Anthropic) controlled by
-secrets.toml + RUN_CLOUD_EVAL=1.
+    uv run python scripts/run_representative_regression.py --ids Q4 Q6
 """
 
 from __future__ import annotations
@@ -20,10 +24,13 @@ from datetime import date, datetime
 from pathlib import Path
 
 import yaml
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 
 # sys.path shim — same pattern as scripts/seed_agent_rag.py
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from agent.db.analytics_adapter import AnalyticsDbAdapter
 from agent.deps import AgentDeps, SelectedPatient
 from agent.observability import configure_observability
 from agent.runner import AgenticRunner
@@ -35,7 +42,9 @@ from agent.state import (
 from unittest.mock import MagicMock
 
 
-_DEFAULT_SUITE = Path(__file__).resolve().parent.parent / "tests/agent/regression/representative_questions.yaml"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_SUITE = _REPO_ROOT / "tests/agent/regression/representative_questions.yaml"
+_SYNTHETIC_SQL = _REPO_ROOT / "tests/agent/redshift_synthetic.sql"
 _DEFAULT_PATIENT = SelectedPatient(
     source_id="src-john-1962",
     display_name="John Smith",
@@ -45,16 +54,38 @@ _DEFAULT_PATIENT = SelectedPatient(
 )
 
 
-def _build_live_deps() -> AgentDeps:
-    """Build deps for a live-model run.
+def _build_synthetic_analytics_db() -> AnalyticsDbAdapter:
+    """In-memory SQLite mirror of the §7.12 view whitelist.
 
-    Reads the same secrets.toml as the Streamlit app (analytics_db,
-    ai_keys, rag_model). Patient is pre-selected so the agent doesn't
-    have to disambiguate.
+    StaticPool + check_same_thread=False are required because pydantic-ai
+    runs sync tools in run_in_executor across threads. Without them, the
+    `:memory:` database created on the main thread is invisible to the
+    worker thread that actually invokes the SQL templates.
     """
-    import streamlit as st  # noqa: F401  — imported for secrets access
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    sql = _SYNTHETIC_SQL.read_text()
+    with engine.begin() as conn:
+        for stmt in sql.split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                conn.execute(text(stmt))
+    return AnalyticsDbAdapter(engine=engine, dialect="sqlite")
 
-    from agent.db.analytics_adapter import AnalyticsDbAdapter
+
+def _build_live_deps() -> AgentDeps:
+    """Build deps for a regression run.
+
+    LLM is live (Ollama / Anthropic / Bedrock per secrets.toml).
+    Analytics DB is the synthetic in-memory SQLite mirror — see module
+    docstring for why. RAG reads from the local Chroma store, which
+    must already be seeded via `scripts/seed_agent_rag.py`.
+    """
+    import streamlit as st  # noqa: F401 — imported for secrets access
+
     from agent.rag.chroma_adapter import ChromaRagAdapter
     import chromadb
     from orm.models import RoleTypeEnum, SessionLocal
@@ -70,7 +101,7 @@ def _build_live_deps() -> AgentDeps:
         last_dataframe=None,
         last_sql=None,
         last_query_meta=None,
-        analytics_db=AnalyticsDbAdapter.from_streamlit_secrets(),
+        analytics_db=_build_synthetic_analytics_db(),
         rag=rag,
         sqlite_session=SessionLocal(),
         audit_logger=MagicMock(),  # regression runs don't write to audit
