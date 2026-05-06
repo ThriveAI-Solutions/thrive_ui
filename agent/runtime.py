@@ -153,6 +153,7 @@ def _render_event(event: StreamEvent) -> None:
             "success": event.success,
             "elapsed_ms": event.elapsed_ms,
             "error": event.error,
+            "reliability_note": event.reliability_note,
         }
         add_message(
             Message(

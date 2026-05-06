@@ -56,6 +56,8 @@ def render_tool_call_message(message, index: int) -> None:
         if payload.get("result_summary"):
             st.markdown("**Result summary**")
             st.code(payload["result_summary"])
+        if payload.get("reliability_note"):
+            st.warning(f"⚠ {payload['reliability_note']}", icon="⚠️")
         if payload.get("error"):
             st.error(payload["error"])
         if payload.get("elapsed_ms"):

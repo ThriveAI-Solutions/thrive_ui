@@ -179,6 +179,11 @@ class AgenticRunner:
                                 except Exception:
                                     summary = f"result_type={type(result_content).__name__}"
 
+                                reliability_note = None
+                                rn_attr = getattr(result_content, "reliability_note", None)
+                                if isinstance(rn_attr, str) and rn_attr.strip():
+                                    reliability_note = rn_attr
+
                                 # Persist to audit (per spec §8.6).
                                 audit = getattr(deps, "audit_logger", None)
                                 if audit is not None:
@@ -189,7 +194,13 @@ class AgenticRunner:
                                             tool_name=info["tool_name"],
                                             selected_patient_source_id=sel_src,
                                             arguments=info["args"],
-                                            result_obj=result_content if isinstance(result_content, dict) else {},
+                                            result_obj=result_content
+                                            if isinstance(result_content, dict)
+                                            else (
+                                                result_content.model_dump(mode="json")
+                                                if hasattr(result_content, "model_dump")
+                                                else {}
+                                            ),
                                             elapsed_ms=elapsed_ms,
                                             success=True,
                                             error=None,
@@ -204,6 +215,7 @@ class AgenticRunner:
                                     success=True,
                                     elapsed_ms=elapsed_ms,
                                     error=None,
+                                    reliability_note=reliability_note,
                                 )
 
                                 # Auto-surface the disambiguation chooser

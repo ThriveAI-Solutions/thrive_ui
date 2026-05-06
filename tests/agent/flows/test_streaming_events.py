@@ -202,3 +202,46 @@ async def test_stream_calls_audit_logger_once_per_tool_call():
     audited_tools = [c.kwargs.get("tool_name") for c in audit_logger.log.call_args_list]
     assert "find_patient" in audited_tools
     assert "final_result" not in audited_tools
+
+
+@pytest.mark.asyncio
+async def test_completed_event_carries_reliability_note():
+    """When a tool returns an object with a reliability_note attr, the
+    streamed ToolCallCompleted event surfaces it."""
+    from unittest.mock import MagicMock
+    from pydantic_ai.models.test import TestModel
+    from pydantic_ai import Agent, RunContext
+    from pydantic import BaseModel
+    from agent.runner import AgenticRunner
+    from agent.deps import AgentDeps
+    from agent.state import AgentResponse, ToolCallCompleted
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    class StubResult(BaseModel):
+        domain: str = "labs"
+        items: list = []
+        data_availability: str = "data_present"
+        reliability_note: str = "LOINC coverage ~50%"
+
+    def stub_tool(ctx: RunContext[AgentDeps]) -> StubResult:
+        return StubResult()
+
+    runner = AgenticRunner.__new__(AgenticRunner)
+    runner._agent = Agent(
+        model=TestModel(),
+        deps_type=AgentDeps,
+        output_type=AgentResponse,
+        system_prompt=SYSTEM_PROMPT,
+    )
+    runner._agent.tool(stub_tool)
+
+    deps = MagicMock(spec=AgentDeps)
+    deps.audit_logger = None
+    deps.selected_patient = None
+
+    events = []
+    async for evt in runner.stream("anything", deps=deps):
+        events.append(evt)
+
+    completed = [e for e in events if isinstance(e, ToolCallCompleted)]
+    assert any(c.reliability_note == "LOINC coverage ~50%" for c in completed)

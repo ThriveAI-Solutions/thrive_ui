@@ -27,6 +27,7 @@ class ToolCallCompleted(BaseModel):
     success: bool
     elapsed_ms: int
     error: Optional[str] = None
+    reliability_note: Optional[str] = None
 
 
 class FinalResponseEvent(BaseModel):

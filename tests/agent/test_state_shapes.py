@@ -43,3 +43,16 @@ def test_agent_response_with_followups():
         followups=["What about labs?", "Show medications"],
     )
     assert len(r.followups) == 2
+
+
+def test_tool_call_completed_carries_reliability_note():
+    from agent.state import ToolCallCompleted
+
+    evt = ToolCallCompleted(
+        tool_name="get_patient_clinical_data",
+        result_summary="row_count=4",
+        success=True,
+        elapsed_ms=120,
+        reliability_note="LOINC coverage ~50%",
+    )
+    assert evt.reliability_note == "LOINC coverage ~50%"
