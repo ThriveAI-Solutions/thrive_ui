@@ -167,6 +167,7 @@ class User(Base):
     show_elapsed_time = Column(Boolean, default=True)
     llm_fallback = Column(Boolean, default=False)
     confirm_magic_commands = Column(Boolean, default=True)  # True = show popup, False = auto-execute
+    agentic_mode = Column(Boolean, default=False)
     min_message_id = Column(Integer, default=0)
     theme = Column(String(50), default=ThemeType.WELLTELLAI.value)
     selected_llm_provider = Column(String(50), default=None)
@@ -201,6 +202,7 @@ class User(Base):
             "theme": self.theme,
             "selected_llm_provider": self.selected_llm_provider,
             "selected_llm_model": self.selected_llm_model,
+            "agentic_mode": self.agentic_mode,
         }
 
 
