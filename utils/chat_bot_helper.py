@@ -1170,6 +1170,12 @@ def add_acknowledgement():
 
 
 def normal_message_flow(my_question: str):
+    user = st.session_state.get("user")
+    if user is not None and getattr(user, "agentic_mode", False):
+        from agent.runtime import run_agentic_message_flow
+
+        return run_agentic_message_flow(my_question)
+    # ----- existing Vanna flow follows unchanged -----
     # Ethical guardrails temporarily disabled for training/testing
     # guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
     # logger.debug(
