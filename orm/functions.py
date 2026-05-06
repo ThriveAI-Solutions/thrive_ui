@@ -122,6 +122,7 @@ def set_user_preferences_in_session_state():
         st.session_state.show_elapsed_time = user.show_elapsed_time
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.confirm_magic_commands = getattr(user, "confirm_magic_commands", True)
+        st.session_state.agentic_mode = bool(getattr(user, "agentic_mode", False))
         st.session_state.min_message_id = user.min_message_id
         st.session_state.user_role = user.role.role.value
         st.session_state.user_theme = user.theme
@@ -497,6 +498,7 @@ def update_user_preferences(user_id: int, **preferences) -> bool:
                 "min_message_id",
                 "selected_llm_provider",
                 "selected_llm_model",
+                "agentic_mode",
             }
             for key, value in preferences.items():
                 if key in allowed_fields:

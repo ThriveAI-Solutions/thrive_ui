@@ -3,7 +3,12 @@ import time
 import pandas as pd
 import streamlit as st
 
-from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
+from orm.functions import (
+    get_recent_messages,
+    save_user_settings,
+    set_user_preferences_in_session_state,
+    update_user_preferences,
+)
 from utils.chat_bot_helper import (
     get_message_group_css,
     get_unique_messages,
@@ -52,6 +57,7 @@ def load_community_questions(csv_file):
 from utils.quick_logger import get_logger
 
 logger = get_logger(__name__)
+
 
 set_user_preferences_in_session_state()
 
@@ -158,6 +164,7 @@ with st.sidebar.expander("🤖 LLM Selection", expanded=False):
 
                 # Invalidate VannaService cache
                 from utils.vanna_calls import VannaService
+
                 user_id = st.session_state.cookies.get("user_id")
                 user_role = st.session_state.get("user_role")
                 if user_id and user_role is not None:
@@ -259,6 +266,29 @@ with st.sidebar.expander("Settings"):
             # Save to database
             save_user_settings()
             st.toast("Settings saved!")
+
+agentic_mode_initial = bool(
+    getattr(st.session_state.get("user"), "agentic_mode", False)
+    if st.session_state.get("user")
+    else st.session_state.get("agentic_mode", False)
+)
+agentic_mode = st.sidebar.checkbox(
+    "Agentic mode (beta)",
+    value=agentic_mode_initial,
+    help="Use the new tool-driven agent for clinical questions. Vanna remains for users with this off.",
+    key="agentic_mode_checkbox",
+)
+if agentic_mode != agentic_mode_initial:
+    try:
+        import json as _json
+
+        _uid_str = st.session_state.cookies.get("user_id")
+        if _uid_str:
+            _uid = _json.loads(_uid_str)
+            update_user_preferences(user_id=_uid, agentic_mode=agentic_mode)
+            st.session_state.agentic_mode = agentic_mode
+    except Exception:
+        pass
 
 st.sidebar.button("Clear", on_click=lambda: set_question(None), width="stretch", type="primary")
 
