@@ -153,16 +153,20 @@ def main() -> int:
     runner = AgenticRunner()
 
     results: list[dict] = []
-    for q in questions:
-        print(f"\n=== {q['id']}: {q['prompt']}\n")
-        tool_calls, final_text = asyncio.run(_run_one(runner, deps, q["prompt"]))
-        grade = _grade(q, tool_calls, final_text)
-        results.append({"id": q["id"], **grade, "final_text": final_text})
-        flag = "✓" if grade["pass"] else "✗"
-        print(
-            f"  [{flag}] tools={grade['tools_pass']} da={grade['data_availability_pass']} "
-            f"must_not={grade['must_not_contain_pass']} must_any={grade['must_contain_any_pass']}"
-        )
+    loop = asyncio.new_event_loop()
+    try:
+        for q in questions:
+            print(f"\n=== {q['id']}: {q['prompt']}\n")
+            tool_calls, final_text = loop.run_until_complete(_run_one(runner, deps, q["prompt"]))
+            grade = _grade(q, tool_calls, final_text)
+            results.append({"id": q["id"], **grade, "final_text": final_text})
+            flag = "✓" if grade["pass"] else "✗"
+            print(
+                f"  [{flag}] tools={grade['tools_pass']} da={grade['data_availability_pass']} "
+                f"must_not={grade['must_not_contain_pass']} must_any={grade['must_contain_any_pass']}"
+            )
+    finally:
+        loop.close()
 
     total = len(results)
     passed = sum(1 for r in results if r["pass"])
