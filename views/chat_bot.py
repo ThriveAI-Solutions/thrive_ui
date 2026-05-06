@@ -59,6 +59,39 @@ from utils.quick_logger import get_logger
 logger = get_logger(__name__)
 
 
+def _clear_selected_patient() -> None:
+    for k in (
+        "selected_patient_source_id",
+        "selected_patient_display_name",
+        "selected_patient_dob",
+        "selection_origin",
+        "selected_at",
+    ):
+        st.session_state.pop(k, None)
+
+
+def _render_selected_patient_banner() -> None:
+    src = st.session_state.get("selected_patient_source_id")
+    if not src:
+        return
+    name = st.session_state.get("selected_patient_display_name", "Unknown")
+    dob = st.session_state.get("selected_patient_dob", "")
+    src_short = (src[:10] + "...") if len(src) > 13 else src
+
+    with st.container(border=True):
+        col_label, col_switch, col_clear = st.columns([6, 1, 1])
+        with col_label:
+            st.markdown(f"📋 **Selected:** {name}" + (f" (b. {dob})" if dob else "") + f" · `{src_short}`")
+        with col_switch:
+            if st.button("Switch", key="switch_patient_btn"):
+                _clear_selected_patient()
+                st.rerun()
+        with col_clear:
+            if st.button("Clear", key="clear_patient_btn"):
+                _clear_selected_patient()
+                st.rerun()
+
+
 set_user_preferences_in_session_state()
 
 # Initialize session state variables
@@ -390,6 +423,8 @@ if st.session_state.get("show_question_history", True):
 if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):
         st.markdown("Ask me a question about your data")
+
+_render_selected_patient_banner()
 
 # Populate messages in a dedicated container so we can keep a footer below
 messages_container = st.container()
