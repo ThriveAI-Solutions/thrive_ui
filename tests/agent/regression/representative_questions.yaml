@@ -1,0 +1,151 @@
+# Representative-question regression suite per spec §13.
+#
+# Pass criteria per question (spec §11.3):
+#   1. expected_tools is a subset of the model's actual call sequence
+#   2. expected_data_availability matches the principal clinical-tool result
+#   3. final reply does NOT contain any phrase from must_not_contain
+#
+# The principal tool for a question is the LAST clinical-data / document
+# tool in expected_tools. find_patient and search_codes are setup tools.
+#
+# selected_patient is filled by the runner before invoking the agent so
+# clinical-data tools don't ModelRetry. Use src-john-1962 (the diabetic
+# patient in the synthetic fixture) for offline runs.
+
+questions:
+  - id: Q1
+    prompt: "Has John Smith had any invasive procedures or surgeries between 2024-01-01 and today? Show date, facility, procedure, and provider."
+    expected_tools:
+      - find_patient
+      - get_patient_clinical_data
+    expected_domains:
+      - procedures
+    expected_data_availability: data_present
+    must_not_contain:
+      - "I don't have access"
+      - "as an AI"
+      - "I cannot access medical records"
+
+  - id: Q2
+    prompt: "Has John Smith had any negative Hepatitis lab results in the last year? Show date, test name, and result."
+    expected_tools:
+      - find_patient
+      - search_codes
+      - get_patient_clinical_data
+    expected_domains:
+      - labs
+    expected_data_availability: data_present
+    must_not_contain:
+      - "I am not a doctor"
+      - "as an AI"
+
+  - id: Q3
+    prompt: "Has John Smith ever been tested for Measles or Rubeola IgM/IgG? Show the result."
+    expected_tools:
+      - find_patient
+      - search_codes
+      - get_patient_clinical_data
+    expected_domains:
+      - labs
+    expected_data_availability: data_present
+    must_not_contain:
+      - "I cannot retrieve lab"
+
+  - id: Q4
+    prompt: "Does John Smith have a history of diabetes? If yes, what was their most recent A1C?"
+    expected_tools:
+      - find_patient
+      - get_patient_clinical_data
+    expected_domains:
+      - diagnoses
+      - labs
+    expected_data_availability: data_present
+    must_not_contain:
+      - "as an AI"
+      - "I am not a doctor"
+
+  - id: Q5
+    prompt: "Has John Smith been admitted to long-term care, hospital, or healthcare facilities between 2025-01-01 and today? Include facilities and admit dates."
+    expected_tools:
+      - find_patient
+      - get_patient_clinical_data
+    expected_domains:
+      - encounters
+    expected_data_availability: data_present
+    must_not_contain:
+      - "I do not have access"
+
+  - id: Q6
+    prompt: "Has John Smith ever received an MMR vaccine? Include date, vaccine, and facility."
+    expected_tools:
+      - find_patient
+      - search_codes
+      - get_patient_clinical_data
+    expected_domains:
+      - immunizations
+    expected_data_availability: data_present
+    must_not_contain:
+      - "as an AI"
+
+  - id: Q7
+    prompt: "Does John Smith have any documented progress notes mentioning diabetes? Provide who diagnosed and when last mentioned."
+    expected_tools:
+      - find_patient
+      - list_patient_documents
+      - get_patient_clinical_data
+    expected_domains:
+      - diagnoses
+    expected_data_availability: data_present
+    must_not_contain:
+      - "as an AI"
+    must_contain_any:
+      - "note bodies"
+      - "HEALTHeLINK"
+      - "source EHR"
+
+  - id: Q8
+    prompt: "Did John Smith have any imaging done in 2026? Show type, body location, where, and impression."
+    expected_tools:
+      - find_patient
+      - get_patient_clinical_data
+    expected_domains:
+      - imaging
+    expected_data_availability: data_present
+    must_not_contain:
+      - "as an AI"
+    must_contain_any:
+      - "impression"
+      - "HEALTHeLINK"
+
+  - id: Q9
+    prompt: "Has John Smith been treated with antibiotics for Gonorrhea or Chlamydia after 2026-01-01? Show medications, dosage, prescriber."
+    expected_tools:
+      - find_patient
+      - search_codes
+      - get_patient_clinical_data
+    expected_domains:
+      - medications
+    expected_data_availability: data_present
+    must_not_contain:
+      - "as an AI"
+    must_contain_any:
+      - "EPT"
+      - "pregnancy"
+      - "not in the warehouse"
+      - "not stored"
+
+  - id: Q10
+    prompt: "Show John Smith's Hep B maternal history — gravida, para, prior pregnancy outcomes, and MRNs of living children."
+    expected_tools:
+      - find_patient
+    expected_domains: []
+    expected_data_availability: domain_not_available
+    must_not_contain:
+      - "gravida"
+      - "para 2"
+      - "I have access"
+    must_contain_any:
+      - "obstetric"
+      - "not available"
+      - "deferred"
+    deferred: true
