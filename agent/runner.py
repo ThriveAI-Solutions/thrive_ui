@@ -36,6 +36,8 @@ from agent.state import (
 from agent.system_prompt import SYSTEM_PROMPT
 from agent.tools.find_patient import find_patient
 from agent.tools.get_patient_clinical_data import get_patient_clinical_data
+from agent.tools.list_patient_documents import list_patient_documents
+from agent.tools.search_codes import search_codes
 from agent.tools.search_knowledge_base import search_knowledge_base
 
 
@@ -107,7 +109,8 @@ class AgenticRunner:
         self._agent.tool(find_patient)
         self._agent.tool(get_patient_clinical_data)
         self._agent.tool(search_knowledge_base)
-        # Phase 2+ tools register here as they ship.
+        self._agent.tool(list_patient_documents)
+        self._agent.tool(search_codes)
 
     async def run(self, question: str, deps: AgentDeps) -> AgentResponse:
         """Single-shot run; collects the final AgentResponse without streaming.
