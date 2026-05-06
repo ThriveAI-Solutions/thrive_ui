@@ -93,4 +93,7 @@ class AuditLogger:
             error=error,
         )
         self.session.add(row)
-        self.session.flush()
+        # Commit per call so we don't hold the SQLite write lock while the
+        # agent yields more events. flush() alone leaves the transaction
+        # open and blocks downstream Message.save() with "database is locked".
+        self.session.commit()

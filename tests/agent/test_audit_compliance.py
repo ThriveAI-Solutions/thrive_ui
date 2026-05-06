@@ -70,9 +70,45 @@ def test_audit_logger_writes_row(monkeypatch):
         success=True,
         error=None,
     )
-    session.commit()
+    # No outer commit — AuditLogger.log() commits per call so it does not
+    # hold the SQLite write lock open while the agent yields more events.
 
     row = session.query(ToolCall).one()
     assert row.tool_name == "find_patient"
     assert "src-1" not in row.result_summary
     assert row.success is True
+
+
+def test_audit_logger_releases_write_lock_immediately(tmp_path):
+    """A second connection to the same SQLite file must be able to
+    INSERT immediately after AuditLogger.log() returns. If the audit
+    session held an open transaction, the second writer would block on
+    SQLite's BUSY/locked timeout and fail.
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from orm.models import Base, ToolCall
+
+    db_file = tmp_path / "audit_lock.sqlite3"
+    url = f"sqlite:///{db_file}"
+    engine = create_engine(url)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    audit_session = Session()
+
+    logger = AuditLogger(session=audit_session, session_id="s1", user_id=1, user_role=1)
+    logger.log(
+        tool_name="find_patient",
+        selected_patient_source_id=None,
+        arguments={"q": "x"},
+        result_obj={"matches": [], "total_unique": 0},
+        elapsed_ms=1,
+        success=True,
+        error=None,
+    )
+
+    # Concurrent writer with a tiny timeout — should not block.
+    other = create_engine(url, connect_args={"timeout": 0.5})
+    with other.begin() as conn:
+        conn.execute(text("CREATE TABLE other (id INTEGER)"))
+        conn.execute(text("INSERT INTO other VALUES (1)"))

@@ -29,7 +29,7 @@ dependencies = [
     "pymilvus>=2.6.0; sys_platform == 'linux' or sys_platform == 'darwin'",
     "milvus-lite>=2.5.1; sys_platform == 'linux' or sys_platform == 'darwin'",
     "openpyxl>=3.1.0",
-    "pydantic-ai>=1.0.8",
+    "pydantic-ai>=1.90.0",
     "docling>=2.65.0",
     "typer>=0.15.0",
     "rich>=13.0.0",

@@ -5,16 +5,19 @@ Amazon RDS Postgres. The dialect string lets callers detect which
 engine-specific quirks apply (e.g., Redshift uses pg_views, lacks
 some Postgres functions).
 
-Per spec §7.7 the adapter is read-only at the SQLAlchemy level.
+Per spec §7.7 the adapter is read-only. Three layers of enforcement:
+1. _FORBIDDEN_RE rejects obvious write keywords before they hit the DB.
+2. SQLite: PRAGMA query_only = ON installed via connect event listener.
+3. Postgres/Redshift: default_transaction_read_only=on at session level.
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 
 
@@ -24,10 +27,41 @@ _FORBIDDEN_RE = re.compile(
 )
 
 
+def _install_sqlite_query_only(engine: Engine) -> None:
+    @event.listens_for(engine, "connect")
+    def _set_query_only(dbapi_connection, connection_record):  # noqa: ARG001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA query_only = ON")
+        cursor.close()
+
+    # Apply to any already-pooled connections so the guard activates
+    # immediately, not only on the next checkout.
+    with engine.connect() as conn:
+        conn.exec_driver_sql("PRAGMA query_only = ON")
+
+
+def _install_pg_read_only(engine: Engine) -> None:
+    @event.listens_for(engine, "connect")
+    def _set_read_only(dbapi_connection, connection_record):  # noqa: ARG001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+        cursor.close()
+
+
 @dataclass
 class AnalyticsDbAdapter:
     engine: Engine
     dialect: str  # "sqlite" | "postgres" | "redshift"
+    _guards_installed: bool = field(default=False, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self._guards_installed:
+            return
+        if self.dialect == "sqlite":
+            _install_sqlite_query_only(self.engine)
+        elif self.dialect in ("postgres", "redshift"):
+            _install_pg_read_only(self.engine)
+        self._guards_installed = True
 
     def fetch_all(self, sql: str, params: Optional[dict] = None) -> list[dict]:
         if _FORBIDDEN_RE.search(sql):
@@ -46,5 +80,5 @@ class AnalyticsDbAdapter:
         url = analytics.get("url")
         if not url:
             raise RuntimeError("secrets.analytics_db.url is required (postgres:// or redshift://)")
-        engine = create_engine(url, execution_options={"readonly": True})
+        engine = create_engine(url)
         return cls(engine=engine, dialect=dialect)

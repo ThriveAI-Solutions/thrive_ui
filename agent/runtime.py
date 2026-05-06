@@ -7,7 +7,8 @@ when the user has agentic_mode=True.
 from __future__ import annotations
 import asyncio
 import json
-from typing import Any
+import threading
+from typing import Any, Coroutine
 
 import streamlit as st
 
@@ -32,6 +33,38 @@ def _runner() -> AgenticRunner:
     return AgenticRunner()
 
 
+def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
+    """Safely execute a coroutine to completion regardless of caller context.
+
+    asyncio.run() raises if a loop is already running (e.g., when called
+    from inside another coroutine, or under Streamlit + Tornado on some
+    versions). Spawn a worker thread with a fresh loop in that case.
+    """
+    try:
+        asyncio.get_running_loop()
+        in_loop = True
+    except RuntimeError:
+        in_loop = False
+
+    if not in_loop:
+        return asyncio.run(coro)
+
+    box: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            box["value"] = asyncio.run(coro)
+        except BaseException as exc:  # propagate to caller thread
+            box["error"] = exc
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join()
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
 def run_agentic_message_flow(my_question: str) -> None:
     """Drop-in replacement for the Vanna branch in normal_message_flow.
 
@@ -49,18 +82,18 @@ def run_agentic_message_flow(my_question: str) -> None:
     )
 
     sqlite_session = SessionLocal()
-    deps = build_agent_deps(sqlite_session)
-    runner = _runner()
+    try:
+        deps = build_agent_deps(sqlite_session)
+        runner = _runner()
 
-    # Streamlit asyncio bridge: we stream events one-by-one. Each yield
-    # is rendered immediately via add_message + render.
-    async def consume() -> None:
-        async for event in runner.stream(my_question, deps=deps):
-            _render_event(event)
+        async def consume() -> None:
+            async for event in runner.stream(my_question, deps=deps):
+                _render_event(event)
 
-    asyncio.run(consume())
-    sqlite_session.commit()
-    sqlite_session.close()
+        _run_async(consume())
+        sqlite_session.commit()
+    finally:
+        sqlite_session.close()
 
 
 def _render_event(event: StreamEvent) -> None:

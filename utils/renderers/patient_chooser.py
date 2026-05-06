@@ -30,10 +30,13 @@ def render_patient_chooser(message, index: int) -> None:
     truncated = payload.get("truncated", False)
 
     st.markdown(f"**Which patient?** ({total} unique{' — more available' if truncated else ''})")
+    # Use message.id (persisted PK) so keys stay stable as session_state
+    # message history is trimmed and `index` shifts.
+    msg_id = getattr(message, "id", None) or index
     for i, m in enumerate(matches):
         if st.button(
             _format_match(m),
-            key=f"chooser-{index}-{i}-{m.get('source_id')}",
+            key=f"chooser-msg{msg_id}-{i}-{m.get('source_id')}",
         ):
             st.session_state["selected_patient_source_id"] = m["source_id"]
             st.session_state["selected_patient_display_name"] = m.get("display_name", "")

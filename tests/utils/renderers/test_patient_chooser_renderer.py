@@ -35,6 +35,30 @@ def test_chooser_renders_button_per_match():
         assert st.button.call_count == 2
 
 
+def test_chooser_button_keys_use_message_id_not_index():
+    """Keys must remain stable when older messages are trimmed and
+    `index` shifts. message.id is the persisted PK and never moves.
+    """
+    msg = MagicMock()
+    msg.id = 4242
+    msg.content = json.dumps(
+        {
+            "matches": [
+                {"source_id": "src-a", "display_name": "A", "dob": None, "facilities_seen": []},
+                {"source_id": "src-b", "display_name": "B", "dob": None, "facilities_seen": []},
+            ],
+            "total_unique": 2,
+            "truncated": False,
+        }
+    )
+    with patch("utils.renderers.patient_chooser.st") as st:
+        st.button = MagicMock(return_value=False)
+        render_patient_chooser(msg, index=7)
+        keys_used = [call.kwargs["key"] for call in st.button.call_args_list]
+        assert all("4242" in k for k in keys_used), keys_used
+        assert all("index-7" not in k for k in keys_used), keys_used
+
+
 def test_chooser_button_click_writes_session_state():
     msg = MagicMock()
     msg.content = json.dumps(

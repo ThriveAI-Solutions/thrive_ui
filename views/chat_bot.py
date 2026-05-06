@@ -311,6 +311,9 @@ agentic_mode = st.sidebar.checkbox(
     help="Use the new tool-driven agent for clinical questions. Vanna remains for users with this off.",
     key="agentic_mode_checkbox",
 )
+# Always mirror the checkbox into session_state so consumers (chat_bot_helper,
+# magic_functions) see the live value even if persistence below fails.
+st.session_state.agentic_mode = agentic_mode
 if agentic_mode != agentic_mode_initial:
     try:
         import json as _json
@@ -319,7 +322,6 @@ if agentic_mode != agentic_mode_initial:
         if _uid_str:
             _uid = _json.loads(_uid_str)
             update_user_preferences(user_id=_uid, agentic_mode=agentic_mode)
-            st.session_state.agentic_mode = agentic_mode
     except Exception:
         pass
 

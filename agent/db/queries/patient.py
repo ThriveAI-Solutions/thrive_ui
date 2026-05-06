@@ -1,8 +1,11 @@
 """SQL templates for patient lookup.
 
 Per spec §8.2: identity = source_id (varchar). Join through
-internal_source_reference_v with empi_rank != 99. Use
-internal_patient_profile_v as the consent-aware demographic source.
+internal_source_reference_v and pick the canonical (empi_rank = 1)
+source_id per patient — this is how we deduplicate across feeds.
+``related_source_ids_sql`` returns the other non-99 ranks for the same
+internal patient. Use internal_patient_profile_v as the consent-aware
+demographic source.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ def find_patient_sql(
     mrn: Optional[str] = None,
     limit: int = 25,
 ) -> Tuple[str, dict]:
-    where_clauses: list[str] = ["isr.empi_rank != 99"]
+    where_clauses: list[str] = []
     params: dict = {"limit": limit}
 
     if first_name:
@@ -33,8 +36,12 @@ def find_patient_sql(
         where_clauses.append("ipp.umrn = :mrn")
         params["mrn"] = mrn
 
-    where = " AND ".join(where_clauses)
+    where = " AND ".join(where_clauses) if where_clauses else "1=1"
 
+    # isr.empi_rank = 1 picks the canonical source_id per patient (one
+    # row per patient). 99 is automatically excluded since 99 != 1.
+    # related_source_ids_sql returns the other ranks for the same
+    # internal patient.
     sql = f"""
     SELECT
         isr.source_id AS source_id,
@@ -50,8 +57,8 @@ def find_patient_sql(
     FROM internal_patient_profile_v ipp
     JOIN internal_source_reference_v isr
       ON ipp.patient_id = isr.patient_id
+     AND isr.empi_rank = 1
     WHERE {where}
-      AND isr.empi_rank = 1
     ORDER BY ipp.last_name, ipp.first_name, ipp.date_of_birth
     LIMIT :limit
     """
