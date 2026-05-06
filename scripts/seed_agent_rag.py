@@ -8,6 +8,11 @@ Idempotent — uses upsert.
 
 from __future__ import annotations
 import sys
+from pathlib import Path
+
+# Make the project root importable when running this script directly.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import chromadb
 
 from agent.rag.chroma_adapter import ChromaRagAdapter
