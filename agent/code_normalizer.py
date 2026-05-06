@@ -33,7 +33,7 @@ def variants_for(canonical: str) -> tuple[str, ...]:
     return _VARIANTS[key]
 
 
-def normalize_token(observed: str) -> Optional[str]:
+def normalize_token(observed: Optional[str]) -> Optional[str]:
     """Reverse: take a row's `code_type` value, return the canonical token or None."""
     if observed is None:
         return None

@@ -44,3 +44,7 @@ def test_normalize_token_collapses_to_canonical():
 
 def test_normalize_token_unknown_returns_none():
     assert normalize_token("zzz-not-real") is None
+
+
+def test_normalize_token_none_input_returns_none():
+    assert normalize_token(None) is None
