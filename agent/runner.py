@@ -171,11 +171,23 @@ class AgenticRunner:
                                     continue
                                 elapsed_ms = max(0, int((loop.time() - info["started_perf"]) * 1000))
                                 result_content = getattr(event.result, "content", None)
-                                # Best-effort: scrub via audit summarizer.
-                                # If summarize_result rejects (e.g., raw DataFrame),
-                                # fall back to a minimal type tag.
+                                # summarize_result wants a dict. Pydantic results
+                                # (ClinicalResult, DocumentIndexResult, …) need to
+                                # be dumped first, otherwise the summarizer falls
+                                # through to the type-tag branch and the audit /
+                                # streamed event lose data_availability and the
+                                # row-count signals downstream graders rely on.
                                 try:
-                                    summary = summarize_result(info["tool_name"], result_content)
+                                    summary_input = (
+                                        result_content
+                                        if isinstance(result_content, dict)
+                                        else (
+                                            result_content.model_dump(mode="json")
+                                            if hasattr(result_content, "model_dump")
+                                            else result_content
+                                        )
+                                    )
+                                    summary = summarize_result(info["tool_name"], summary_input)
                                 except Exception:
                                     summary = f"result_type={type(result_content).__name__}"
 

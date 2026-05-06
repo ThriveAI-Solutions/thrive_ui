@@ -86,6 +86,19 @@ search_codes(vocabulary, query) FIRST to resolve human-readable terms to \
 codes, THEN feed the codes into get_patient_clinical_data. Vocabularies: \
 icd10, loinc, cvx, rxnorm, cpt.
 
+ARGUMENT SHAPES (the model MUST emit these as JSON objects, not strings):
+
+  - date_range is an OBJECT: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}. \
+    Both fields are optional; omit a key to leave one side unbounded. \
+    Never pass date_range as a string like "last year". If the user says \
+    "last year", compute the dates yourself before calling the tool. \
+    Today is 2026-05-06.
+  - loinc_codes / icd10_codes / cpt_codes / cvx_codes / rxnorm_codes are \
+    arrays of strings: ["E11.9", "E11.65"]. Even a single code goes in \
+    a list.
+  - All filter fields are OPTIONAL. Omit any field whose value isn't \
+    constrained by the user question rather than guessing.
+
 When the user asks a population question ("how many diabetics over 65"), \
 use `search_patients_by_criteria` (Phase 4 tool).
 

@@ -198,7 +198,25 @@ def main() -> int:
     try:
         for q in questions:
             print(f"\n=== {q['id']}: {q['prompt']}\n")
-            tool_calls, final_text = loop.run_until_complete(_run_one(runner, deps, q["prompt"]))
+            try:
+                tool_calls, final_text = loop.run_until_complete(_run_one(runner, deps, q["prompt"]))
+            except Exception as exc:
+                print(f"  [✗] crashed: {type(exc).__name__}: {exc}")
+                results.append(
+                    {
+                        "id": q["id"],
+                        "tools_pass": False,
+                        "data_availability_pass": False,
+                        "must_not_contain_pass": False,
+                        "must_contain_any_pass": False,
+                        "pass": False,
+                        "final_text": "",
+                        "expected_tools": sorted(set(q.get("expected_tools", []))),
+                        "actual_tools": [],
+                        "crashed": str(exc),
+                    }
+                )
+                continue
             grade = _grade(q, tool_calls, final_text)
             results.append({"id": q["id"], **grade, "final_text": final_text})
             flag = "✓" if grade["pass"] else "✗"
