@@ -56,7 +56,10 @@ def procedures_sql(
         date_filter_claims += " AND procedure_date <= :end_date"
         params["end_date"] = end_date
 
-    icd10pcs_variants = variants_for("icd10")
+    # ICD-10-PCS is the procedural-codes subset of ICD-10. Per spec §7.12,
+    # only ~7% of problems rows are PCS-coded; non-PCS ICD-10 rows are
+    # diagnoses (e.g. E11.9 diabetes) and must be excluded.
+    icd10pcs_variants = ("ICD-10-PCS", "ICD10-PCS")
     pcs_placeholders = ", ".join(f":pcs_{i}" for i in range(len(icd10pcs_variants)))
     for i, v in enumerate(icd10pcs_variants):
         params[f"pcs_{i}"] = v

@@ -38,3 +38,17 @@ def test_procedures_filtered_by_text(synthetic_db):
     )
     rows = adapter.fetch_all(sql, params)
     assert len(rows) >= 2
+
+
+def test_procedures_excludes_non_pcs_icd10_diagnoses(synthetic_db):
+    """ICD-10 diagnosis codes (E11.9 diabetes, B16.9 hep B) must NOT
+    appear in the procedures UNION — only ICD-10-PCS rows belong here."""
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = procedures_sql(source_id="src-john-1962")
+    rows = adapter.fetch_all(sql, params)
+    problem_rows = [r for r in rows if r["source"] == "problems"]
+    assert all(r["code_type"] == "ICD-10-PCS" for r in problem_rows), (
+        f"Non-PCS rows leaked into procedures: {[r for r in problem_rows if r['code_type'] != 'ICD-10-PCS']}"
+    )
+    # The diabetes diagnosis must not be in the result at all.
+    assert not any(r["code"] == "E11.9" for r in rows)
