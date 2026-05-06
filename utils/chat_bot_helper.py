@@ -16,6 +16,8 @@ from orm.models import Message
 from utils.communicate import speak
 from utils.enums import MessageType, RoleType
 from utils.quick_logger import get_logger
+from utils.renderers.patient_chooser import render_patient_chooser
+from utils.renderers.tool_call import render_tool_call_message
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
 logger = get_logger(__name__)
@@ -1110,6 +1112,8 @@ MESSAGE_RENDERERS = {
     MessageType.FOLLOWUP.value: _render_followup,
     MessageType.TEXT.value: _render_default,  # Explicitly map TEXT to default
     MessageType.THINKING.value: _render_thinking,
+    MessageType.TOOL_CALL.value: render_tool_call_message,
+    MessageType.PATIENT_CHOOSER.value: render_patient_chooser,
 }
 
 
