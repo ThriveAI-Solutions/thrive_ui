@@ -21,6 +21,7 @@ from agent.db.queries.diagnoses import diagnoses_sql
 from agent.db.queries.medications import medications_sql
 from agent.db.queries.immunizations import immunizations_sql
 from agent.db.queries.procedures import procedures_sql
+from agent.db.queries.imaging import imaging_sql
 from agent.code_normalizer import normalize_token, variants_for
 
 
@@ -79,6 +80,13 @@ class ProceduresQuery(BaseModel):
     procedure_text: Optional[str] = None
 
 
+class ImagingQuery(BaseModel):
+    domain: Literal["imaging"] = "imaging"
+    date_range: Optional[DateRange] = None
+    modality: Optional[Literal["xray", "ct", "mri", "us", "pet", "any"]] = "any"
+    body_region: Optional[str] = None
+
+
 PatientClinicalQuery = Annotated[
     Union[
         DemographicsQuery,
@@ -88,6 +96,7 @@ PatientClinicalQuery = Annotated[
         MedicationsQuery,
         ImmunizationsQuery,
         ProceduresQuery,
+        ImagingQuery,
     ],
     Field(discriminator="domain"),
 ]
@@ -194,6 +203,19 @@ class ProcedureItem(BaseModel):
     facility_name: Optional[str]
 
 
+class ImagingItem(BaseModel):
+    item_type: Literal["imaging"] = "imaging"
+    source: Literal["orders", "documents"]
+    source_id: str
+    code: Optional[str]
+    code_type: Optional[str]
+    description: Optional[str]
+    mnemonic: Optional[str]
+    event_date: Optional[str]
+    place_of_service: Optional[str]
+    location_name: Optional[str]
+
+
 ClinicalItem = Annotated[
     Union[
         DemographicsItem,
@@ -203,6 +225,7 @@ ClinicalItem = Annotated[
         MedicationItem,
         ImmunizationItem,
         ProcedureItem,
+        ImagingItem,
     ],
     Field(discriminator="item_type"),
 ]
@@ -506,6 +529,53 @@ def get_patient_clinical_data(
                 "Procedure coverage is split across federated_orders_v (CPT subset), "
                 "federated_problems_v (ICD-10-PCS), and the claims feed (monthly refresh; "
                 "may lag bi-weekly clinical data by up to 30 days)."
+            ),
+        )
+
+    if isinstance(query, ImagingQuery):
+        dr = query.date_range
+        sql, params = imaging_sql(
+            source_id=source_id,
+            modality=query.modality,
+            body_region=query.body_region,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+        )
+        rows = adapter.fetch_all(sql, params)
+        impression_note = (
+            "Imaging report impressions are NOT stored in this warehouse — only "
+            "order/document metadata. Tell the user to retrieve the full report "
+            "via HEALTHeLINK or the source EHR if they need the impression text."
+        )
+        if not rows:
+            return ClinicalResult(
+                domain="imaging",
+                items=[],
+                data_availability="no_records_found",
+                notes_to_agent=impression_note,
+            )
+        items = [
+            ImagingItem(
+                source=r["source"],
+                source_id=r["source_id"],
+                code=r.get("code"),
+                code_type=r.get("code_type"),
+                description=r.get("description"),
+                mnemonic=r.get("mnemonic"),
+                event_date=str(r["event_date"]) if r.get("event_date") else None,
+                place_of_service=r.get("place_of_service"),
+                location_name=r.get("location_name"),
+            )
+            for r in rows
+        ]
+        return ClinicalResult(
+            domain="imaging",
+            items=items,
+            data_availability="data_present",
+            notes_to_agent=impression_note,
+            reliability_note=(
+                "Modality and body region are inferred from order/document text; "
+                "accuracy depends on source-system order naming conventions."
             ),
         )
 

@@ -216,3 +216,23 @@ def test_procedures_filtered_by_cpt(synthetic_db):
     q = ProceduresQuery(cpt_codes=["45378"])
     result = get_patient_clinical_data(ctx, q)
     assert len(result.items) == 1
+
+
+from agent.tools.get_patient_clinical_data import ImagingQuery, ImagingItem
+
+
+def test_imaging_returns_data_present(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, ImagingQuery())
+    assert result.domain == "imaging"
+    assert result.data_availability == "data_present"
+    assert len(result.items) >= 1
+
+
+def test_imaging_always_carries_impression_unavailable_note(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, ImagingQuery())
+    assert result.notes_to_agent is not None
+    assert "impression" in result.notes_to_agent.lower()
