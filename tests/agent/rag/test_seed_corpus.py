@@ -30,3 +30,26 @@ def test_identity_docs_present():
 def test_freshness_docs_present():
     assert any("bi-weekly" in d["text"].lower() for d in FRESHNESS_DOCS)
     assert any("monthly" in d["text"].lower() for d in FRESHNESS_DOCS)
+
+
+def test_examples_docs_cover_each_representative_domain():
+    from agent.rag.seed import EXAMPLES_DOCS, all_seed_docs
+
+    kinds = {d["kind"] for d in EXAMPLES_DOCS}
+    assert kinds == {"examples"}
+    text_blob = " ".join(d["text"] for d in EXAMPLES_DOCS).lower()
+    for needle in (
+        "find_patient",
+        "get_patient_clinical_data",
+        "labs",
+        "diagnoses",
+        "encounters",
+        "immunizations",
+        "procedures",
+        "imaging",
+        "medications",
+        "list_patient_documents",
+        "search_codes",
+    ):
+        assert needle in text_blob, f"missing example coverage: {needle}"
+    assert any(d in all_seed_docs() for d in EXAMPLES_DOCS)

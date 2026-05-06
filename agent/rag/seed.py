@@ -186,5 +186,93 @@ FRESHNESS_DOCS: List[_Doc] = [
 ]
 
 
+EXAMPLES_DOCS: List[_Doc] = [
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Has John Smith had any negative Hepatitis results in the last year?'\n"
+            "Tool sequence: find_patient(first_name='John', last_name='Smith') → "
+            "[user picks one] → search_codes(vocabulary='loinc', query='hepatitis') → "
+            "get_patient_clinical_data({domain:'labs', loinc_codes:[...], "
+            "result_filter:'negative', date_range:{start:..., end:...}})."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Does this patient have a history of diabetes?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'diagnoses', "
+            "condition_text:'diabetes'}) → if positive, also "
+            "get_patient_clinical_data({domain:'labs', "
+            "test_name_text:'a1c', most_recent_only equivalent via date_range})."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Has patient ever had MMR vaccine?'\n"
+            "Tool sequence: search_codes(vocabulary='cvx', query='mmr') → "
+            "get_patient_clinical_data({domain:'immunizations', cvx_codes:['03']})."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Has patient been admitted to a long-term care facility in 2026?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'encounters', "
+            "facility_type:'ltc', date_range:{start:'2026-01-01', end:'2026-12-31'}})."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Did patient have imaging done last year?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'imaging', "
+            "date_range:{...}}). The result will set notes_to_agent reminding you "
+            "that impression text is not stored — surface that to the user."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Has patient been treated with antibiotics for Gonorrhea after a date?'\n"
+            "Tool sequence: search_codes(vocabulary='rxnorm', query='azithromycin') and "
+            "search_codes(vocabulary='rxnorm', query='ceftriaxone') → "
+            "get_patient_clinical_data({domain:'medications', rxnorm_codes:[...], "
+            "date_range:{start:...}}). EPT and pregnancy-at-test are not in the warehouse — "
+            "tell the user."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Does patient have a history of X disease?' (when the user is asking about "
+            "documentation/notes)\n"
+            "Tool sequence: list_patient_documents({document_type:'progress'}) and "
+            "get_patient_clinical_data({domain:'diagnoses', condition_text:'X'}). "
+            "Note bodies are not in the warehouse; surface that to the user."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Has this patient had any invasive procedures in date range?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'procedures', "
+            "date_range:{...}}). Result UNIONs orders, problems (ICD-10-PCS), and the "
+            "claims feed; the claims feed lags by up to 30 days — include the freshness "
+            "caveat from reliability_note."
+        ),
+    },
+]
+
+
 def all_seed_docs() -> List[_Doc]:
-    return [*SCHEMA_DOCS, *IDENTITY_DOCS, *FRESHNESS_DOCS]
+    return [*SCHEMA_DOCS, *IDENTITY_DOCS, *FRESHNESS_DOCS, *EXAMPLES_DOCS]
