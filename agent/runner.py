@@ -26,11 +26,12 @@ from agent.deps import AgentDeps
 from agent.models import build_model
 from agent.state import (
     AgentResponse,
-    StreamEvent,
-    ToolCallStarted,
-    ToolCallCompleted,
-    FinalResponseEvent,
     CapReachedEvent,
+    FinalResponseEvent,
+    PatientChooserEvent,
+    StreamEvent,
+    ToolCallCompleted,
+    ToolCallStarted,
 )
 from agent.system_prompt import SYSTEM_PROMPT
 from agent.tools.find_patient import find_patient
@@ -61,6 +62,13 @@ def _max_wall_clock_s() -> float:
         return float(st.secrets.get("agent", {}).get("max_wall_clock_s", _DEFAULT_MAX_WALL_CLOCK_S))
     except Exception:
         return _DEFAULT_MAX_WALL_CLOCK_S
+
+
+def _to_jsonable(obj: Any) -> Any:
+    """Coerce a Pydantic model to a plain dict so the UI / audit can read it."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(mode="json")
+    return obj
 
 
 def _normalize_args(raw: Any) -> dict:
@@ -194,6 +202,16 @@ class AgenticRunner:
                                     elapsed_ms=elapsed_ms,
                                     error=None,
                                 )
+
+                                # Auto-surface the disambiguation chooser
+                                # right after find_patient succeeds, so the
+                                # UI does not depend on the model attaching
+                                # an artifact to final_result (smaller models
+                                # often skip that step).
+                                if info["tool_name"] == "find_patient":
+                                    payload = _to_jsonable(result_content)
+                                    if isinstance(payload, dict) and payload.get("total_unique", 0) > 0:
+                                        yield PatientChooserEvent(payload=payload)
 
                 elif Agent.is_end_node(node):
                     output = getattr(node.data, "output", None)

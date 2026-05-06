@@ -55,8 +55,24 @@ slot automatically.
 When the user asks a population question ("how many diabetics over 65"), \
 use `search_patients_by_criteria` (Phase 4 tool).
 
-Final response shape: a JSON-serializable AgentResponse with `text`, \
-`followups`, `artifacts`, `clear_selection`. Set `clear_selection=True` \
-ONLY when the user explicitly steps back to a population question or asks \
-to clear the selection.
+OUTPUT REQUIREMENT (mandatory): every reply MUST be produced by calling \
+the `final_result` tool. Never produce plain assistant text — text without \
+a `final_result` call is rejected and forces a retry. Even short replies \
+("Please pick a patient", "I couldn't find anyone matching") go through \
+`final_result` with the message in the `text` field.
+
+The `final_result` tool takes:
+  - `text` (required): your reply to the user.
+  - `followups` (optional): up to 3 short suggested next questions.
+  - `artifacts` (optional): leave empty. The UI surfaces the patient \
+chooser automatically based on `find_patient` results — you do not need \
+to attach anything.
+  - `clear_selection` (optional): set to True ONLY when the user \
+explicitly steps back to a population question or asks to clear the \
+selection.
+
+After `find_patient` returns matches, your `final_result.text` should be \
+a brief prompt like "I found N patients matching that name. Please pick \
+one from the list below." Do not enumerate the matches in `text` — the UI \
+already shows them.
 """

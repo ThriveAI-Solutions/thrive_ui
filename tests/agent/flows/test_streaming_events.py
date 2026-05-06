@@ -20,6 +20,7 @@ from agent.state import (
     AgentResponse,
     CapReachedEvent,
     FinalResponseEvent,
+    PatientChooserEvent,
     ToolCallCompleted,
     ToolCallStarted,
 )
@@ -151,6 +152,40 @@ async def test_stream_final_event_carries_agent_response():
     assert len(finals) == 1
     assert isinstance(finals[0].response, AgentResponse)
     assert "patient" in finals[0].response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_patient_chooser_event_after_find_patient_with_matches():
+    """The runtime auto-surfaces a chooser as soon as find_patient returns
+    matches — independent of whether the model attached an artifact to
+    final_result. This is what the user actually sees in the UI."""
+    engine = _make_threadsafe_db()
+    runner = AgenticRunner(model=_scripted_llm())
+    chooser_events: list[PatientChooserEvent] = []
+    async for ev in runner.stream("Smith", deps=_deps(engine)):
+        if isinstance(ev, PatientChooserEvent):
+            chooser_events.append(ev)
+
+    assert len(chooser_events) == 1
+    payload = chooser_events[0].payload
+    assert payload["total_unique"] >= 1
+    assert isinstance(payload["matches"], list)
+    assert all("source_id" in m for m in payload["matches"])
+
+
+@pytest.mark.asyncio
+async def test_chooser_event_fires_before_final_response():
+    """The chooser must render before the final text so the user can click
+    a patient while reading the assistant's prompt."""
+    engine = _make_threadsafe_db()
+    runner = AgenticRunner(model=_scripted_llm())
+    events: list = []
+    async for ev in runner.stream("Smith", deps=_deps(engine)):
+        events.append(ev)
+
+    chooser_idx = next(i for i, e in enumerate(events) if isinstance(e, PatientChooserEvent))
+    final_idx = next(i for i, e in enumerate(events) if isinstance(e, FinalResponseEvent))
+    assert chooser_idx < final_idx
 
 
 @pytest.mark.asyncio

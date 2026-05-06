@@ -39,8 +39,25 @@ class CapReachedEvent(BaseModel):
     reason: Literal["wall_clock", "tool_count"]
 
 
+class PatientChooserEvent(BaseModel):
+    """Emitted by the runner immediately after find_patient returns matches,
+    so the UI can render a click-to-select chooser without waiting for the
+    model to call final_result. Independent of any artifact the model may
+    or may not attach.
+    """
+
+    kind: Literal["patient_chooser"] = "patient_chooser"
+    payload: dict  # PatientSearchResults shape: {matches, total_unique, truncated}
+
+
 StreamEvent = Annotated[
-    Union[ToolCallStarted, ToolCallCompleted, FinalResponseEvent, CapReachedEvent],
+    Union[
+        ToolCallStarted,
+        ToolCallCompleted,
+        FinalResponseEvent,
+        CapReachedEvent,
+        PatientChooserEvent,
+    ],
     Field(discriminator="kind"),
 ]
 

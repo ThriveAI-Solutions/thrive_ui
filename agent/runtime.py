@@ -17,11 +17,12 @@ from agent.observability import configure_observability
 from agent.runner import AgenticRunner
 from agent.state import (
     AgentResponse,
-    StreamEvent,
-    ToolCallStarted,
-    ToolCallCompleted,
-    FinalResponseEvent,
     CapReachedEvent,
+    FinalResponseEvent,
+    PatientChooserEvent,
+    StreamEvent,
+    ToolCallCompleted,
+    ToolCallStarted,
 )
 from utils.enums import MessageType, RoleType
 from orm.models import Message, SessionLocal
@@ -137,20 +138,20 @@ def _render_event(event: StreamEvent) -> None:
         )
         return
 
+    if isinstance(event, PatientChooserEvent):
+        # Auto-surfaced by runner.stream() right after find_patient succeeds,
+        # independent of any artifact the model may attach to final_result.
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                json.dumps(event.payload),
+                MessageType.PATIENT_CHOOSER,
+            )
+        )
+        return
+
     if isinstance(event, FinalResponseEvent):
         response = event.response
-        # If the response carries a PatientSearchResults artifact (Phase 1
-        # surfaces this via a tool result), render the chooser.
-        for artifact in response.artifacts:
-            if artifact.artifact_type == "patient_search_results":
-                add_message(
-                    Message(
-                        RoleType.ASSISTANT,
-                        json.dumps(artifact.payload),
-                        MessageType.PATIENT_CHOOSER,
-                    )
-                )
-        # Final text
         add_message(
             Message(
                 RoleType.ASSISTANT,
