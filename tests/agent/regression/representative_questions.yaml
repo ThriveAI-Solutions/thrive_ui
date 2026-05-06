@@ -5,18 +5,17 @@
 #   2. expected_data_availability matches the principal clinical-tool result
 #   3. final reply does NOT contain any phrase from must_not_contain
 #
-# The principal tool for a question is the LAST clinical-data / document
-# tool in expected_tools. find_patient and search_codes are setup tools.
-#
-# selected_patient is filled by the runner before invoking the agent so
-# clinical-data tools don't ModelRetry. Use src-john-1962 (the diabetic
-# patient in the synthetic fixture) for offline runs.
+# Regression mode is post-disambiguation: the runner pre-fills the
+# selected_patient slot AND prepends a [Regression context: ...] line to
+# each prompt telling the agent to skip find_patient. So expected_tools
+# does NOT include find_patient — that flow is exercised in production
+# smoke, not here. We're testing routing into the right clinical-data
+# domain and the right caveats in the reply.
 
 questions:
   - id: Q1
     prompt: "Has John Smith had any invasive procedures or surgeries between 2024-01-01 and today? Show date, facility, procedure, and provider."
     expected_tools:
-      - find_patient
       - get_patient_clinical_data
     expected_domains:
       - procedures
@@ -29,7 +28,6 @@ questions:
   - id: Q2
     prompt: "Has John Smith had any negative Hepatitis lab results in the last year? Show date, test name, and result."
     expected_tools:
-      - find_patient
       - search_codes
       - get_patient_clinical_data
     expected_domains:
@@ -42,7 +40,6 @@ questions:
   - id: Q3
     prompt: "Has John Smith ever been tested for Measles or Rubeola IgM/IgG? Show the result."
     expected_tools:
-      - find_patient
       - search_codes
       - get_patient_clinical_data
     expected_domains:
@@ -54,7 +51,6 @@ questions:
   - id: Q4
     prompt: "Does John Smith have a history of diabetes? If yes, what was their most recent A1C?"
     expected_tools:
-      - find_patient
       - get_patient_clinical_data
     expected_domains:
       - diagnoses
@@ -67,7 +63,6 @@ questions:
   - id: Q5
     prompt: "Has John Smith been admitted to long-term care, hospital, or healthcare facilities between 2025-01-01 and today? Include facilities and admit dates."
     expected_tools:
-      - find_patient
       - get_patient_clinical_data
     expected_domains:
       - encounters
@@ -78,7 +73,6 @@ questions:
   - id: Q6
     prompt: "Has John Smith ever received an MMR vaccine? Include date, vaccine, and facility."
     expected_tools:
-      - find_patient
       - search_codes
       - get_patient_clinical_data
     expected_domains:
@@ -90,7 +84,6 @@ questions:
   - id: Q7
     prompt: "Does John Smith have any documented progress notes mentioning diabetes? Provide who diagnosed and when last mentioned."
     expected_tools:
-      - find_patient
       - list_patient_documents
       - get_patient_clinical_data
     expected_domains:
@@ -106,7 +99,6 @@ questions:
   - id: Q8
     prompt: "Did John Smith have any imaging done in 2026? Show type, body location, where, and impression."
     expected_tools:
-      - find_patient
       - get_patient_clinical_data
     expected_domains:
       - imaging
@@ -120,7 +112,6 @@ questions:
   - id: Q9
     prompt: "Has John Smith been treated with antibiotics for Gonorrhea or Chlamydia after 2026-01-01? Show medications, dosage, prescriber."
     expected_tools:
-      - find_patient
       - search_codes
       - get_patient_clinical_data
     expected_domains:
@@ -136,8 +127,7 @@ questions:
 
   - id: Q10
     prompt: "Show John Smith's Hep B maternal history — gravida, para, prior pregnancy outcomes, and MRNs of living children."
-    expected_tools:
-      - find_patient
+    expected_tools: []
     expected_domains: []
     expected_data_availability: domain_not_available
     must_not_contain:

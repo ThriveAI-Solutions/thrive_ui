@@ -146,10 +146,20 @@ def _grade(question: dict, tool_calls: list[dict], final_text: str) -> dict:
     }
 
 
+_PRESELECT_CONTEXT = (
+    "[Regression context: a patient has already been selected — "
+    "John Smith, source_id 'src-john-1962', DOB 1962-05-01. "
+    "Do NOT call find_patient. Go directly to the patient-specific "
+    "clinical-data tools (get_patient_clinical_data, "
+    "list_patient_documents, search_codes).]\n\n"
+)
+
+
 async def _run_one(runner: AgenticRunner, deps: AgentDeps, prompt: str) -> tuple[list[dict], str]:
     tool_calls: list[dict] = []
     final_text = ""
-    async for evt in runner.stream(prompt, deps=deps):
+    full_prompt = _PRESELECT_CONTEXT + prompt
+    async for evt in runner.stream(full_prompt, deps=deps):
         if isinstance(evt, ToolCallStarted):
             tool_calls.append({"tool_name": evt.tool_name, "result_summary": ""})
         elif isinstance(evt, ToolCallCompleted):
