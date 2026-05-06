@@ -1,0 +1,82 @@
+from datetime import date, datetime
+from unittest.mock import MagicMock
+import pytest
+
+from agent.deps import AgentDeps, SelectedPatient
+from agent.db.analytics_adapter import AnalyticsDbAdapter
+from agent.tools.get_patient_clinical_data import (
+    get_patient_clinical_data,
+    DemographicsQuery,
+    EncountersQuery,
+    DateRange,
+    ClinicalResult,
+)
+from pydantic_ai import ModelRetry
+
+
+def _deps(synthetic_db, selected: SelectedPatient | None) -> AgentDeps:
+    return AgentDeps(
+        user_id=1,
+        user_role=MagicMock(value=1),
+        session_id="s1",
+        selected_patient=selected,
+        last_dataframe=None,
+        last_sql=None,
+        last_query_meta=None,
+        analytics_db=AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite"),
+        rag=None,
+        sqlite_session=None,
+        audit_logger=MagicMock(),
+    )
+
+
+def _selected_john() -> SelectedPatient:
+    return SelectedPatient(
+        source_id="src-john-1962",
+        display_name="John Smith",
+        dob=date(1962, 5, 1),
+        selected_at=datetime.now(),
+        selection_origin="user_click",
+    )
+
+
+def test_demographics_returns_data_present(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, DemographicsQuery())
+    assert isinstance(result, ClinicalResult)
+    assert result.domain == "demographics"
+    assert result.data_availability == "data_present"
+    assert len(result.items) == 1
+
+
+def test_encounters_returns_two_for_john_1962(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, EncountersQuery())
+    assert result.domain == "encounters"
+    assert len(result.items) == 2
+
+
+def test_encounters_date_range_narrows_results(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = EncountersQuery(date_range=DateRange(start=date(2026, 3, 1), end=date(2026, 4, 30)))
+    result = get_patient_clinical_data(ctx, q)
+    assert len(result.items) == 1
+
+
+def test_no_selection_raises_model_retry(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    with pytest.raises(ModelRetry, match="No patient is currently selected"):
+        get_patient_clinical_data(ctx, EncountersQuery())
+
+
+def test_no_records_found_data_availability(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = EncountersQuery(date_range=DateRange(start=date(1900, 1, 1), end=date(1900, 12, 31)))
+    result = get_patient_clinical_data(ctx, q)
+    assert result.data_availability == "no_records_found"
+    assert result.items == []
