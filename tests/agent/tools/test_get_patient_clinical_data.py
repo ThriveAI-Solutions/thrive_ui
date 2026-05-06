@@ -80,3 +80,36 @@ def test_no_records_found_data_availability(synthetic_db):
     result = get_patient_clinical_data(ctx, q)
     assert result.data_availability == "no_records_found"
     assert result.items == []
+
+
+from agent.tools.get_patient_clinical_data import LabsQuery, LabItem
+
+
+def test_labs_returns_data_present(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, LabsQuery())
+    assert result.domain == "labs"
+    assert result.data_availability == "data_present"
+    assert len(result.items) == 4
+    assert all(isinstance(i, LabItem) for i in result.items)
+
+
+def test_labs_reliability_note_set_when_non_loinc_present(synthetic_db):
+    """At least one fixture row has code_type='local' — that triggers the badge."""
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, LabsQuery())
+    assert result.reliability_note is not None
+    assert "loinc" in result.reliability_note.lower()
+
+
+def test_labs_negative_result_filter(synthetic_db):
+    from agent.tools.get_patient_clinical_data import LabsQuery
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, LabsQuery(result_filter="negative"))
+    assert result.data_availability == "data_present"
+    assert len(result.items) == 1
+    assert result.items[0].clean_result == "negative"

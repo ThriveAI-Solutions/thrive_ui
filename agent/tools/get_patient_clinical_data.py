@@ -16,6 +16,8 @@ from pydantic_ai import ModelRetry, RunContext
 
 from agent.deps import AgentDeps
 from agent.db.queries.clinical import demographics_sql, encounters_sql
+from agent.db.queries.labs import labs_sql
+from agent.code_normalizer import normalize_token, variants_for
 
 
 # --- Query shapes (Phase 1 subset) ----------------------------------
@@ -36,9 +38,16 @@ class EncountersQuery(BaseModel):
     facility_type: Optional[Literal["inpatient", "outpatient", "ed", "ltc", "any"]] = "any"
 
 
-# Phase 2 will expand this union; for now we keep it minimal.
+class LabsQuery(BaseModel):
+    domain: Literal["labs"] = "labs"
+    date_range: Optional[DateRange] = None
+    loinc_codes: Optional[List[str]] = None
+    test_name_text: Optional[str] = None
+    result_filter: Optional[Literal["positive", "negative", "abnormal", "any"]] = "any"
+
+
 PatientClinicalQuery = Annotated[
-    Union[DemographicsQuery, EncountersQuery],
+    Union[DemographicsQuery, EncountersQuery, LabsQuery],
     Field(discriminator="domain"),
 ]
 
@@ -78,8 +87,21 @@ class EncounterItem(BaseModel):
     place_of_service: Optional[str]
 
 
+class LabItem(BaseModel):
+    item_type: Literal["lab"] = "lab"
+    source_id: str
+    code: Optional[str]
+    code_type: Optional[str]
+    name: Optional[str]
+    result: Optional[str]
+    clean_result: Optional[str]
+    unit: Optional[str]
+    event_datetime: Optional[str]
+    service_provider: Optional[str]
+
+
 ClinicalItem = Annotated[
-    Union[DemographicsItem, EncounterItem],
+    Union[DemographicsItem, EncounterItem, LabItem],
     Field(discriminator="item_type"),
 ]
 
@@ -168,6 +190,51 @@ def get_patient_clinical_data(
             domain="encounters",
             items=items,
             data_availability="data_present",
+        )
+
+    if isinstance(query, LabsQuery):
+        dr = query.date_range
+        sql, params = labs_sql(
+            source_id=source_id,
+            loinc_codes=query.loinc_codes,
+            test_name_text=query.test_name_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            result_filter=query.result_filter,
+        )
+        rows = adapter.fetch_all(sql, params)
+        if not rows:
+            return ClinicalResult(
+                domain="labs",
+                items=[],
+                data_availability="no_records_found",
+            )
+        items = [
+            LabItem(
+                source_id=r["source_id"],
+                code=r.get("code"),
+                code_type=r.get("code_type"),
+                name=r.get("name"),
+                result=r.get("result"),
+                clean_result=r.get("clean_result"),
+                unit=r.get("unit"),
+                event_datetime=str(r["event_datetime"]) if r.get("event_datetime") else None,
+                service_provider=r.get("service_provider"),
+            )
+            for r in rows
+        ]
+        non_loinc = [i for i in items if normalize_token(i.code_type or "") != "loinc"]
+        reliability_note = None
+        if non_loinc:
+            reliability_note = (
+                f"LOINC coverage in source data is ~50%; "
+                f"{len(non_loinc)} of {len(items)} returned rows use non-LOINC vocabularies."
+            )
+        return ClinicalResult(
+            domain="labs",
+            items=items,
+            data_availability="data_present",
+            reliability_note=reliability_note,
         )
 
     raise NotImplementedError(f"Unhandled domain: {query.domain}")
