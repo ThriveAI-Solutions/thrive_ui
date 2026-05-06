@@ -18,6 +18,7 @@ from agent.deps import AgentDeps
 from agent.db.queries.clinical import demographics_sql, encounters_sql
 from agent.db.queries.labs import labs_sql
 from agent.db.queries.diagnoses import diagnoses_sql
+from agent.db.queries.medications import medications_sql
 from agent.code_normalizer import normalize_token, variants_for
 
 
@@ -54,8 +55,22 @@ class DiagnosesQuery(BaseModel):
     most_recent_only: bool = False
 
 
+class MedicationsQuery(BaseModel):
+    domain: Literal["medications"] = "medications"
+    date_range: Optional[DateRange] = None
+    rxnorm_codes: Optional[List[str]] = None
+    drug_class: Optional[str] = None
+    linked_diagnosis_codes: Optional[List[str]] = None
+
+
 PatientClinicalQuery = Annotated[
-    Union[DemographicsQuery, EncountersQuery, LabsQuery, DiagnosesQuery],
+    Union[
+        DemographicsQuery,
+        EncountersQuery,
+        LabsQuery,
+        DiagnosesQuery,
+        MedicationsQuery,
+    ],
     Field(discriminator="domain"),
 ]
 
@@ -119,8 +134,24 @@ class DiagnosisItem(BaseModel):
     service_provider_npi: Optional[str]
 
 
+class MedicationItem(BaseModel):
+    item_type: Literal["medication"] = "medication"
+    source_id: str
+    ndc_code: Optional[str]
+    rxnorm_code: Optional[str]
+    med_name: Optional[str]
+    date_prescribed: Optional[str]
+    prescribing_provider_npi: Optional[str]
+    med_strength: Optional[str]
+    med_strength_unit: Optional[str]
+    med_form: Optional[str]
+    med_sig: Optional[str]
+    drug_supply_days: Optional[int]
+    number_of_refills: Optional[int]
+
+
 ClinicalItem = Annotated[
-    Union[DemographicsItem, EncounterItem, LabItem, DiagnosisItem],
+    Union[DemographicsItem, EncounterItem, LabItem, DiagnosisItem, MedicationItem],
     Field(discriminator="item_type"),
 ]
 
@@ -294,6 +325,54 @@ def get_patient_clinical_data(
             items=items,
             data_availability="data_present",
             reliability_note=reliability_note,
+        )
+
+    if isinstance(query, MedicationsQuery):
+        if query.drug_class is not None or query.linked_diagnosis_codes is not None:
+            return ClinicalResult(
+                domain="medications",
+                items=[],
+                data_availability="domain_not_available",
+                notes_to_agent=(
+                    "drug_class / linked_diagnosis_codes filters are not implemented in v1. "
+                    "Resolve to rxnorm_codes via search_codes(vocabulary='rxnorm') and retry."
+                ),
+            )
+        dr = query.date_range
+        sql, params = medications_sql(
+            source_id=source_id,
+            rxnorm_codes=query.rxnorm_codes,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+        )
+        rows = adapter.fetch_all(sql, params)
+        if not rows:
+            return ClinicalResult(
+                domain="medications",
+                items=[],
+                data_availability="no_records_found",
+            )
+        items = [
+            MedicationItem(
+                source_id=r["source_id"],
+                ndc_code=r.get("ndc_code"),
+                rxnorm_code=r.get("rxnorm_code"),
+                med_name=r.get("med_name"),
+                date_prescribed=str(r["date_prescribed"]) if r.get("date_prescribed") else None,
+                prescribing_provider_npi=r.get("prescribing_provider_npi"),
+                med_strength=r.get("med_strength"),
+                med_strength_unit=r.get("med_strength_unit"),
+                med_form=r.get("med_form"),
+                med_sig=r.get("med_sig"),
+                drug_supply_days=r.get("drug_supply_days"),
+                number_of_refills=r.get("number_of_refills"),
+            )
+            for r in rows
+        ]
+        return ClinicalResult(
+            domain="medications",
+            items=items,
+            data_availability="data_present",
         )
 
     raise NotImplementedError(f"Unhandled domain: {query.domain}")

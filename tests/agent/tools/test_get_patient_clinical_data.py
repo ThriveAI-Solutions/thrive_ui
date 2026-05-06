@@ -143,3 +143,25 @@ def test_diagnoses_most_recent_only(synthetic_db):
     q = DiagnosesQuery(most_recent_only=True)
     result = get_patient_clinical_data(ctx, q)
     assert len(result.items) == 1
+
+
+from agent.tools.get_patient_clinical_data import MedicationsQuery, MedicationItem
+
+
+def test_medications_returns_two(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, MedicationsQuery())
+    assert result.domain == "medications"
+    assert result.data_availability == "data_present"
+    assert len(result.items) == 2
+    assert all(isinstance(i, MedicationItem) for i in result.items)
+
+
+def test_medications_filtered_by_rxnorm(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = MedicationsQuery(rxnorm_codes=["18631"])
+    result = get_patient_clinical_data(ctx, q)
+    assert len(result.items) == 1
+    assert result.items[0].med_name == "Azithromycin"
