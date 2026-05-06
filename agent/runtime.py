@@ -34,12 +34,37 @@ def _runner() -> AgenticRunner:
     return AgenticRunner()
 
 
+_LOOP: asyncio.AbstractEventLoop | None = None
+_LOOP_LOCK = threading.Lock()
+
+
+def _persistent_loop() -> asyncio.AbstractEventLoop:
+    """Process-wide event loop reused across requests.
+
+    Pydantic AI's OpenAI / Anthropic providers hold long-lived httpx
+    connection pools whose TCP transports are bound to the loop on
+    which they were first awaited. asyncio.run() creates and closes a
+    fresh loop per call, leaving the cached client with dead transports
+    on the second request — visible as
+    "RuntimeError: unable to perform operation on <TCPTransport closed>".
+    Pinning a single loop keeps those transports alive.
+    """
+    global _LOOP
+    with _LOOP_LOCK:
+        if _LOOP is None or _LOOP.is_closed():
+            _LOOP = asyncio.new_event_loop()
+        return _LOOP
+
+
 def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
     """Safely execute a coroutine to completion regardless of caller context.
 
-    asyncio.run() raises if a loop is already running (e.g., when called
-    from inside another coroutine, or under Streamlit + Tornado on some
-    versions). Spawn a worker thread with a fresh loop in that case.
+    Three paths:
+    1. No running loop on this thread → run on the persistent loop via
+       run_until_complete (the common Streamlit script-thread case).
+    2. Already inside a running loop on this thread (e.g. tests with
+       pytest-asyncio) → spawn a worker thread with a fresh asyncio.run
+       so we do not deadlock the caller's loop.
     """
     try:
         asyncio.get_running_loop()
@@ -48,7 +73,7 @@ def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
         in_loop = False
 
     if not in_loop:
-        return asyncio.run(coro)
+        return _persistent_loop().run_until_complete(coro)
 
     box: dict[str, Any] = {}
 

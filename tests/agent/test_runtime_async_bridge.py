@@ -48,6 +48,25 @@ async def test_run_async_propagates_exceptions():
         _run_async(coro())
 
 
+def test_run_async_reuses_a_persistent_loop_across_calls():
+    """Pydantic AI's HTTP clients (httpx connection pools) bind their
+    transports to the loop they were first used on. asyncio.run() per
+    call would close that loop and leave the next call with dead
+    transports — exactly the "TCPTransport closed" RuntimeError the
+    user hit after clicking a patient. Two consecutive _run_async
+    calls must share one loop."""
+    import asyncio as _asyncio
+
+    from agent.runtime import _run_async
+
+    async def get_loop_id():
+        return id(_asyncio.get_event_loop())
+
+    a = _run_async(get_loop_id())
+    b = _run_async(get_loop_id())
+    assert a == b
+
+
 def test_run_agentic_flow_closes_sqlite_session_on_exception(monkeypatch):
     """If the agent raises mid-run, the per-request SQLite session must
     still be closed — otherwise long-running Streamlit processes leak
