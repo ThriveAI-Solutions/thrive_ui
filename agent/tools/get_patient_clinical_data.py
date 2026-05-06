@@ -17,6 +17,7 @@ from pydantic_ai import ModelRetry, RunContext
 from agent.deps import AgentDeps
 from agent.db.queries.clinical import demographics_sql, encounters_sql
 from agent.db.queries.labs import labs_sql
+from agent.db.queries.diagnoses import diagnoses_sql
 from agent.code_normalizer import normalize_token, variants_for
 
 
@@ -46,8 +47,15 @@ class LabsQuery(BaseModel):
     result_filter: Optional[Literal["positive", "negative", "abnormal", "any"]] = "any"
 
 
+class DiagnosesQuery(BaseModel):
+    domain: Literal["diagnoses"] = "diagnoses"
+    icd10_codes: Optional[List[str]] = None
+    condition_text: Optional[str] = None
+    most_recent_only: bool = False
+
+
 PatientClinicalQuery = Annotated[
-    Union[DemographicsQuery, EncountersQuery, LabsQuery],
+    Union[DemographicsQuery, EncountersQuery, LabsQuery, DiagnosesQuery],
     Field(discriminator="domain"),
 ]
 
@@ -100,8 +108,19 @@ class LabItem(BaseModel):
     service_provider: Optional[str]
 
 
+class DiagnosisItem(BaseModel):
+    item_type: Literal["diagnosis"] = "diagnosis"
+    source_id: str
+    code: Optional[str]
+    code_type: Optional[str]
+    diagnosis: Optional[str]
+    diagnosis_datetime: Optional[str]
+    chronic_ind: Optional[str]
+    service_provider_npi: Optional[str]
+
+
 ClinicalItem = Annotated[
-    Union[DemographicsItem, EncounterItem, LabItem],
+    Union[DemographicsItem, EncounterItem, LabItem, DiagnosisItem],
     Field(discriminator="item_type"),
 ]
 
@@ -232,6 +251,46 @@ def get_patient_clinical_data(
             )
         return ClinicalResult(
             domain="labs",
+            items=items,
+            data_availability="data_present",
+            reliability_note=reliability_note,
+        )
+
+    if isinstance(query, DiagnosesQuery):
+        sql, params = diagnoses_sql(
+            source_id=source_id,
+            icd10_codes=query.icd10_codes,
+            condition_text=query.condition_text,
+            most_recent_only=query.most_recent_only,
+        )
+        rows = adapter.fetch_all(sql, params)
+        if not rows:
+            return ClinicalResult(
+                domain="diagnoses",
+                items=[],
+                data_availability="no_records_found",
+            )
+        items = [
+            DiagnosisItem(
+                source_id=r["source_id"],
+                code=r.get("code"),
+                code_type=r.get("code_type"),
+                diagnosis=r.get("diagnosis"),
+                diagnosis_datetime=str(r["diagnosis_datetime"]) if r.get("diagnosis_datetime") else None,
+                chronic_ind=r.get("chronic_ind"),
+                service_provider_npi=r.get("service_provider_npi"),
+            )
+            for r in rows
+        ]
+        non_icd10 = [i for i in items if normalize_token(i.code_type or "") != "icd10"]
+        reliability_note = None
+        if non_icd10:
+            reliability_note = (
+                f"ICD-10 coverage in source data is ~57%; "
+                f"{len(non_icd10)} of {len(items)} returned rows use SNOMED/ICD-9/other vocabularies."
+            )
+        return ClinicalResult(
+            domain="diagnoses",
             items=items,
             data_availability="data_present",
             reliability_note=reliability_note,

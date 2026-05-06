@@ -113,3 +113,33 @@ def test_labs_negative_result_filter(synthetic_db):
     assert result.data_availability == "data_present"
     assert len(result.items) == 1
     assert result.items[0].clean_result == "negative"
+
+
+from agent.tools.get_patient_clinical_data import DiagnosesQuery, DiagnosisItem
+
+
+def test_diagnoses_returns_three_for_john_1962(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, DiagnosesQuery())
+    assert result.domain == "diagnoses"
+    assert result.data_availability == "data_present"
+    assert len(result.items) == 3
+    assert all(isinstance(i, DiagnosisItem) for i in result.items)
+
+
+def test_diagnoses_filtered_by_text_returns_diabetes(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = DiagnosesQuery(condition_text="diabetes")
+    result = get_patient_clinical_data(ctx, q)
+    assert len(result.items) == 1
+    assert "diabetes" in result.items[0].diagnosis.lower()
+
+
+def test_diagnoses_most_recent_only(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = DiagnosesQuery(most_recent_only=True)
+    result = get_patient_clinical_data(ctx, q)
+    assert len(result.items) == 1
