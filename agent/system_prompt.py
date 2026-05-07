@@ -73,6 +73,13 @@ the slot automatically:
     date_range}) — UNION over orders, problems (ICD-10-PCS), and claims. \
     Claims data refreshes monthly so it lags clinical data by up to 30 days; \
     surface that in your reply.
+  - get_patient_clinical_data({domain:'surgeries', cpt_codes, procedure_text, \
+    date_range}) — invasive procedures and surgeries only. Filters orders to \
+    CPT surgery range (10004-69990), problems to invasive ICD-10-PCS root \
+    operations, and includes most claims procedures. Includes performing \
+    provider name when an encounter match exists. Use this instead of \
+    'procedures' when the user asks specifically about surgeries, operations, \
+    or invasive procedures.
   - get_patient_clinical_data({domain:'imaging', modality, body_region, \
     date_range}) — imaging orders + radiology document index. Impression text \
     is NOT stored in this warehouse. Tell users to retrieve full impressions \

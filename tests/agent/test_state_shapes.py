@@ -56,3 +56,49 @@ def test_tool_call_completed_carries_reliability_note():
         reliability_note="LOINC coverage ~50%",
     )
     assert evt.reliability_note == "LOINC coverage ~50%"
+
+
+from agent.tools.get_patient_clinical_data import (
+    SurgeriesQuery,
+    SurgeryItem,
+    PatientClinicalQuery,
+    ClinicalItem,
+)
+from pydantic import TypeAdapter
+
+
+def test_surgeries_query_in_discriminated_union():
+    adapter = TypeAdapter(PatientClinicalQuery)
+    q = adapter.validate_python({"domain": "surgeries"})
+    assert isinstance(q, SurgeriesQuery)
+
+
+def test_surgeries_query_with_filters():
+    adapter = TypeAdapter(PatientClinicalQuery)
+    q = adapter.validate_python({
+        "domain": "surgeries",
+        "cpt_codes": ["27447"],
+        "procedure_text": "knee",
+        "date_range": {"start": "2025-01-01"},
+    })
+    assert isinstance(q, SurgeriesQuery)
+    assert q.cpt_codes == ["27447"]
+
+
+def test_surgery_item_in_clinical_item_union():
+    adapter = TypeAdapter(ClinicalItem)
+    item = adapter.validate_python({
+        "item_type": "surgery",
+        "source": "orders",
+        "source_id": "src-1",
+        "code": "27447",
+        "code_type": "CPT",
+        "description": "Total knee arthroplasty",
+        "event_date": "2025-06-15",
+        "place_of_service": "21",
+        "provider_npi": None,
+        "performing_provider": "Dr. Ortho",
+        "facility_name": None,
+    })
+    assert isinstance(item, SurgeryItem)
+    assert item.performing_provider == "Dr. Ortho"
