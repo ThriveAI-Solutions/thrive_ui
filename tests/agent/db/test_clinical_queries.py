@@ -14,8 +14,10 @@ def test_encounters_for_source_id(synthetic_db):
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = encounters_sql(source_id="src-john-1962")
     rows = adapter.fetch_all(sql, params)
-    assert len(rows) == 2
-    assert all(r["facility_name"] == "Buffalo Medical Group" for r in rows)
+    assert len(rows) == 3
+    facility_names = {r["facility_name"] for r in rows}
+    assert "Buffalo Medical Group" in facility_names
+    assert "Buffalo General" in facility_names
 
 
 def test_encounters_date_range_filter(synthetic_db):

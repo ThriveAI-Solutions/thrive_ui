@@ -6,7 +6,7 @@ def test_diagnoses_for_source_id(synthetic_db):
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = diagnoses_sql(source_id="src-john-1962")
     rows = adapter.fetch_all(sql, params)
-    assert len(rows) == 3
+    assert len(rows) == 4
 
 
 def test_diagnoses_filtered_by_icd10_codes(synthetic_db):

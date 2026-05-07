@@ -62,7 +62,8 @@ CREATE TABLE federated_encounters_v (
 INSERT INTO federated_encounters_v VALUES
     ('src-john-1962', 'enc-1', 'office_visit', 'completed', '2026-04-01 09:30', '2026-04-01 09:30', 'Buffalo Medical Group', 'Dr. Foo', 'Buffalo Medical Group', '11'),
     ('src-john-1962', 'enc-2', 'office_visit', 'completed', '2026-02-15 10:00', '2026-02-15 10:00', 'Buffalo Medical Group', 'Dr. Foo', 'Buffalo Medical Group', '11'),
-    ('src-john-1971', 'enc-3', 'inpatient', 'completed', '2026-03-15 14:00', '2026-03-15 14:00', 'Kaleida Methodist', 'Dr. Bar', 'Kaleida Methodist', '21');
+    ('src-john-1971', 'enc-3', 'inpatient', 'completed', '2026-03-15 14:00', '2026-03-15 14:00', 'Kaleida Methodist', 'Dr. Bar', 'Kaleida Methodist', '21'),
+    ('src-john-1962', 'enc-surg-1', 'inpatient', 'completed', '2025-06-15 08:00', '2025-06-15 08:00', 'Buffalo General', 'Dr. Ortho', 'Buffalo General', '21');
 
 CREATE TABLE federated_demographic_v (
     source_id TEXT,
@@ -110,7 +111,8 @@ CREATE TABLE federated_problems_v (
 INSERT INTO federated_problems_v VALUES
     ('src-john-1962', 'E11.9', 'ICD-10', 'Type 2 diabetes mellitus without complications', '2024-06-12', '2026-04-01', 'Y', '1234567890'),
     ('src-john-1962', 'B16.9', 'ICD-10', 'Acute hepatitis B without delta-agent', '2025-09-01', '2025-09-15', 'N', '1234567890'),
-    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', '2024-08-22', 'N', '1234567890');
+    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', '2024-08-22', 'N', '1234567890'),
+    ('src-john-1962', '0WJG4ZZ', 'ICD-10-PCS', 'Inspection of peritoneal cavity, percutaneous endoscopic', '2025-01-10', '2025-01-10', 'N', '1234567890');
 
 CREATE TABLE federated_meds_v (
     source_id TEXT,
@@ -143,7 +145,8 @@ CREATE TABLE federated_orders_v (
 INSERT INTO federated_orders_v VALUES
     ('src-john-1962', '71046', 'CPT', 'Chest X-ray, 2 views', '2026-03-15 13:00', '2026-03-15 09:00', '22', 'completed'),
     ('src-john-1962', '45378', 'CPT', 'Colonoscopy, diagnostic', '2025-12-01 10:00', '2025-11-20 09:00', '22', 'completed'),
-    ('src-john-1962', 'LOC-X-1', '', 'Local x-ray', '2024-08-20 09:00', '2024-08-20 09:00', '22', 'completed');
+    ('src-john-1962', 'LOC-X-1', '', 'Local x-ray', '2024-08-20 09:00', '2024-08-20 09:00', '22', 'completed'),
+    ('src-john-1962', '27447', 'CPT', 'Total knee arthroplasty', '2025-06-15 08:00', '2025-06-10 09:00', '21', 'completed');
 
 CREATE TABLE federated_vaccination_v (
     source_id TEXT,

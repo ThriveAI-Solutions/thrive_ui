@@ -50,12 +50,12 @@ def test_demographics_returns_data_present(synthetic_db):
     assert len(result.items) == 1
 
 
-def test_encounters_returns_two_for_john_1962(synthetic_db):
+def test_encounters_returns_three_for_john_1962(synthetic_db):
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, EncountersQuery())
     assert result.domain == "encounters"
-    assert len(result.items) == 2
+    assert len(result.items) == 3
 
 
 def test_encounters_date_range_narrows_results(synthetic_db):
@@ -118,13 +118,13 @@ def test_labs_negative_result_filter(synthetic_db):
 from agent.tools.get_patient_clinical_data import DiagnosesQuery, DiagnosisItem
 
 
-def test_diagnoses_returns_three_for_john_1962(synthetic_db):
+def test_diagnoses_returns_four_for_john_1962(synthetic_db):
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, DiagnosesQuery())
     assert result.domain == "diagnoses"
     assert result.data_availability == "data_present"
-    assert len(result.items) == 3
+    assert len(result.items) == 4
     assert all(isinstance(i, DiagnosisItem) for i in result.items)
 
 
