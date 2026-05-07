@@ -14,7 +14,7 @@ from typing import List, Optional, Tuple
 from agent.code_normalizer import variants_for
 
 
-# ICD-10-PCS 4th-character root operations considered invasive.
+# ICD-10-PCS 3rd-character (root operation) values considered invasive.
 _INVASIVE_ROOT_OPS = (
     "5",  # Destruction
     "8",  # Division
@@ -120,7 +120,8 @@ def surgeries_sql(
          AND DATE(o.date_of_procedure) = DATE(e.datetime)
         WHERE o.source_id = :source_id
           AND o.code_type IN ({cpt_ct_placeholders})
-          AND CAST(o.code AS INTEGER) BETWEEN 10004 AND 69990
+          AND LENGTH(o.code) = 5
+          AND o.code >= '10004' AND o.code <= '69990'
           {cpt_filter}
           {text_filter_orders}
           {date_filter_orders}
@@ -171,6 +172,7 @@ def surgeries_sql(
           ON c.source_id = e.source_id
          AND DATE(c.procedure_date) = DATE(e.datetime)
         WHERE c.source_id = :source_id
+          AND c.code_type IN ({pcs_placeholders})
           AND SUBSTR(c.icd_procedure_code, 3, 1) != 'J'
           {icdpcs_filter}
           {text_filter_claims}
