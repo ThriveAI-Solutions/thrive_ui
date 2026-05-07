@@ -21,6 +21,7 @@ def procedures_sql(
     procedure_text: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     params: dict = {"source_id": source_id}
 
@@ -80,7 +81,7 @@ def procedures_sql(
             place_of_service,
             NULL AS provider_npi,
             NULL AS facility_name
-        FROM federated_orders_v
+        FROM {schema_prefix}federated_orders_v
         WHERE source_id = :source_id
           AND (code_type IN ({cpt_ct_placeholders}) OR code_type = '' OR code_type IS NULL)
           {cpt_filter}
@@ -99,7 +100,7 @@ def procedures_sql(
             NULL AS place_of_service,
             service_provider_npi AS provider_npi,
             NULL AS facility_name
-        FROM federated_problems_v
+        FROM {schema_prefix}federated_problems_v
         WHERE source_id = :source_id
           AND code_type IN ({pcs_placeholders})
           {icdpcs_filter}
@@ -118,7 +119,7 @@ def procedures_sql(
             place_of_service,
             rendering_provider_npi AS provider_npi,
             facility_name
-        FROM federated_claims_icd_procedure_detail_v
+        FROM {schema_prefix}federated_claims_icd_procedure_detail_v
         WHERE source_id = :source_id
           {icdpcs_filter}
           {text_filter_claims}

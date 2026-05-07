@@ -17,6 +17,7 @@ def diagnoses_sql(
     icd10_codes: Optional[List[str]] = None,
     condition_text: Optional[str] = None,
     most_recent_only: bool = False,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where: list[str] = ["source_id = :source_id"]
     params: dict = {"source_id": source_id}
@@ -48,7 +49,7 @@ def diagnoses_sql(
             status_datetime,
             chronic_ind,
             service_provider_npi
-        FROM federated_problems_v
+        FROM {schema_prefix}federated_problems_v
         WHERE {where_sql}
         ORDER BY diagnosis_datetime DESC
     """

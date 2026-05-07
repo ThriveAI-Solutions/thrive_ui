@@ -252,9 +252,10 @@ def get_patient_clinical_data(
         )
     source_id = ctx.deps.selected_patient.source_id
     adapter = ctx.deps.analytics_db
+    schema_prefix = getattr(adapter, "schema_prefix", "")
 
     if isinstance(query, DemographicsQuery):
-        sql, params = demographics_sql(source_id=source_id)
+        sql, params = demographics_sql(source_id=source_id, schema_prefix=schema_prefix)
         rows = adapter.fetch_all(sql, params)
         if not rows:
             return ClinicalResult(
@@ -289,6 +290,7 @@ def get_patient_clinical_data(
             start_date=dr.start.isoformat() if dr and dr.start else None,
             end_date=dr.end.isoformat() if dr and dr.end else None,
             facility_type=query.facility_type,
+            schema_prefix=schema_prefix,
         )
         rows = adapter.fetch_all(sql, params)
         if not rows:
@@ -326,6 +328,7 @@ def get_patient_clinical_data(
             start_date=dr.start.isoformat() if dr and dr.start else None,
             end_date=dr.end.isoformat() if dr and dr.end else None,
             result_filter=query.result_filter,
+            schema_prefix=schema_prefix,
         )
         rows = adapter.fetch_all(sql, params)
         if not rows:
@@ -368,6 +371,7 @@ def get_patient_clinical_data(
             icd10_codes=query.icd10_codes,
             condition_text=query.condition_text,
             most_recent_only=query.most_recent_only,
+            schema_prefix=schema_prefix,
         )
         rows = adapter.fetch_all(sql, params)
         if not rows:
@@ -419,6 +423,7 @@ def get_patient_clinical_data(
             rxnorm_codes=query.rxnorm_codes,
             start_date=dr.start.isoformat() if dr and dr.start else None,
             end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
         )
         rows = adapter.fetch_all(sql, params)
         if not rows:
@@ -458,6 +463,7 @@ def get_patient_clinical_data(
             vaccine_text=query.vaccine_text,
             start_date=dr.start.isoformat() if dr and dr.start else None,
             end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
         )
         rows = adapter.fetch_all(sql, params)
         if not rows:
@@ -494,6 +500,7 @@ def get_patient_clinical_data(
             procedure_text=query.procedure_text,
             start_date=dr.start.isoformat() if dr and dr.start else None,
             end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
         )
         rows = adapter.fetch_all(sql, params)
         if not rows:
@@ -540,6 +547,7 @@ def get_patient_clinical_data(
             body_region=query.body_region,
             start_date=dr.start.isoformat() if dr and dr.start else None,
             end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
         )
         rows = adapter.fetch_all(sql, params)
         impression_note = (

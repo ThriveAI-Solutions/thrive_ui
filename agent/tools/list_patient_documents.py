@@ -58,6 +58,7 @@ def list_patient_documents(
         document_type=query.document_type,
         start_date=dr.start.isoformat() if dr and dr.start else None,
         end_date=dr.end.isoformat() if dr and dr.end else None,
+        schema_prefix=getattr(adapter, "schema_prefix", ""),
     )
     rows = adapter.fetch_all(sql, params)
     if not rows:

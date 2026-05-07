@@ -14,6 +14,7 @@ def documents_sql(
     document_type: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where: list[str] = ["source_id = :source_id"]
     params: dict = {"source_id": source_id}
@@ -39,7 +40,7 @@ def documents_sql(
             encounter_id,
             place_of_service,
             location_name
-        FROM federated_documents_v
+        FROM {schema_prefix}federated_documents_v
         WHERE {" AND ".join(where)}
         ORDER BY datetime DESC
     """

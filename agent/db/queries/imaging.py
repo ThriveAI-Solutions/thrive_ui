@@ -31,6 +31,7 @@ def imaging_sql(
     body_region: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     params: dict = {"source_id": source_id}
 
@@ -78,7 +79,7 @@ def imaging_sql(
             date_of_procedure AS event_date,
             place_of_service,
             NULL AS location_name
-        FROM federated_orders_v
+        FROM {schema_prefix}federated_orders_v
         WHERE source_id = :source_id
           AND (
               LOWER(name) LIKE '%imag%'
@@ -103,7 +104,7 @@ def imaging_sql(
             datetime AS event_date,
             place_of_service,
             location_name
-        FROM federated_documents_v
+        FROM {schema_prefix}federated_documents_v
         WHERE source_id = :source_id
           AND (
               LOWER(name) LIKE '%radiolog%'

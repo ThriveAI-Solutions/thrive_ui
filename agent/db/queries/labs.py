@@ -28,6 +28,7 @@ def labs_sql(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     result_filter: Optional[str] = None,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where: list[str] = ["source_id = :source_id"]
     params: dict = {"source_id": source_id}
@@ -72,7 +73,7 @@ def labs_sql(
             unit,
             datetime AS event_datetime,
             service_provider
-        FROM federated_results_v
+        FROM {schema_prefix}federated_results_v
         WHERE {" AND ".join(where)}
         ORDER BY datetime DESC
     """

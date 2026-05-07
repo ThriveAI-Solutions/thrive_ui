@@ -19,6 +19,7 @@ def find_patient_sql(
     dob: Optional[str] = None,
     mrn: Optional[str] = None,
     limit: int = 25,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where_clauses: list[str] = []
     params: dict = {"limit": limit}
@@ -54,8 +55,8 @@ def find_patient_sql(
         ipp.last_date_of_visit AS most_recent_activity,
         ipp.practice_name AS practice_name,
         isr.empi_rank AS empi_rank
-    FROM internal_patient_profile_v ipp
-    JOIN internal_source_reference_v isr
+    FROM {schema_prefix}internal_patient_profile_v ipp
+    JOIN {schema_prefix}internal_source_reference_v isr
       ON ipp.patient_id = isr.patient_id
      AND isr.empi_rank = 1
     WHERE {where}
@@ -65,11 +66,11 @@ def find_patient_sql(
     return sql, params
 
 
-def related_source_ids_sql() -> Tuple[str, dict]:
+def related_source_ids_sql(*, schema_prefix: str = "") -> Tuple[str, dict]:
     return (
-        """
+        f"""
         SELECT source_id, empi_rank, source_name
-        FROM internal_source_reference_v
+        FROM {schema_prefix}internal_source_reference_v
         WHERE patient_id = :internal_patient_id
           AND empi_rank != 99
           AND empi_rank != 1

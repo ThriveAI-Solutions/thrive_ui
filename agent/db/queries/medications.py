@@ -16,6 +16,7 @@ def medications_sql(
     rxnorm_codes: Optional[List[str]] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where: list[str] = ["source_id = :source_id"]
     params: dict = {"source_id": source_id}
@@ -47,7 +48,7 @@ def medications_sql(
             med_sig,
             drug_supply_days,
             number_of_refills
-        FROM federated_meds_v
+        FROM {schema_prefix}federated_meds_v
         WHERE {" AND ".join(where)}
         ORDER BY date_prescribed DESC
     """

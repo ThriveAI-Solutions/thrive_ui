@@ -20,16 +20,16 @@ _FACILITY_TYPE_TO_POS_CODES = {
 }
 
 
-def demographics_sql(*, source_id: str) -> Tuple[str, dict]:
+def demographics_sql(*, source_id: str, schema_prefix: str = "") -> Tuple[str, dict]:
     return (
-        """
+        f"""
         SELECT
             source_id,
             first_name,
             last_name,
             date_of_birth,
             gender
-        FROM federated_demographic_v
+        FROM {schema_prefix}federated_demographic_v
         WHERE source_id = :source_id
         """,
         {"source_id": source_id},
@@ -42,6 +42,7 @@ def encounters_sql(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     facility_type: Optional[str] = None,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where_clauses = ["source_id = :source_id"]
     params: dict = {"source_id": source_id}
@@ -75,7 +76,7 @@ def encounters_sql(
             rendering_provider,
             facility_name,
             place_of_service
-        FROM federated_encounters_v
+        FROM {schema_prefix}federated_encounters_v
         WHERE {where}
         ORDER BY {date_col} DESC
     """

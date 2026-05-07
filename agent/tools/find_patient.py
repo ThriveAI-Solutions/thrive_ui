@@ -47,18 +47,20 @@ def find_patient(
 ) -> PatientSearchResults:
     """Find patients by name, DOB, or MRN. Always dedupes by source_id."""
     adapter = ctx.deps.analytics_db
+    schema_prefix = getattr(adapter, "schema_prefix", "")
     sql, params = find_patient_sql(
         first_name=query.first_name,
         last_name=query.last_name,
         dob=query.dob.isoformat() if query.dob else None,
         mrn=query.mrn,
         limit=query.limit + 1,
+        schema_prefix=schema_prefix,
     )
     rows = adapter.fetch_all(sql, params)
     truncated = len(rows) > query.limit
     rows = rows[: query.limit]
 
-    related_sql, _ = related_source_ids_sql()
+    related_sql, _ = related_source_ids_sql(schema_prefix=schema_prefix)
 
     matches: List[PatientMatch] = []
     for r in rows:

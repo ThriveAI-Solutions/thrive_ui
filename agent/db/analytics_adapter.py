@@ -52,6 +52,7 @@ def _install_pg_read_only(engine: Engine) -> None:
 class AnalyticsDbAdapter:
     engine: Engine
     dialect: str  # "sqlite" | "postgres" | "redshift"
+    schema: str = ""  # e.g. "dw" for prod Redshift; "" for SQLite/search_path-based
     _guards_installed: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -62,6 +63,18 @@ class AnalyticsDbAdapter:
         elif self.dialect in ("postgres", "redshift"):
             _install_pg_read_only(self.engine)
         self._guards_installed = True
+
+    @property
+    def schema_prefix(self) -> str:
+        """String to prepend to unqualified table names in raw SQL templates.
+
+        Returns "" when schema is empty (SQLite, or any engine where the
+        connection's search_path already includes the target schema), or
+        "{schema}." otherwise. Idempotent on a trailing dot the user may
+        have written in secrets.toml.
+        """
+        s = (self.schema or "").rstrip(".")
+        return f"{s}." if s else ""
 
     def fetch_all(self, sql: str, params: Optional[dict] = None) -> list[dict]:
         if _FORBIDDEN_RE.search(sql):
@@ -81,4 +94,5 @@ class AnalyticsDbAdapter:
         if not url:
             raise RuntimeError("secrets.analytics_db.url is required (postgres:// or redshift://)")
         engine = create_engine(url)
-        return cls(engine=engine, dialect=dialect)
+        schema = analytics.get("schema", "") or ""
+        return cls(engine=engine, dialect=dialect, schema=schema)

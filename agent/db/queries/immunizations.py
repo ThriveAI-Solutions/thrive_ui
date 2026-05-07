@@ -14,6 +14,7 @@ def immunizations_sql(
     vaccine_text: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where: list[str] = ["source_id = :source_id"]
     params: dict = {"source_id": source_id}
@@ -47,7 +48,7 @@ def immunizations_sql(
             {date_col} AS event_datetime,
             location_name,
             mvx_code
-        FROM federated_vaccination_v
+        FROM {schema_prefix}federated_vaccination_v
         WHERE {" AND ".join(where)}
         ORDER BY {date_col} DESC
     """
