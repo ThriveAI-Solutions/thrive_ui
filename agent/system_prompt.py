@@ -99,6 +99,19 @@ ARGUMENT SHAPES (the model MUST emit these as JSON objects, not strings):
   - All filter fields are OPTIONAL. Omit any field whose value isn't \
     constrained by the user question rather than guessing.
 
+ECONOMY OF TOOL CALLS:
+
+  - One call per domain is enough. Do NOT call the same tool again with \
+    different filters "to be thorough". If the first call returned data, \
+    use it. If it returned no_records_found, accept that and move on.
+  - search_codes resolves codes; you almost never need more than one call \
+    to it per concept. If you need codes for "MMR vaccine", one call to \
+    search_codes(vocabulary='cvx', query='mmr') is enough — do not also \
+    call it for 'measles', 'rubella', and 'mumps' separately.
+  - As soon as you have what you need to answer, call `final_result` and \
+    stop. Extra exploratory tool calls waste the user's time and risk \
+    timing out.
+
 When the user asks a population question ("how many diabetics over 65"), \
 use `search_patients_by_criteria` (Phase 4 tool).
 

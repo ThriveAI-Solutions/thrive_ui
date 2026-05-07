@@ -201,7 +201,16 @@ def main() -> int:
             try:
                 tool_calls, final_text = loop.run_until_complete(_run_one(runner, deps, q["prompt"]))
             except Exception as exc:
-                print(f"  [✗] crashed: {type(exc).__name__}: {exc}")
+                # Walk the __cause__ chain — pydantic-ai wraps the underlying
+                # ValidationError inside UnexpectedModelBehavior, so the chain
+                # is where the actually useful "date_range expected object got
+                # string" message lives.
+                detail = f"{type(exc).__name__}: {exc}"
+                cause = exc.__cause__ or exc.__context__
+                while cause is not None:
+                    detail += f"\n      caused by {type(cause).__name__}: {cause}"
+                    cause = cause.__cause__ or cause.__context__
+                print(f"  [✗] crashed: {detail}")
                 results.append(
                     {
                         "id": q["id"],

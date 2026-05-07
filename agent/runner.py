@@ -96,12 +96,17 @@ class AgenticRunner:
     """
 
     def __init__(self, model: Optional[Model] = None) -> None:
+        # retries=5: small local models (qwen3.6:27b, gemma) often need
+        # several attempts to produce a valid date_range / array shape
+        # for the discriminated-union clinical query. Two retries was
+        # too tight — well-routed runs were aborting on a 3rd malformed
+        # call. See the regression run notes in the Phase 2 plan.
         self._agent: Agent[AgentDeps, AgentResponse] = Agent(
             model=model or build_model(),
             deps_type=AgentDeps,
             output_type=AgentResponse,
             system_prompt=SYSTEM_PROMPT,
-            retries=2,
+            retries=5,
         )
         self._register_tools()
 
