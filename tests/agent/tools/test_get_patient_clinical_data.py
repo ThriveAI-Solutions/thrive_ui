@@ -50,12 +50,12 @@ def test_demographics_returns_data_present(synthetic_db):
     assert len(result.items) == 1
 
 
-def test_encounters_returns_three_for_john_1962(synthetic_db):
+def test_encounters_returns_four_for_john_1962(synthetic_db):
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, EncountersQuery())
     assert result.domain == "encounters"
-    assert len(result.items) == 3
+    assert len(result.items) == 4
 
 
 def test_encounters_date_range_narrows_results(synthetic_db):
@@ -257,13 +257,16 @@ def test_surgeries_excludes_non_surgical_cpt(synthetic_db):
     assert "LOC-X-1" not in codes
 
 
-def test_surgeries_includes_performing_provider(synthetic_db):
+def test_surgeries_performing_provider_ambiguous(synthetic_db):
+    """Knee arthroplasty matches two encounters on same day → both providers listed, flagged ambiguous."""
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, SurgeriesQuery())
     knee = [i for i in result.items if i.code == "27447"]
     assert len(knee) == 1
-    assert knee[0].performing_provider == "Dr. Ortho"
+    assert "Dr. Ortho" in knee[0].performing_provider
+    assert "Dr. Anesthesia" in knee[0].performing_provider
+    assert knee[0].provider_ambiguous is True
 
 
 def test_surgeries_carries_reliability_note(synthetic_db):

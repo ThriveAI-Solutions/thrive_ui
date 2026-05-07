@@ -98,7 +98,9 @@ def test_surgery_item_in_clinical_item_union():
         "place_of_service": "21",
         "provider_npi": None,
         "performing_provider": "Dr. Ortho",
+        "provider_ambiguous": False,
         "facility_name": None,
     })
     assert isinstance(item, SurgeryItem)
     assert item.performing_provider == "Dr. Ortho"
+    assert item.provider_ambiguous is False

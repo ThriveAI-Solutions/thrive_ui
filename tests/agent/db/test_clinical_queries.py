@@ -14,7 +14,7 @@ def test_encounters_for_source_id(synthetic_db):
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = encounters_sql(source_id="src-john-1962")
     rows = adapter.fetch_all(sql, params)
-    assert len(rows) == 3
+    assert len(rows) == 4
     facility_names = {r["facility_name"] for r in rows}
     assert "Buffalo Medical Group" in facility_names
     assert "Buffalo General" in facility_names

@@ -63,7 +63,8 @@ INSERT INTO federated_encounters_v VALUES
     ('src-john-1962', 'enc-1', 'office_visit', 'completed', '2026-04-01 09:30', '2026-04-01 09:30', 'Buffalo Medical Group', 'Dr. Foo', 'Buffalo Medical Group', '11'),
     ('src-john-1962', 'enc-2', 'office_visit', 'completed', '2026-02-15 10:00', '2026-02-15 10:00', 'Buffalo Medical Group', 'Dr. Foo', 'Buffalo Medical Group', '11'),
     ('src-john-1971', 'enc-3', 'inpatient', 'completed', '2026-03-15 14:00', '2026-03-15 14:00', 'Kaleida Methodist', 'Dr. Bar', 'Kaleida Methodist', '21'),
-    ('src-john-1962', 'enc-surg-1', 'inpatient', 'completed', '2025-06-15 08:00', '2025-06-15 08:00', 'Buffalo General', 'Dr. Ortho', 'Buffalo General', '21');
+    ('src-john-1962', 'enc-surg-1', 'inpatient', 'completed', '2025-06-15 08:00', '2025-06-15 08:00', 'Buffalo General', 'Dr. Ortho', 'Buffalo General', '21'),
+    ('src-john-1962', 'enc-surg-2', 'outpatient', 'completed', '2025-06-15 14:00', '2025-06-15 14:00', 'Buffalo General', 'Dr. Anesthesia', 'Buffalo General', '21');
 
 CREATE TABLE federated_demographic_v (
     source_id TEXT,

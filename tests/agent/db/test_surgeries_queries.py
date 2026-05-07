@@ -66,14 +66,16 @@ def test_surgeries_claims_broadly_inclusive(synthetic_db):
     assert "0WJG4ZZ" not in claims_codes
 
 
-def test_surgeries_performing_provider_from_encounter(synthetic_db):
-    """The knee arthroplasty on 2025-06-15 should match enc-surg-1 → Dr. Ortho."""
+def test_surgeries_performing_provider_lists_all_when_ambiguous(synthetic_db):
+    """The knee arthroplasty on 2025-06-15 matches two encounters → comma-joined list."""
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = surgeries_sql(source_id="src-john-1962")
     rows = adapter.fetch_all(sql, params)
     knee = [r for r in rows if r["code"] == "27447"]
     assert len(knee) == 1
-    assert knee[0]["performing_provider"] == "Dr. Ortho"
+    provider = knee[0]["performing_provider"]
+    assert "Dr. Ortho" in provider
+    assert "Dr. Anesthesia" in provider
 
 
 def test_surgeries_performing_provider_null_when_no_encounter(synthetic_db):

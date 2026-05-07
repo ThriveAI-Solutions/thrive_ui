@@ -47,8 +47,18 @@ def surgeries_sql(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     schema_prefix: str = "",
+    dialect: str = "sqlite",
 ) -> Tuple[str, dict]:
     params: dict = {"source_id": source_id}
+
+    # --- Provider aggregation (dialect-aware) ---
+    # When multiple encounters match the same day, join all distinct provider
+    # names rather than silently picking one. The tool handler can detect
+    # ambiguity by checking for the separator in the returned string.
+    if dialect in ("postgres", "redshift"):
+        provider_agg = "LISTAGG(DISTINCT e.rendering_provider, ', ') WITHIN GROUP (ORDER BY e.rendering_provider)"
+    else:
+        provider_agg = "GROUP_CONCAT(DISTINCT e.rendering_provider)"
 
     # --- CPT code filter (orders branch only) ---
     cpt_filter = ""
@@ -113,7 +123,7 @@ def surgeries_sql(
             o.place_of_service,
             NULL AS provider_npi,
             NULL AS facility_name,
-            MAX(e.rendering_provider) AS performing_provider
+            {provider_agg} AS performing_provider
         FROM {schema_prefix}federated_orders_v o
         LEFT JOIN {schema_prefix}federated_encounters_v e
           ON o.source_id = e.source_id
@@ -140,7 +150,7 @@ def surgeries_sql(
             NULL AS place_of_service,
             p.service_provider_npi AS provider_npi,
             NULL AS facility_name,
-            MAX(e.rendering_provider) AS performing_provider
+            {provider_agg} AS performing_provider
         FROM {schema_prefix}federated_problems_v p
         LEFT JOIN {schema_prefix}federated_encounters_v e
           ON p.source_id = e.source_id
@@ -166,7 +176,7 @@ def surgeries_sql(
             c.place_of_service,
             c.rendering_provider_npi AS provider_npi,
             c.facility_name,
-            MAX(e.rendering_provider) AS performing_provider
+            {provider_agg} AS performing_provider
         FROM {schema_prefix}federated_claims_icd_procedure_detail_v c
         LEFT JOIN {schema_prefix}federated_encounters_v e
           ON c.source_id = e.source_id

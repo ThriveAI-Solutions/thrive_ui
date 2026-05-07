@@ -223,6 +223,7 @@ class SurgeryItem(BaseModel):
     place_of_service: Optional[str]
     provider_npi: Optional[str]
     performing_provider: Optional[str]
+    provider_ambiguous: bool = False
     facility_name: Optional[str]
 
 
@@ -565,6 +566,7 @@ def get_patient_clinical_data(
 
     if isinstance(query, SurgeriesQuery):
         dr = query.date_range
+        db_dialect = getattr(adapter, "dialect", "sqlite")
         sql, params = surgeries_sql(
             source_id=source_id,
             cpt_codes=query.cpt_codes,
@@ -572,14 +574,16 @@ def get_patient_clinical_data(
             start_date=dr.start.isoformat() if dr and dr.start else None,
             end_date=dr.end.isoformat() if dr and dr.end else None,
             schema_prefix=schema_prefix,
+            dialect=db_dialect,
         )
         rows = adapter.fetch_all(sql, params)
         reliability = (
             "Surgery identification uses CPT surgery range (10004-69990) for orders "
             "and invasive ICD-10-PCS root operations for problems. Claims procedures "
             "are broadly included. Performing provider is resolved from encounter date "
-            "matching and may be unavailable if no encounter aligns. Claims data "
-            "refreshes monthly and may lag clinical data by up to 30 days."
+            "matching and may be unavailable if no encounter aligns. When multiple "
+            "providers match the same date, all are listed (comma-separated). Claims "
+            "data refreshes monthly and may lag clinical data by up to 30 days."
         )
         if not rows:
             return ClinicalResult(
@@ -588,21 +592,25 @@ def get_patient_clinical_data(
                 data_availability="no_records_found",
                 reliability_note=reliability,
             )
-        items = [
-            SurgeryItem(
-                source=r["source"],
-                source_id=r["source_id"],
-                code=r.get("code"),
-                code_type=r.get("code_type"),
-                description=r.get("description"),
-                event_date=str(r["event_date"]) if r.get("event_date") else None,
-                place_of_service=r.get("place_of_service"),
-                provider_npi=r.get("provider_npi"),
-                performing_provider=r.get("performing_provider"),
-                facility_name=r.get("facility_name"),
+        items = []
+        for r in rows:
+            raw_provider = r.get("performing_provider")
+            ambiguous = isinstance(raw_provider, str) and "," in raw_provider
+            items.append(
+                SurgeryItem(
+                    source=r["source"],
+                    source_id=r["source_id"],
+                    code=r.get("code"),
+                    code_type=r.get("code_type"),
+                    description=r.get("description"),
+                    event_date=str(r["event_date"]) if r.get("event_date") else None,
+                    place_of_service=r.get("place_of_service"),
+                    provider_npi=r.get("provider_npi"),
+                    performing_provider=raw_provider,
+                    provider_ambiguous=ambiguous,
+                    facility_name=r.get("facility_name"),
+                )
             )
-            for r in rows
-        ]
         return ClinicalResult(
             domain="surgeries",
             items=items,
