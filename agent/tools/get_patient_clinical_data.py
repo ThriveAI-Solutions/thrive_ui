@@ -21,6 +21,7 @@ from agent.db.queries.diagnoses import diagnoses_sql
 from agent.db.queries.medications import medications_sql
 from agent.db.queries.immunizations import immunizations_sql
 from agent.db.queries.procedures import procedures_sql
+from agent.db.queries.surgeries import surgeries_sql
 from agent.db.queries.imaging import imaging_sql
 from agent.code_normalizer import normalize_token, variants_for
 
@@ -80,6 +81,13 @@ class ProceduresQuery(BaseModel):
     procedure_text: Optional[str] = None
 
 
+class SurgeriesQuery(BaseModel):
+    domain: Literal["surgeries"] = "surgeries"
+    date_range: Optional[DateRange] = None
+    cpt_codes: Optional[List[str]] = None
+    procedure_text: Optional[str] = None
+
+
 class ImagingQuery(BaseModel):
     domain: Literal["imaging"] = "imaging"
     date_range: Optional[DateRange] = None
@@ -96,6 +104,7 @@ PatientClinicalQuery = Annotated[
         MedicationsQuery,
         ImmunizationsQuery,
         ProceduresQuery,
+        SurgeriesQuery,
         ImagingQuery,
     ],
     Field(discriminator="domain"),
@@ -203,6 +212,20 @@ class ProcedureItem(BaseModel):
     facility_name: Optional[str]
 
 
+class SurgeryItem(BaseModel):
+    item_type: Literal["surgery"] = "surgery"
+    source: Literal["orders", "problems", "claims"]
+    source_id: str
+    code: Optional[str]
+    code_type: Optional[str]
+    description: Optional[str]
+    event_date: Optional[str]
+    place_of_service: Optional[str]
+    provider_npi: Optional[str]
+    performing_provider: Optional[str]
+    facility_name: Optional[str]
+
+
 class ImagingItem(BaseModel):
     item_type: Literal["imaging"] = "imaging"
     source: Literal["orders", "documents"]
@@ -225,6 +248,7 @@ ClinicalItem = Annotated[
         MedicationItem,
         ImmunizationItem,
         ProcedureItem,
+        SurgeryItem,
         ImagingItem,
     ],
     Field(discriminator="item_type"),
@@ -537,6 +561,53 @@ def get_patient_clinical_data(
                 "federated_problems_v (ICD-10-PCS), and the claims feed (monthly refresh; "
                 "may lag bi-weekly clinical data by up to 30 days)."
             ),
+        )
+
+    if isinstance(query, SurgeriesQuery):
+        dr = query.date_range
+        sql, params = surgeries_sql(
+            source_id=source_id,
+            cpt_codes=query.cpt_codes,
+            procedure_text=query.procedure_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+        )
+        rows = adapter.fetch_all(sql, params)
+        reliability = (
+            "Surgery identification uses CPT surgery range (10004-69990) for orders "
+            "and invasive ICD-10-PCS root operations for problems. Claims procedures "
+            "are broadly included. Performing provider is resolved from encounter date "
+            "matching and may be unavailable if no encounter aligns. Claims data "
+            "refreshes monthly and may lag clinical data by up to 30 days."
+        )
+        if not rows:
+            return ClinicalResult(
+                domain="surgeries",
+                items=[],
+                data_availability="no_records_found",
+                reliability_note=reliability,
+            )
+        items = [
+            SurgeryItem(
+                source=r["source"],
+                source_id=r["source_id"],
+                code=r.get("code"),
+                code_type=r.get("code_type"),
+                description=r.get("description"),
+                event_date=str(r["event_date"]) if r.get("event_date") else None,
+                place_of_service=r.get("place_of_service"),
+                provider_npi=r.get("provider_npi"),
+                performing_provider=r.get("performing_provider"),
+                facility_name=r.get("facility_name"),
+            )
+            for r in rows
+        ]
+        return ClinicalResult(
+            domain="surgeries",
+            items=items,
+            data_availability="data_present",
+            reliability_note=reliability,
         )
 
     if isinstance(query, ImagingQuery):

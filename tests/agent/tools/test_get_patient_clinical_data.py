@@ -219,6 +219,7 @@ def test_procedures_filtered_by_cpt(synthetic_db):
 
 
 from agent.tools.get_patient_clinical_data import ImagingQuery, ImagingItem
+from agent.tools.get_patient_clinical_data import SurgeriesQuery, SurgeryItem
 
 
 def test_imaging_returns_data_present(synthetic_db):
@@ -236,3 +237,47 @@ def test_imaging_always_carries_impression_unavailable_note(synthetic_db):
     result = get_patient_clinical_data(ctx, ImagingQuery())
     assert result.notes_to_agent is not None
     assert "impression" in result.notes_to_agent.lower()
+
+
+def test_surgeries_returns_data_present(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, SurgeriesQuery())
+    assert result.domain == "surgeries"
+    assert result.data_availability == "data_present"
+    assert all(isinstance(i, SurgeryItem) for i in result.items)
+
+
+def test_surgeries_excludes_non_surgical_cpt(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, SurgeriesQuery())
+    codes = {i.code for i in result.items}
+    assert "71046" not in codes
+    assert "LOC-X-1" not in codes
+
+
+def test_surgeries_includes_performing_provider(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, SurgeriesQuery())
+    knee = [i for i in result.items if i.code == "27447"]
+    assert len(knee) == 1
+    assert knee[0].performing_provider == "Dr. Ortho"
+
+
+def test_surgeries_carries_reliability_note(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, SurgeriesQuery())
+    assert result.reliability_note is not None
+    assert "surgery" in result.reliability_note.lower() or "invasive" in result.reliability_note.lower()
+
+
+def test_surgeries_date_range_filters(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    q = SurgeriesQuery(date_range=DateRange(start=date(2025, 1, 1), end=date(2025, 12, 31)))
+    result = get_patient_clinical_data(ctx, q)
+    codes = {i.code for i in result.items}
+    assert "27447" in codes
