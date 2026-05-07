@@ -4,7 +4,7 @@ Filters the three procedure sources to surgical/invasive codes only and
 LEFT JOINs federated_encounters_v to resolve performing provider name.
 
 Orders branch: CPT surgery range 10004-69990.
-Problems branch: invasive ICD-10-PCS root operations (4th character).
+Problems branch: invasive ICD-10-PCS root operations (3rd character).
 Claims branch: broadly inclusive, excludes Inspection (root op J).
 """
 

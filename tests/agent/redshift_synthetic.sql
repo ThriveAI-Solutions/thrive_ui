@@ -190,7 +190,8 @@ CREATE TABLE federated_claims_icd_procedure_detail_v (
     facility_name TEXT
 );
 INSERT INTO federated_claims_icd_procedure_detail_v VALUES
-    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', '21', '1234567890', 'Buffalo General');
+    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', '21', '1234567890', 'Buffalo General'),
+    ('src-john-1962', '0WJG4ZZ', 'ICD-10-PCS', 'Inspection of peritoneal cavity, percutaneous endoscopic', '2025-01-10', '21', '1234567890', 'Buffalo General');
 
 CREATE TABLE federated_vitals_v (
     source_id TEXT,
