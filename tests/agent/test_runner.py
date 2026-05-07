@@ -45,3 +45,66 @@ def test_runner_registers_phase2_tools():
     assert "search_knowledge_base" in tool_names
     assert "list_patient_documents" in tool_names
     assert "search_codes" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_runner_injects_selection_into_instructions():
+    """When deps.selected_patient is set, the model must receive the
+    selection_instructions text in the prompt — that's how it knows to
+    skip find_patient. We capture what the model actually sees by using
+    a FunctionModel that records its incoming messages.
+    """
+    from datetime import date, datetime
+    from pydantic_ai.messages import (
+        ModelMessage,
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        ToolCallPart,
+    )
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+    from unittest.mock import MagicMock
+    from agent.deps import AgentDeps, SelectedPatient
+
+    captured: dict = {"prompt_text": ""}
+
+    async def behavior(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        for m in messages:
+            if isinstance(m, ModelRequest):
+                for part in m.parts:
+                    text = getattr(part, "content", None)
+                    if isinstance(text, str):
+                        captured["prompt_text"] += "\n" + text
+                    instructions = getattr(m, "instructions", None)
+                    if isinstance(instructions, str):
+                        captured["prompt_text"] += "\n" + instructions
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="final_result",
+                    args={
+                        "text": "ok",
+                        "followups": [],
+                        "artifacts": [],
+                        "clear_selection": False,
+                        "cap_reached": False,
+                    },
+                    tool_call_id="c1",
+                ),
+            ]
+        )
+
+    runner = AgenticRunner(model=FunctionModel(behavior, model_name="capture"))
+    deps = MagicMock(spec=AgentDeps)
+    deps.selected_patient = SelectedPatient(
+        source_id="src-john-1962",
+        display_name="John Smith",
+        dob=date(1962, 5, 1),
+        selected_at=datetime(2026, 5, 6),
+        selection_origin="user_click",
+    )
+    deps.audit_logger = None
+
+    await runner.run("anything", deps=deps)
+    assert "src-john-1962" in captured["prompt_text"]
+    assert "find_patient" in captured["prompt_text"].lower()

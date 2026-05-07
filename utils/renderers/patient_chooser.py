@@ -43,4 +43,11 @@ def render_patient_chooser(message, index: int) -> None:
             st.session_state["selected_patient_dob"] = m.get("dob")
             st.session_state["selection_origin"] = "user_click"
             st.session_state["selected_at"] = datetime.now().isoformat()
+            # Re-fire the original question so the agent continues with
+            # the slot now filled. agent.runtime stashes this before each
+            # run; if missing (e.g. stale chooser from a prior session),
+            # the user can simply re-ask.
+            pending = st.session_state.get("pending_user_question")
+            if pending:
+                st.session_state["my_question"] = pending
             st.rerun()

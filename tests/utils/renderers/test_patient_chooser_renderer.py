@@ -83,3 +83,63 @@ def test_chooser_button_click_writes_session_state():
         st.session_state = fake_session
         render_patient_chooser(msg, index=0)
         assert fake_session["selected_patient_source_id"] == "src-clicked"
+
+
+def test_chooser_button_click_retriggers_pending_question():
+    """When the user clicks a patient, the chat loop must re-fire the
+    original question with the slot now filled. The handler does this
+    by copying pending_user_question into my_question — that's the
+    same trigger chat_input uses for new questions."""
+    msg = MagicMock()
+    msg.content = json.dumps(
+        {
+            "matches": [
+                {
+                    "source_id": "src-clicked",
+                    "display_name": "John Smith",
+                    "dob": "1962-05-01",
+                    "facilities_seen": [],
+                    "most_recent_activity": None,
+                }
+            ],
+            "total_unique": 1,
+            "truncated": False,
+        }
+    )
+    fake_session = {
+        "pending_user_question": "Has John Smith had any procedures?",
+    }
+    with patch("utils.renderers.patient_chooser.st") as st:
+        st.button = MagicMock(return_value=True)
+        st.session_state = fake_session
+        render_patient_chooser(msg, index=0)
+        assert fake_session["my_question"] == "Has John Smith had any procedures?"
+
+
+def test_chooser_button_click_with_no_pending_question_is_safe():
+    """If somehow there's no stashed question (e.g. session restart with
+    an old chooser still in history), clicking shouldn't crash — it just
+    sets the slot and lets the user re-ask."""
+    msg = MagicMock()
+    msg.content = json.dumps(
+        {
+            "matches": [
+                {
+                    "source_id": "src-clicked",
+                    "display_name": "X",
+                    "dob": None,
+                    "facilities_seen": [],
+                }
+            ],
+            "total_unique": 1,
+            "truncated": False,
+        }
+    )
+    fake_session = {}
+    with patch("utils.renderers.patient_chooser.st") as st:
+        st.button = MagicMock(return_value=True)
+        st.session_state = fake_session
+        render_patient_chooser(msg, index=0)
+    assert fake_session["selected_patient_source_id"] == "src-clicked"
+    # my_question should not be set to a junk value when there's nothing to resume.
+    assert fake_session.get("my_question") in (None,)

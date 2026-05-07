@@ -33,6 +33,15 @@ class ToolCallCompleted(BaseModel):
 class FinalResponseEvent(BaseModel):
     kind: Literal["final_response"] = "final_response"
     response: "AgentResponse"
+    # Full transcript of the run (system+user+model messages, tool calls,
+    # tool results). Carried so the runtime can persist it back to
+    # session_state for multi-turn message_history continuity.
+    # Stored as Any to avoid importing pydantic-ai message types into
+    # this module's public surface; the runtime treats it as an opaque
+    # list of pydantic-ai ModelMessage instances.
+    all_messages: list[Any] = Field(default_factory=list)
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class CapReachedEvent(BaseModel):

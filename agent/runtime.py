@@ -96,30 +96,49 @@ def run_agentic_message_flow(my_question: str) -> None:
 
     Renders user message, runs the agent with streaming, persists
     each tool call and the final response as orm.Message rows.
+
+    Multi-turn continuity: prior `agent_message_history` (list of
+    pydantic-ai ModelMessage) is threaded into the run; the post-run
+    transcript is written back. The original question is also stashed
+    as `pending_user_question` so the patient-chooser click handler
+    can re-trigger this flow with the same prompt.
     """
     from utils.chat_bot_helper import add_message
 
-    add_message(
-        Message(
-            RoleType.USER,
-            my_question,
-            MessageType.TEXT,
-        )
-    )
+    # Stash the question for chooser-click resume before any errors can
+    # short-circuit us out.
+    st.session_state["pending_user_question"] = my_question
 
-    sqlite_session = SessionLocal()
+    # Outer try ensures my_question is always cleared, even if
+    # add_message or SessionLocal raises before we reach the agent
+    # call — otherwise the chat_bot.py loop would re-fire the same
+    # question on the next rerun and the user would see no response.
     try:
-        deps = build_agent_deps(sqlite_session)
-        runner = _runner()
+        add_message(
+            Message(
+                RoleType.USER,
+                my_question,
+                MessageType.TEXT,
+            )
+        )
 
-        async def consume() -> None:
-            async for event in runner.stream(my_question, deps=deps):
-                _render_event(event)
+        sqlite_session = SessionLocal()
+        try:
+            deps = build_agent_deps(sqlite_session)
+            runner = _runner()
+            prior_history = st.session_state.get("agent_message_history") or None
 
-        _run_async(consume())
-        sqlite_session.commit()
+            async def consume() -> None:
+                async for event in runner.stream(my_question, deps=deps, message_history=prior_history):
+                    _render_event(event)
+
+            _run_async(consume())
+            sqlite_session.commit()
+        finally:
+            sqlite_session.close()
     finally:
-        sqlite_session.close()
+        # Parity with the Vanna flow at chat_bot_helper.py:1417.
+        st.session_state["my_question"] = None
 
 
 def _render_event(event: StreamEvent) -> None:
@@ -185,7 +204,8 @@ def _render_event(event: StreamEvent) -> None:
                 MessageType.TEXT,
             )
         )
-        # Honor clear_selection
+        # Honor clear_selection: drop both the slot AND the conversation
+        # history, since "start fresh" means no carry-over context.
         if response.clear_selection:
             for k in (
                 "selected_patient_source_id",
@@ -193,8 +213,16 @@ def _render_event(event: StreamEvent) -> None:
                 "selected_patient_dob",
                 "selection_origin",
                 "selected_at",
+                "agent_message_history",
+                "pending_user_question",
             ):
                 st.session_state.pop(k, None)
+        else:
+            # Persist the post-run transcript so the next turn (whether
+            # a follow-up or a chooser-click resume) continues the same
+            # conversation rather than starting over.
+            if event.all_messages:
+                st.session_state["agent_message_history"] = list(event.all_messages)
         return
 
     if isinstance(event, CapReachedEvent):

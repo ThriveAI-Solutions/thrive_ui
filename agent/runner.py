@@ -23,6 +23,7 @@ from pydantic_ai.models import Model
 
 from agent.audit import summarize_result
 from agent.deps import AgentDeps
+from agent.instructions import selection_instructions
 from agent.models import build_model
 from agent.state import (
     AgentResponse,
@@ -108,6 +109,7 @@ class AgenticRunner:
             system_prompt=SYSTEM_PROMPT,
             retries=5,
         )
+        self._agent.instructions(selection_instructions)
         self._register_tools()
 
     def _register_tools(self) -> None:
@@ -117,18 +119,30 @@ class AgenticRunner:
         self._agent.tool(list_patient_documents)
         self._agent.tool(search_codes)
 
-    async def run(self, question: str, deps: AgentDeps) -> AgentResponse:
+    async def run(
+        self,
+        question: str,
+        deps: AgentDeps,
+        message_history: Optional[list[Any]] = None,
+    ) -> AgentResponse:
         """Single-shot run; collects the final AgentResponse without streaming.
 
         Used by tests and any caller that doesn't need step-by-step streaming.
+        Pass `message_history` from a prior run's `FinalResponseEvent.all_messages`
+        to continue a multi-turn conversation.
         """
-        result = await self._agent.run(question, deps=deps)
+        result = await self._agent.run(
+            question,
+            deps=deps,
+            message_history=message_history or None,
+        )
         return result.output
 
     async def stream(
         self,
         question: str,
         deps: AgentDeps,
+        message_history: Optional[list[Any]] = None,
     ) -> AsyncIterator[StreamEvent]:
         """Streaming variant. Yields ToolCallStarted / ToolCallCompleted /
         FinalResponseEvent / CapReachedEvent in order.
@@ -143,7 +157,11 @@ class AgenticRunner:
         # tool_call_id -> {tool_name, args, started_at, started_perf}
         pending: dict[str, dict[str, Any]] = {}
 
-        async with self._agent.iter(question, deps=deps) as run:
+        async with self._agent.iter(
+            question,
+            deps=deps,
+            message_history=message_history or None,
+        ) as run:
             async for node in run:
                 if loop.time() - start > wall_clock_cap:
                     yield CapReachedEvent(reason="wall_clock")
@@ -248,7 +266,8 @@ class AgenticRunner:
                 elif Agent.is_end_node(node):
                     output = getattr(node.data, "output", None)
                     if isinstance(output, AgentResponse):
-                        yield FinalResponseEvent(response=output)
+                        all_msgs = list(run.result.all_messages()) if getattr(run, "result", None) is not None else []
+                        yield FinalResponseEvent(response=output, all_messages=all_msgs)
                         return
 
         # Fallback: if iteration exited without an End node (shouldn't happen
@@ -256,4 +275,7 @@ class AgenticRunner:
         if hasattr(run, "result") and run.result is not None:
             output = run.result.output
             if isinstance(output, AgentResponse):
-                yield FinalResponseEvent(response=output)
+                yield FinalResponseEvent(
+                    response=output,
+                    all_messages=list(run.result.all_messages()),
+                )
