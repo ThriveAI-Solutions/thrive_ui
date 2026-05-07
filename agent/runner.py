@@ -244,6 +244,27 @@ class AgenticRunner:
                                         # Audit failure must never break the run.
                                         pass
 
+                                # Pop the analytics adapter's SQL log so
+                                # the next tool call starts clean. Tools
+                                # run sequentially; whatever ran since the
+                                # last pop is attributable to this tool.
+                                sql_executed: list[dict] = []
+                                adapter = getattr(deps, "analytics_db", None)
+                                if adapter is not None and hasattr(adapter, "pop_sql_log"):
+                                    try:
+                                        sql_executed = adapter.pop_sql_log()
+                                    except Exception:
+                                        sql_executed = []
+
+                                # Reuse the same dict we built for summarize_result
+                                # so we don't dump the model twice.
+                                result_payload: dict | None = None
+                                try:
+                                    if isinstance(summary_input, dict):
+                                        result_payload = summary_input
+                                except Exception:
+                                    result_payload = None
+
                                 yield ToolCallCompleted(
                                     tool_name=info["tool_name"],
                                     result_summary=summary,
@@ -251,6 +272,8 @@ class AgenticRunner:
                                     elapsed_ms=elapsed_ms,
                                     error=None,
                                     reliability_note=reliability_note,
+                                    sql_executed=sql_executed,
+                                    result_payload=result_payload,
                                 )
 
                                 # Auto-surface the disambiguation chooser

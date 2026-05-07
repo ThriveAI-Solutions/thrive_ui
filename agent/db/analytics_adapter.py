@@ -54,6 +54,12 @@ class AnalyticsDbAdapter:
     dialect: str  # "sqlite" | "postgres" | "redshift"
     schema: str = ""  # e.g. "dw" for prod Redshift; "" for SQLite/search_path-based
     _guards_installed: bool = field(default=False, init=False, repr=False)
+    # Per-adapter buffer of executed (sql, params) pairs. The runtime pops
+    # this after each tool invocation so the streamed ToolCallCompleted
+    # event can carry the SQL that produced the result. Tools run
+    # sequentially in the agent loop, so the buffer is unambiguously
+    # attributable to the most recent tool call.
+    sql_log: list[dict] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self._guards_installed:
@@ -79,9 +85,20 @@ class AnalyticsDbAdapter:
     def fetch_all(self, sql: str, params: Optional[dict] = None) -> list[dict]:
         if _FORBIDDEN_RE.search(sql):
             raise ValueError("Adapter is read-only; statement contains write keyword.")
+        self.sql_log.append({"sql": sql, "params": dict(params or {})})
         with self.engine.connect() as conn:
             result = conn.execute(text(sql), params or {})
             return [dict(row._mapping) for row in result]
+
+    def pop_sql_log(self) -> list[dict]:
+        """Return the accumulated SQL log and reset it.
+
+        Returns a snapshot (new list); the caller owns it and is unaffected
+        by subsequent fetch_all calls on this adapter.
+        """
+        snapshot = self.sql_log
+        self.sql_log = []
+        return snapshot
 
     @classmethod
     def from_streamlit_secrets(cls) -> "AnalyticsDbAdapter":

@@ -173,6 +173,8 @@ def _render_event(event: StreamEvent) -> None:
             "elapsed_ms": event.elapsed_ms,
             "error": event.error,
             "reliability_note": event.reliability_note,
+            "sql_executed": event.sql_executed,
+            "result_payload": event.result_payload,
         }
         add_message(
             Message(

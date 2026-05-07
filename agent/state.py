@@ -28,6 +28,14 @@ class ToolCallCompleted(BaseModel):
     elapsed_ms: int
     error: Optional[str] = None
     reliability_note: Optional[str] = None
+    # Observability for the chat UI: SQL the tool ran (popped from
+    # adapter.pop_sql_log()) and a serialized snapshot of the tool's
+    # return value. Both surfaced behind a role-gated expander so
+    # admins (and optionally clinicians) can inspect what produced
+    # the answer. Empty list / None when the tool ran no SQL or the
+    # result wasn't dict-serializable.
+    sql_executed: List[dict] = Field(default_factory=list)
+    result_payload: Optional[dict] = None
 
 
 class FinalResponseEvent(BaseModel):

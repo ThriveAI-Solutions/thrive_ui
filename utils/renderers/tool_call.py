@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 import streamlit as st
 
+from agent.observability_gate import role_can_see_query_details
+
 
 _TOOL_EMOJI = {
     "find_patient": "🔍",
@@ -62,3 +64,45 @@ def render_tool_call_message(message, index: int) -> None:
             st.error(payload["error"])
         if payload.get("elapsed_ms"):
             st.caption(f"{payload['elapsed_ms']} ms")
+
+        # Role-gated observability: executed SQL + raw row data.
+        # Admins see by default; doctors/others only if [agent].
+        # expose_query_details_to includes their role.
+        user_role = st.session_state.get("user_role")
+        if role_can_see_query_details(user_role):
+            sql_log = payload.get("sql_executed") or []
+            if sql_log:
+                with st.expander(f"View SQL ({len(sql_log)} statement(s))", expanded=False):
+                    for i, entry in enumerate(sql_log, 1):
+                        st.code(entry.get("sql", ""), language="sql")
+                        if entry.get("params"):
+                            st.caption(f"params: {entry['params']}")
+
+            result_payload = payload.get("result_payload")
+            if isinstance(result_payload, dict):
+                rows = _rows_from_payload(result_payload)
+                if rows:
+                    with st.expander(f"View rows ({len(rows)})", expanded=False):
+                        try:
+                            import pandas as pd
+
+                            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                        except Exception:
+                            st.json(rows)
+                else:
+                    with st.expander("View raw data", expanded=False):
+                        st.json(result_payload)
+
+
+def _rows_from_payload(payload: dict) -> list:
+    """Return the row-like list inside a tool's result payload, if any.
+
+    Tools wrap their rows under domain-specific keys: matches (find_patient),
+    items (ClinicalResult), documents (DocumentIndexResult). Returns the
+    first list-of-dicts value found; empty list otherwise.
+    """
+    for key in ("items", "matches", "documents"):
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            return value
+    return []
