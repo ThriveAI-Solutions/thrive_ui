@@ -5907,6 +5907,19 @@ wheels = [
 ]
 
 [[package]]
+name = "sqlalchemy-redshift"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "sqlalchemy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/78/0d/d5e7dd863b6f7a445cd7c929373e71e71c819f95e56ab8ea3ed4776b2f69/sqlalchemy_redshift-1.0.0.tar.gz", hash = "sha256:882964d42184604ef653ab770501e942e7f9296b537d3b138551f609d1c52860", size = 56060, upload-time = "2026-04-28T00:31:25.922Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d2/2d/1206bc07d7333624694576366bb158a66e314755b10439d634c2ceea4484/sqlalchemy_redshift-1.0.0-py3-none-any.whl", hash = "sha256:8b3a946401148b9443eb623f84a64bb30fa99ddc873c17d6a9e70cc0e5ea8dd1", size = 39103, upload-time = "2026-04-28T00:31:24.491Z" },
+]
+
+[[package]]
 name = "sqlparse"
 version = "0.5.3"
 source = { registry = "https://pypi.org/simple" }
@@ -6092,6 +6105,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "speechrecognition" },
+    { name = "sqlalchemy-redshift" },
     { name = "streamlit" },
     { name = "streamlit-cookies-manager-ext" },
     { name = "vanna", extra = ["anthropic", "chromadb", "gemini", "ollama", "postgres"] },
@@ -6133,6 +6147,7 @@ requires-dist = [
     { name = "scikit-learn", specifier = ">=1.3.0" },
     { name = "scipy", specifier = ">=1.11.0" },
     { name = "speechrecognition", specifier = ">=3.14.1" },
+    { name = "sqlalchemy-redshift", specifier = ">=1.0.0" },
     { name = "streamlit", specifier = ">=1.43.2" },
     { name = "streamlit-cookies-manager-ext", specifier = ">=0.1.0" },
     { name = "vanna", extras = ["anthropic", "chromadb", "gemini", "ollama", "postgres"], specifier = "==2.0.2" },
