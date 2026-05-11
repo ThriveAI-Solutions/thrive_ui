@@ -32,7 +32,12 @@ CREATE TABLE internal_patient_profile_v (
 INSERT INTO internal_patient_profile_v VALUES
     (1, 'John', 'Smith', 'John Smith', '1962-05-01', 64, 'M', '2026-04-01', 'Buffalo Medical Group', 'Dr. Foo', 'diabetes'),
     (2, 'John', 'Smith', 'John Smith', '1971-08-12', 54, 'M', '2026-03-15', 'Kaleida Methodist', 'Dr. Bar', NULL),
-    (3, 'Jane', 'Smith', 'Jane Smith', '1985-02-20', 41, 'F', '2026-04-20', 'ECMC', 'Dr. Baz', NULL);
+    (3, 'Jane', 'Smith', 'Jane Smith', '1985-02-20', 41, 'F', '2026-04-20', 'ECMC', 'Dr. Baz', NULL),
+    (4, 'Mary', 'Jones', 'Mary Jones', '1956-03-10', 70, 'F', '2026-04-15', 'Kaleida Methodist', 'Dr. Foo', 'diabetes, hypertension'),
+    (5, 'Robert', 'Lee',  'Robert Lee',  '1970-11-22', 55, 'M', '2026-04-10', 'Buffalo Medical Group', 'Dr. Bar', 'hyperlipidemia'),
+    (6, 'Anne',   'Garcia','Anne Garcia', '1948-01-05', 78, 'F', '2024-08-01', 'Kaleida Methodist', 'Dr. Baz', 'hypertension'),
+    (7, 'Daniel', 'Wright','Daniel Wright','1977-09-30', 48, 'M', '2026-04-25', 'Buffalo Medical Group', 'Dr. Foo', 'type 2 diabetes mellitus'),
+    (8, 'Susan',  'Park',  'Susan Park',   '1955-07-14', 71, 'F', '2026-03-20', 'Kaleida Methodist', 'Dr. Bar', 'diabetes');
 
 CREATE TABLE internal_source_reference_v (
     patient_id INTEGER,
@@ -46,7 +51,12 @@ INSERT INTO internal_source_reference_v VALUES
     (1, 'src-john-1962-alt', 2, 'BMG', 'EHR'),
     (1, 'src-john-1962-stale', 99, 'BMG', 'EHR'),
     (2, 'src-john-1971', 1, 'Kaleida', 'EHR'),
-    (3, 'src-jane-1985', 1, 'ECMC', 'EHR');
+    (3, 'src-jane-1985', 1, 'ECMC', 'EHR'),
+    (4, 'src-mary-1956', 1, 'Kaleida', 'EHR'),
+    (5, 'src-robert-1970', 1, 'BMG', 'EHR'),
+    (6, 'src-anne-1948', 1, 'Kaleida', 'EHR'),
+    (7, 'src-daniel-1977', 1, 'BMG', 'EHR'),
+    (8, 'src-susan-1955', 1, 'Kaleida', 'EHR');
 
 CREATE TABLE federated_encounters_v (
     source_id TEXT,
@@ -214,12 +224,31 @@ INSERT INTO federated_vitals_v VALUES
 
 CREATE TABLE metric_federated_data_v (
     patient_id INTEGER,
+    origin_id TEXT,
+    start_date DATE,
+    end_date DATE,
     code TEXT,
     code_type TEXT,
+    code_system TEXT,
     event_name TEXT,
-    start_date DATE,
+    source_table TEXT,
     is_claims_data INTEGER,
     data_source TEXT
 );
 INSERT INTO metric_federated_data_v VALUES
-    (1, 'E11.9', 'ICD-10', 'Type 2 diabetes mellitus', '2024-06-12', 0, 'BMG');
+    -- John 1962 — diabetes diagnosis (clinical)
+    (1, 'enc-1', '2025-06-10', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_problems_v', 0, 'BMG'),
+    -- John 1971 — hypertension (not diabetic, useful negative)
+    (2, 'enc-2', '2025-04-05', NULL, 'I10',   'ICD-10', 'ICD10CM', 'Essential hypertension',   'federated_problems_v', 0, 'Kaleida'),
+    -- Mary Jones (70F Kaleida) — diabetes + metformin
+    (4, 'enc-4',  '2025-09-12', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_problems_v', 0, 'Kaleida'),
+    (4, 'enc-4m', '2025-09-15', NULL, '6809',  'RxNorm', 'RXNORM',  'metformin',                 'federated_meds_v',     0, 'Kaleida'),
+    -- Robert Lee — metformin without diagnosis
+    (5, 'enc-5m', '2026-01-20', NULL, '6809',  'RxNorm', 'RXNORM',  'metformin',                 'federated_meds_v',     0, 'BMG'),
+    -- Anne Garcia (78F Kaleida) — hypertension only, stale visit
+    (6, 'enc-6',  '2024-07-22', NULL, 'I10',   'ICD-10', 'ICD10CM', 'Essential hypertension',   'federated_problems_v', 0, 'Kaleida'),
+    -- Daniel Wright — diabetes + metformin via claims (refresh-cadence test)
+    (7, 'enc-7c', '2025-11-30', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_claims_icd_diagnosis_detail_v', 1, 'BMG'),
+    (7, 'enc-7m', '2026-02-05', NULL, '6809',  'RxNorm', 'RXNORM',  'metformin',                 'federated_meds_v',     0, 'BMG'),
+    -- Susan Park (71F Kaleida) — diabetes (qualifies "diabetics over 65 at Kaleida")
+    (8, 'enc-8',  '2025-12-01', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_problems_v', 0, 'Kaleida');
