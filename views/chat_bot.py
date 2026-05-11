@@ -498,7 +498,11 @@ if not my_question and st.session_state.get("pending_sql_error", False) and st.s
     st.stop()
 
 if my_question:
-    magic_response = is_magic_do_magic(my_question)
+    if st.session_state.get("agentic_mode", False):
+        previous_df = st.session_state.get("df")
+    else:
+        previous_df = None
+    magic_response = is_magic_do_magic(my_question, previous_df=previous_df)
     if magic_response == True:
         st.stop()
 
