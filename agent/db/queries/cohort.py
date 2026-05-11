@@ -1,0 +1,113 @@
+"""SQL template for the cohort tool.
+
+Phase 4 design §3.2 — single SELECT over internal_patient_profile_v +
+internal_source_reference_v, with optional inner-join subqueries on
+metric_federated_data_v for diagnosis_codes and medication_rxnorm_codes
+filters. COUNT(*) OVER () returns the population total in one round trip;
+LIMIT sample_size+1 lets the caller detect that the cohort exceeds the
+sample.
+
+Positional placeholders (:dx_0, :dx_1, ...) are used for IN-list filters
+because the project's existing SQLAlchemy text() pattern does NOT use
+expanding bindparam — see agent/db/queries/labs.py for the same idiom.
+"""
+
+from __future__ import annotations
+from typing import Tuple
+
+
+def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
+    """Build the SELECT for search_patients_by_criteria.
+
+    `criteria` is a CohortCriteria (defined in agent/tools/search_patients_by_criteria.py).
+    It is duck-typed here so the SQL builder can be unit-tested against a
+    minimal namespace without importing the tool module.
+
+    Returns (sql, params). The caller passes both into adapter.fetch_all.
+    """
+    params: dict = {}
+    join_clauses: list[str] = []
+    where_clauses: list[str] = ["1=1"]
+
+    # --- diagnosis codes ----------------------------------------------
+    if getattr(criteria, "diagnosis_codes", None):
+        codes = list(criteria.diagnosis_codes)
+        placeholders = ", ".join(f":dx_{i}" for i in range(len(codes)))
+        for i, c in enumerate(codes):
+            params[f"dx_{i}"] = c
+        dx_filter = [
+            f"code IN ({placeholders})",
+            "code_type IN ('ICD-10', 'ICD10', 'SNOMED')",
+        ]
+        dr = getattr(criteria, "diagnosis_date_range", None)
+        if dr is not None:
+            if getattr(dr, "start", None):
+                dx_filter.append("start_date >= :dx_start")
+                params["dx_start"] = dr.start.isoformat()
+            if getattr(dr, "end", None):
+                dx_filter.append("start_date <= :dx_end")
+                params["dx_end"] = dr.end.isoformat()
+        join_clauses.append(
+            f"JOIN (SELECT DISTINCT patient_id FROM {schema_prefix}metric_federated_data_v "
+            f"WHERE {' AND '.join(dx_filter)}) dx ON dx.patient_id = p.patient_id"
+        )
+
+    # --- medication codes ---------------------------------------------
+    if getattr(criteria, "medication_rxnorm_codes", None):
+        codes = list(criteria.medication_rxnorm_codes)
+        placeholders = ", ".join(f":med_{i}" for i in range(len(codes)))
+        for i, c in enumerate(codes):
+            params[f"med_{i}"] = c
+        join_clauses.append(
+            f"JOIN (SELECT DISTINCT patient_id FROM {schema_prefix}metric_federated_data_v "
+            f"WHERE code IN ({placeholders}) "
+            f"AND code_type IN ('RxNorm', 'NDC')) med ON med.patient_id = p.patient_id"
+        )
+
+    # --- demographic / visit filters ----------------------------------
+    if getattr(criteria, "age_min", None) is not None:
+        where_clauses.append("p.age >= :age_min")
+        params["age_min"] = criteria.age_min
+    if getattr(criteria, "age_max", None) is not None:
+        where_clauses.append("p.age <= :age_max")
+        params["age_max"] = criteria.age_max
+    if getattr(criteria, "gender", None):
+        where_clauses.append("p.gender = :gender")
+        params["gender"] = criteria.gender
+    if getattr(criteria, "facility", None):
+        where_clauses.append("LOWER(p.practice_name) LIKE :facility")
+        params["facility"] = f"%{criteria.facility.lower()}%"
+    if getattr(criteria, "last_visit_after", None):
+        where_clauses.append("p.last_date_of_visit >= :lv_after")
+        params["lv_after"] = criteria.last_visit_after.isoformat()
+    if getattr(criteria, "last_visit_before", None):
+        where_clauses.append("p.last_date_of_visit <= :lv_before")
+        params["lv_before"] = criteria.last_visit_before.isoformat()
+    if getattr(criteria, "condition_text", None):
+        where_clauses.append("LOWER(p.conditions) LIKE :cond_text")
+        params["cond_text"] = f"%{criteria.condition_text.lower()}%"
+
+    sample_size = getattr(criteria, "sample_size", 20)
+    params["sample_size_plus_one"] = int(sample_size) + 1
+
+    join_block = "\n        ".join(join_clauses)
+    where_block = " AND ".join(where_clauses)
+
+    sql = f"""
+        SELECT
+            isr.source_id,
+            p.full_name AS display_name,
+            p.age,
+            p.gender,
+            p.last_date_of_visit,
+            p.practice_name,
+            COUNT(*) OVER () AS total_count
+        FROM {schema_prefix}internal_patient_profile_v p
+        JOIN {schema_prefix}internal_source_reference_v isr
+          ON isr.patient_id = p.patient_id
+          AND isr.empi_rank != 99
+        {join_block}
+        WHERE {where_block}
+        LIMIT :sample_size_plus_one
+    """
+    return sql, params
