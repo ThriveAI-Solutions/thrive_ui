@@ -88,6 +88,22 @@ def _normalize_args(raw: Any) -> dict:
     return {}
 
 
+def _sync_last_dataframe_to_session_state(
+    last_dataframe: Optional[Any],
+    session_state: dict,
+) -> None:
+    """Mirror deps.last_dataframe into st.session_state['df'] for
+    slash-command compatibility (Vanna and the agent share the same key).
+
+    None means 'this turn produced no dataframe' — leave any prior
+    session_state['df'] in place. An empty DataFrame IS a valid result
+    (e.g., 'no records found') and overwrites the prior value.
+    """
+    if last_dataframe is None:
+        return
+    session_state["df"] = last_dataframe
+
+
 class AgenticRunner:
     """Owns the Pydantic AI Agent and its tool registrations.
 
@@ -290,6 +306,12 @@ class AgenticRunner:
                     output = getattr(node.data, "output", None)
                     if isinstance(output, AgentResponse):
                         all_msgs = list(run.result.all_messages()) if getattr(run, "result", None) is not None else []
+                        try:
+                            import streamlit as st
+
+                            _sync_last_dataframe_to_session_state(deps.last_dataframe, st.session_state)
+                        except Exception:
+                            pass
                         yield FinalResponseEvent(response=output, all_messages=all_msgs)
                         return
 
@@ -298,6 +320,12 @@ class AgenticRunner:
         if hasattr(run, "result") and run.result is not None:
             output = run.result.output
             if isinstance(output, AgentResponse):
+                try:
+                    import streamlit as st
+
+                    _sync_last_dataframe_to_session_state(deps.last_dataframe, st.session_state)
+                except Exception:
+                    pass
                 yield FinalResponseEvent(
                     response=output,
                     all_messages=list(run.result.all_messages()),
