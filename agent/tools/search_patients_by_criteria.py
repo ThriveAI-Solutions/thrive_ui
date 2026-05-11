@@ -47,6 +47,7 @@ class CohortResult(BaseModel):
     total_count: int
     sample: List[PatientMatch]
     data_availability: Literal["data_present", "no_records_found", "error"]
+    truncated: bool = False
     reliability_note: Optional[str] = None
     notes_to_agent: Optional[str] = None
 
@@ -114,6 +115,9 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
         return result
 
     total_count = int(rows[0]["total_count"])
+    # cohort_sql applies LIMIT sample_size+1 as a truncation sentinel
+    # (see agent/db/queries/cohort.py); mirrors find_patient.truncated.
+    truncated = len(rows) > criteria.sample_size
 
     sample_rows = rows[: criteria.sample_size] if criteria.sample_size > 0 else []
     sample = [
@@ -142,6 +146,7 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
         total_count=total_count,
         sample=sample,
         data_availability="data_present",
+        truncated=truncated,
         reliability_note=reliability,
     )
     ctx.deps.last_dataframe = cohort_result_to_df(result)

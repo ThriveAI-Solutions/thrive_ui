@@ -140,6 +140,41 @@ def test_sample_size_zero_returns_count_only(synthetic_db):
     assert result.sample == []
 
 
+def test_truncated_true_when_population_exceeds_sample(synthetic_db):
+    """sample_size smaller than the matching cohort → truncated=True."""
+    from agent.tools.search_patients_by_criteria import (
+        search_patients_by_criteria,
+        CohortCriteria,
+    )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db)
+    result = search_patients_by_criteria(
+        ctx,
+        CohortCriteria(diagnosis_codes=["E11.9"], sample_size=1),
+    )
+    assert result.total_count >= 3
+    assert len(result.sample) == 1
+    assert result.truncated is True
+
+
+def test_truncated_false_when_sample_covers_population(synthetic_db):
+    """sample_size ≥ population → truncated=False."""
+    from agent.tools.search_patients_by_criteria import (
+        search_patients_by_criteria,
+        CohortCriteria,
+    )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db)
+    result = search_patients_by_criteria(
+        ctx,
+        CohortCriteria(diagnosis_codes=["E11.9"], age_min=65, facility="Kaleida", sample_size=20),
+    )
+    assert result.total_count == 2
+    assert result.truncated is False
+
+
 def test_last_dataframe_populated_on_success(synthetic_db):
     from agent.tools.search_patients_by_criteria import (
         search_patients_by_criteria,
