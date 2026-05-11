@@ -236,3 +236,41 @@ def test_imaging_always_carries_impression_unavailable_note(synthetic_db):
     result = get_patient_clinical_data(ctx, ImagingQuery())
     assert result.notes_to_agent is not None
     assert "impression" in result.notes_to_agent.lower()
+
+
+def test_clinical_tool_sets_last_dataframe_on_deps(synthetic_db):
+    """After get_patient_clinical_data returns, ctx.deps.last_dataframe
+    should hold a pandas DataFrame of the result items."""
+    import pandas as pd
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+
+    result = get_patient_clinical_data(ctx, DemographicsQuery())
+
+    assert result.domain == "demographics"
+    assert isinstance(ctx.deps.last_dataframe, pd.DataFrame)
+    assert len(ctx.deps.last_dataframe) == len(result.items)
+
+
+def test_clinical_tool_empty_result_sets_empty_dataframe(synthetic_db):
+    """A no_records_found result should still set an (empty) DataFrame
+    on deps so downstream tools see a definite signal rather than None."""
+    import pandas as pd
+    from agent.tools.get_patient_clinical_data import LabsQuery
+
+    selected_no_data = SelectedPatient(
+        source_id="src-nonexistent",
+        display_name="Nobody",
+        dob=None,
+        selected_at=datetime.now(),
+        selection_origin="user_click",
+    )
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected_no_data)
+
+    result = get_patient_clinical_data(ctx, LabsQuery(date_range=None))
+
+    assert result.data_availability == "no_records_found"
+    assert isinstance(ctx.deps.last_dataframe, pd.DataFrame)
+    assert len(ctx.deps.last_dataframe) == 0
