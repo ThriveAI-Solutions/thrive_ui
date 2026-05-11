@@ -118,76 +118,76 @@ DataAvailability = Literal[
 class DemographicsItem(BaseModel):
     item_type: Literal["demographics"] = "demographics"
     source_id: str
-    first_name: Optional[str]
-    last_name: Optional[str]
-    date_of_birth: Optional[date]
-    gender: Optional[str]
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    gender: Optional[str] = None
 
 
 class EncounterItem(BaseModel):
     item_type: Literal["encounter"] = "encounter"
     source_id: str
-    encounter_id: Optional[str]
-    type: Optional[str]
-    status: Optional[str]
-    event_datetime: Optional[str]
-    location: Optional[str]
-    rendering_provider: Optional[str]
-    facility_name: Optional[str]
-    place_of_service: Optional[str]
+    encounter_id: Optional[str] = None
+    type: Optional[str] = None
+    status: Optional[str] = None
+    event_datetime: Optional[str] = None
+    location: Optional[str] = None
+    rendering_provider: Optional[str] = None
+    facility_name: Optional[str] = None
+    place_of_service: Optional[str] = None
 
 
 class LabItem(BaseModel):
     item_type: Literal["lab"] = "lab"
     source_id: str
-    code: Optional[str]
-    code_type: Optional[str]
-    name: Optional[str]
-    result: Optional[str]
-    clean_result: Optional[str]
-    unit: Optional[str]
-    event_datetime: Optional[str]
-    service_provider: Optional[str]
+    code: Optional[str] = None
+    code_type: Optional[str] = None
+    name: Optional[str] = None
+    result: Optional[str] = None
+    clean_result: Optional[str] = None
+    unit: Optional[str] = None
+    event_datetime: Optional[str] = None
+    service_provider: Optional[str] = None
 
 
 class DiagnosisItem(BaseModel):
     item_type: Literal["diagnosis"] = "diagnosis"
     source_id: str
-    code: Optional[str]
-    code_type: Optional[str]
-    diagnosis: Optional[str]
-    diagnosis_datetime: Optional[str]
-    chronic_ind: Optional[str]
-    service_provider_npi: Optional[str]
+    code: Optional[str] = None
+    code_type: Optional[str] = None
+    diagnosis: Optional[str] = None
+    diagnosis_datetime: Optional[str] = None
+    chronic_ind: Optional[str] = None
+    service_provider_npi: Optional[str] = None
 
 
 class MedicationItem(BaseModel):
     item_type: Literal["medication"] = "medication"
     source_id: str
-    ndc_code: Optional[str]
-    rxnorm_code: Optional[str]
-    med_name: Optional[str]
-    date_prescribed: Optional[str]
-    prescribing_provider_npi: Optional[str]
-    med_strength: Optional[str]
-    med_strength_unit: Optional[str]
-    med_form: Optional[str]
-    med_sig: Optional[str]
-    drug_supply_days: Optional[int]
-    number_of_refills: Optional[int]
+    ndc_code: Optional[str] = None
+    rxnorm_code: Optional[str] = None
+    med_name: Optional[str] = None
+    date_prescribed: Optional[str] = None
+    prescribing_provider_npi: Optional[str] = None
+    med_strength: Optional[str] = None
+    med_strength_unit: Optional[str] = None
+    med_form: Optional[str] = None
+    med_sig: Optional[str] = None
+    drug_supply_days: Optional[int] = None
+    number_of_refills: Optional[int] = None
 
 
 class ImmunizationItem(BaseModel):
     item_type: Literal["immunization"] = "immunization"
     source_id: str
-    cvx: Optional[str]
-    ndc: Optional[str]
-    vaccine: Optional[str]
-    manufacturer: Optional[str]
-    lot: Optional[str]
-    event_datetime: Optional[str]
-    location_name: Optional[str]
-    mvx_code: Optional[str]
+    cvx: Optional[str] = None
+    ndc: Optional[str] = None
+    vaccine: Optional[str] = None
+    manufacturer: Optional[str] = None
+    lot: Optional[str] = None
+    event_datetime: Optional[str] = None
+    location_name: Optional[str] = None
+    mvx_code: Optional[str] = None
 
 
 class ProcedureItem(BaseModel):
@@ -195,27 +195,27 @@ class ProcedureItem(BaseModel):
     source: Literal["orders", "problems", "claims"]
     # source_id is NULL for the claims branch: federated_claims_icd_procedure_detail_v
     # has no source_id column per redshift_tables.json (Task 4 reconciliation).
-    source_id: Optional[str]
-    code: Optional[str]
-    code_type: Optional[str]
-    description: Optional[str]
-    event_date: Optional[str]
-    place_of_service: Optional[str]
-    provider_npi: Optional[str]
-    facility_name: Optional[str]
+    source_id: Optional[str] = None
+    code: Optional[str] = None
+    code_type: Optional[str] = None
+    description: Optional[str] = None
+    event_date: Optional[str] = None
+    place_of_service: Optional[str] = None
+    provider_npi: Optional[str] = None
+    facility_name: Optional[str] = None
 
 
 class ImagingItem(BaseModel):
     item_type: Literal["imaging"] = "imaging"
     source: Literal["orders", "documents"]
     source_id: str
-    code: Optional[str]
-    code_type: Optional[str]
-    description: Optional[str]
-    mnemonic: Optional[str]
-    event_date: Optional[str]
-    place_of_service: Optional[str]
-    location_name: Optional[str]
+    code: Optional[str] = None
+    code_type: Optional[str] = None
+    description: Optional[str] = None
+    mnemonic: Optional[str] = None
+    event_date: Optional[str] = None
+    place_of_service: Optional[str] = None
+    location_name: Optional[str] = None
 
 
 ClinicalItem = Annotated[
