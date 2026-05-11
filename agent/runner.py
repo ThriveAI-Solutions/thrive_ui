@@ -28,6 +28,7 @@ from agent.models import build_model
 from agent.state import (
     AgentResponse,
     CapReachedEvent,
+    CohortSampleEvent,
     FinalResponseEvent,
     PatientChooserEvent,
     StreamEvent,
@@ -318,6 +319,19 @@ class AgenticRunner:
                                     payload = _to_jsonable(result_content)
                                     if isinstance(payload, dict) and payload.get("total_unique", 0) > 0:
                                         yield PatientChooserEvent(payload=payload)
+
+                                # Auto-surface the cohort sample as a DataFrame
+                                # after search_patients_by_criteria succeeds, for
+                                # the same reason as the find_patient chooser:
+                                # don't depend on the LLM attaching an artifact.
+                                if info["tool_name"] == "search_patients_by_criteria":
+                                    payload = _to_jsonable(result_content)
+                                    if (
+                                        isinstance(payload, dict)
+                                        and isinstance(payload.get("sample"), list)
+                                        and len(payload["sample"]) > 0
+                                    ):
+                                        yield CohortSampleEvent(payload=payload)
 
                 elif Agent.is_end_node(node):
                     output = getattr(node.data, "output", None)

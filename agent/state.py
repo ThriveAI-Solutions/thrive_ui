@@ -68,6 +68,18 @@ class PatientChooserEvent(BaseModel):
     payload: dict  # PatientSearchResults shape: {matches, total_unique, truncated}
 
 
+class CohortSampleEvent(BaseModel):
+    """Auto-surfaced after a successful search_patients_by_criteria
+    call so the UI renders the cohort sample as a DataFrame regardless
+    of whether the LLM attaches an artifact to the final response.
+
+    Phase 4 design §3.7.
+    """
+
+    kind: Literal["cohort_sample"] = "cohort_sample"
+    payload: dict  # CohortResult shape (total_count, sample, data_availability, reliability_note)
+
+
 StreamEvent = Annotated[
     Union[
         ToolCallStarted,
@@ -75,6 +87,7 @@ StreamEvent = Annotated[
         FinalResponseEvent,
         CapReachedEvent,
         PatientChooserEvent,
+        CohortSampleEvent,
     ],
     Field(discriminator="kind"),
 ]

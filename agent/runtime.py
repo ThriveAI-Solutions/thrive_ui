@@ -18,6 +18,7 @@ from agent.runner import AgenticRunner
 from agent.state import (
     AgentResponse,
     CapReachedEvent,
+    CohortSampleEvent,
     FinalResponseEvent,
     PatientChooserEvent,
     StreamEvent,
@@ -195,6 +196,25 @@ def _render_event(event: StreamEvent) -> None:
                 MessageType.PATIENT_CHOOSER,
             )
         )
+        return
+
+    if isinstance(event, CohortSampleEvent):
+        # Auto-surfaced by runner.stream() right after
+        # search_patients_by_criteria succeeds with a non-empty sample.
+        # Renders as a DataFrame message regardless of whether the LLM
+        # attaches a DataFrameArtifact to the final response.
+        import pandas as pd
+
+        sample = event.payload.get("sample", [])
+        if sample:
+            df = pd.DataFrame(sample)
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    df.to_json(orient="records", date_format="iso"),
+                    MessageType.DATAFRAME,
+                )
+            )
         return
 
     if isinstance(event, FinalResponseEvent):
