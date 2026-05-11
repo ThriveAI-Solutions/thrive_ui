@@ -117,3 +117,12 @@ def test_runner_registers_run_sql():
     runner = AgenticRunner(model=TestModel())
     tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
     assert "run_sql" in tool_names
+
+
+def test_runner_registers_make_chart():
+    from agent.runner import AgenticRunner
+    from pydantic_ai.models.test import TestModel
+
+    runner = AgenticRunner(model=TestModel())
+    tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
+    assert "make_chart" in tool_names

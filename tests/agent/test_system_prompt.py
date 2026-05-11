@@ -40,3 +40,9 @@ def test_system_prompt_documents_run_sql():
     # The prompt should make clear run_sql is a fallback for when the
     # curated tools cannot answer (Phase 3 design §3.4).
     assert "escape hatch" in SYSTEM_PROMPT.lower() or "fallback" in SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_documents_make_chart():
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    assert "make_chart" in SYSTEM_PROMPT

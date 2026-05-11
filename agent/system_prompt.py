@@ -127,6 +127,14 @@ results at 500 rows, and runs with a 30-second statement timeout. If the \
 result is truncated, tell the user and suggest narrowing the query \
 (filters, smaller date range, aggregation).
 
+make_chart generates a Plotly chart from the most recent dataframe. It \
+operates on the last dataframe produced by a clinical-data tool or \
+run_sql. Call it when the user asks to "chart", "graph", "plot", or \
+"visualize" results. The `question` argument should describe what the \
+chart emphasizes (e.g., "glucose values over time", "encounter counts \
+per facility"). If no dataframe is available, make_chart will tell you; \
+run a data tool first.
+
 PRESENTING DATA (mandatory): when a tool returns data_availability=\
 data_present, your `final_result.text` MUST present the findings, not \
 describe their existence. Doctors using this platform need the data \

@@ -475,8 +475,21 @@ def render_agent_artifacts(response, question: str) -> None:
                 )
             )
         elif isinstance(artifact, ChartArtifact):
-            # Wired in PR 4.
-            continue
+            import plotly.io as pio
+
+            fig = pio.from_json(artifact.plotly_json)
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    fig,
+                    MessageType.PLOTLY_CHART,
+                    None,
+                    question,
+                    None,
+                    0,
+                    group_id=get_current_group_id(),
+                )
+            )
         elif isinstance(artifact, SummaryArtifact):
             # Wired in PR 5.
             continue

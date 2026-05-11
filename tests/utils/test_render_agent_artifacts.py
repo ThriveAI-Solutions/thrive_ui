@@ -78,3 +78,23 @@ def test_render_artifacts_handles_multiple_variants():
         render_agent_artifacts(response, question="ad-hoc")
 
     assert [m.type for m in emitted] == ["sql", "dataframe"]
+
+
+def test_render_artifacts_emits_plotly_chart_for_chart_artifact():
+    from utils.chat_bot_helper import render_agent_artifacts
+    from agent.state import AgentResponse
+    from agent.artifacts import ChartArtifact
+    from unittest.mock import patch
+
+    response = AgentResponse(
+        text="here's a chart",
+        artifacts=[ChartArtifact(plotly_json='{"data":[],"layout":{}}', chart_code="code")],
+    )
+
+    emitted: list = []
+    with patch("utils.chat_bot_helper.add_message", side_effect=emitted.append):
+        render_agent_artifacts(response, question="chart this")
+
+    assert len(emitted) == 1
+    # Message.type is stored as a string (the enum value)
+    assert emitted[0].type == "plotly_chart"
