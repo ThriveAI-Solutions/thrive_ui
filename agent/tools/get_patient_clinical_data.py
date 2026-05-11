@@ -193,7 +193,9 @@ class ImmunizationItem(BaseModel):
 class ProcedureItem(BaseModel):
     item_type: Literal["procedure"] = "procedure"
     source: Literal["orders", "problems", "claims"]
-    source_id: str
+    # source_id is NULL for the claims branch: federated_claims_icd_procedure_detail_v
+    # has no source_id column per redshift_tables.json (Task 4 reconciliation).
+    source_id: Optional[str]
     code: Optional[str]
     code_type: Optional[str]
     description: Optional[str]

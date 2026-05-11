@@ -176,18 +176,27 @@ INSERT INTO federated_documents_v VALUES
     ('src-john-1962', '2026-03-15 13:30', 'Radiology Report', 'XRREPORT', 'final', 'enc-r1', '22', 'Buffalo Medical Group'),
     ('src-john-1962', '2025-12-01 11:00', 'Procedure Note', 'PROCNOTE', 'final', 'enc-c1', '22', 'Buffalo Medical Group');
 
+-- Schema corrected per redshift_tables.json (Task 4 reconciliation).
+-- The real federated_claims_icd_procedure_detail_v has no source_id,
+-- code_type, procedure_description, place_of_service, rendering_provider_npi,
+-- or facility_name columns. The real columns are:
+-- claim_line_identifier, icd_procedure_code, icd_type, primary_flag,
+-- procedure_date, procedure_sequence_number, source_file_moyr,
+-- source_file_name, source_format, source_name.
 CREATE TABLE federated_claims_icd_procedure_detail_v (
-    source_id TEXT,
+    claim_line_identifier TEXT,
     icd_procedure_code TEXT,
-    code_type TEXT,
-    procedure_description TEXT,
+    icd_type TEXT,
+    primary_flag INTEGER,
     procedure_date DATE,
-    place_of_service TEXT,
-    rendering_provider_npi TEXT,
-    facility_name TEXT
+    procedure_sequence_number INTEGER,
+    source_file_moyr DATE,
+    source_file_name TEXT,
+    source_format TEXT,
+    source_name TEXT
 );
 INSERT INTO federated_claims_icd_procedure_detail_v VALUES
-    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', '21', '1234567890', 'Buffalo General');
+    ('CLM-001-01', '0DTJ4ZZ', 'ICD-10-PCS', 1, '2024-08-22', 1, '2024-08-01', 'claims_2024_08.csv', 'ICD', 'Highmark');
 
 CREATE TABLE federated_vitals_v (
     source_id TEXT,

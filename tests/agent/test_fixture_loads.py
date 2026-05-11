@@ -28,7 +28,7 @@ def test_synthetic_db_has_phase2_domain_rows(synthetic_db):
             count = conn.execute(text(f"SELECT COUNT(*) FROM {view} WHERE source_id = 'src-john-1962'")).scalar()
             assert count >= 1, f"{view} has no fixture rows for src-john-1962"
 
-        claims_count = conn.execute(
-            text("SELECT COUNT(*) FROM federated_claims_icd_procedure_detail_v WHERE source_id = 'src-john-1962'")
-        ).scalar()
+        # federated_claims_icd_procedure_detail_v has no source_id column per
+        # redshift_tables.json (Task 4 reconciliation). Check total row count instead.
+        claims_count = conn.execute(text("SELECT COUNT(*) FROM federated_claims_icd_procedure_detail_v")).scalar()
         assert claims_count >= 1

@@ -36,11 +36,11 @@ def procedures_sql(
 
     text_filter_orders = ""
     text_filter_problems = ""
-    text_filter_claims = ""
+    # federated_claims_icd_procedure_detail_v has no procedure_description column
+    # per redshift_tables.json; text filtering is not possible on the claims branch.
     if procedure_text:
         text_filter_orders = "AND LOWER(name) LIKE :pt"
         text_filter_problems = "AND LOWER(diagnosis) LIKE :pt"
-        text_filter_claims = "AND LOWER(procedure_description) LIKE :pt"
         params["pt"] = f"%{procedure_text.lower()}%"
 
     date_filter_orders = ""
@@ -111,18 +111,31 @@ def procedures_sql(
 
         SELECT
             'claims' AS source,
-            source_id,
+            -- federated_claims_icd_procedure_detail_v has no source_id column per
+            -- redshift_tables.json; NULL placeholder preserves UNION shape.
+            NULL AS source_id,
             icd_procedure_code AS code,
-            code_type,
-            procedure_description AS description,
+            -- code_type does not exist; icd_type is the real column name per
+            -- redshift_tables.json.
+            icd_type AS code_type,
+            -- procedure_description, place_of_service, rendering_provider_npi,
+            -- and facility_name do not exist on this view per redshift_tables.json.
+            NULL AS description,
             procedure_date AS event_date,
-            place_of_service,
-            rendering_provider_npi AS provider_npi,
-            facility_name
+            NULL AS place_of_service,
+            NULL AS provider_npi,
+            NULL AS facility_name
         FROM {schema_prefix}federated_claims_icd_procedure_detail_v
-        WHERE source_id = :source_id
+        WHERE 1=1
+          -- DEFERRED DEFECT: federated_claims_icd_procedure_detail_v has no
+          -- source_id column, so this branch cannot scope by patient and
+          -- currently returns claims rows from ALL patients in the date range.
+          -- The icdpcs_filter ("AND 1 = 0" by default) suppresses claims entirely
+          -- until a JOIN to a patient-bearing claims view (e.g. a member
+          -- demographics view) is added in a follow-up. Tracked as Phase 3
+          -- carry-over; do not enable the claims branch in production until
+          -- patient scoping is in place.
           {icdpcs_filter}
-          {text_filter_claims}
           {date_filter_claims}
 
         ORDER BY event_date DESC
