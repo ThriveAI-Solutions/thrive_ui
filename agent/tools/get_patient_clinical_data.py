@@ -538,9 +538,11 @@ def _build_procedures_result(
         items=items,
         data_availability="data_present",
         reliability_note=(
-            "Procedure coverage is split across federated_orders_v (CPT subset), "
-            "federated_problems_v (ICD-10-PCS), and the claims feed (monthly refresh; "
-            "may lag bi-weekly clinical data by up to 30 days)."
+            "Procedure coverage in this result is from federated_orders_v (CPT "
+            "subset) and federated_problems_v (ICD-10-PCS only). The claims-feed "
+            "branch (federated_claims_icd_procedure_detail_v) is suppressed in "
+            "Phase 3 because that view has no patient identifier; results may "
+            "therefore under-report compared to the full claims history."
         ),
     )
 

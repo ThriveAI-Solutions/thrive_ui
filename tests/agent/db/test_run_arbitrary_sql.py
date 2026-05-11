@@ -71,3 +71,38 @@ def test_run_arbitrary_sql_writes_to_sql_log(sqlite_adapter):
     log = sqlite_adapter.pop_sql_log()
     assert len(log) == 1
     assert "SELECT a FROM t" in log[0]["sql"]
+
+
+def test_run_arbitrary_sql_caps_query_ending_in_line_comment(sqlite_adapter):
+    """Regression: a trailing -- comment used to let LIMIT injection land
+    inside the comment, leaving the query un-capped."""
+    columns, rows, truncated = sqlite_adapter.run_arbitrary_sql(
+        "SELECT a FROM t ORDER BY a -- everything please",
+        row_cap=3,
+        timeout_s=30,
+    )
+    assert len(rows) == 3
+    assert truncated is True
+
+
+def test_run_arbitrary_sql_caps_query_ending_in_block_comment(sqlite_adapter):
+    columns, rows, truncated = sqlite_adapter.run_arbitrary_sql(
+        "SELECT a FROM t ORDER BY a /* sneaky */",
+        row_cap=3,
+        timeout_s=30,
+    )
+    assert len(rows) == 3
+    assert truncated is True
+
+
+def test_run_arbitrary_sql_rejects_merge_and_copy(sqlite_adapter):
+    """Phase 3 closeout review #5: MERGE/VACUUM/ANALYZE/COPY must trip
+    the adapter regex guard, not just the tool-level AST guard."""
+    for stmt in (
+        "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE",
+        "COPY t FROM '/tmp/x.csv'",
+        "VACUUM t",
+        "ANALYZE t",
+    ):
+        with pytest.raises(ValueError, match="read-only"):
+            sqlite_adapter.run_arbitrary_sql(stmt, row_cap=500, timeout_s=30)

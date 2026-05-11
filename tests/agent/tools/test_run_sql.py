@@ -130,3 +130,108 @@ def test_run_sql_input_validation_rejects_empty():
 
     with pytest.raises(ValidationError):
         RunSqlInput(sql="   ")
+
+
+def test_run_sql_rejects_cte_wrapped_dml(synthetic_db):
+    """The first-keyword check passes (WITH) but the body contains DELETE,
+    which the token-level scan must catch."""
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    with pytest.raises(ModelRetry, match="write keyword"):
+        run_sql(
+            ctx,
+            RunSqlInput(sql="WITH x AS (SELECT 1 AS n) DELETE FROM federated_problems_v"),
+        )
+
+
+def test_run_sql_rejects_cte_wrapped_update(synthetic_db):
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    with pytest.raises(ModelRetry, match="write keyword"):
+        run_sql(
+            ctx,
+            RunSqlInput(sql="WITH x AS (UPDATE t SET a=1 RETURNING *) SELECT * FROM x"),
+        )
+
+
+def test_run_sql_block_comment_drop_caught_by_defense_in_depth(synthetic_db):
+    """Spec §6 risk #2: even though the AST guard treats DROP inside a
+    /* */ comment as benign (it's not a keyword token), the adapter-level
+    regex catches the literal `DROP` word as a belt-and-suspenders backstop.
+
+    Net effect: bypass attempts via comment-encoded DDL are rejected. The
+    user pays a false-positive cost on the harmless `/* DROP TABLE */
+    SELECT 1` pattern — acceptable, since the same query without the
+    misleading comment works fine."""
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    with pytest.raises(ModelRetry, match="read-only|write keyword"):
+        run_sql(ctx, RunSqlInput(sql="/* DROP TABLE foo */ SELECT 1 AS a"))
+
+
+def test_run_sql_trailing_line_comment_does_not_bypass_row_cap(synthetic_db):
+    """Regression for trailing -- comment defeating LIMIT injection.
+
+    Without the comment-stripping in _inject_limit, the appended
+    ` LIMIT 501` lands inside the comment and is ignored, leaving the
+    query effectively uncapped."""
+    from sqlalchemy import text
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    with synthetic_db.connect() as conn:
+        conn.execute(text("CREATE TABLE big_table_cmt (a INTEGER)"))
+        for i in range(600):
+            conn.execute(text("INSERT INTO big_table_cmt (a) VALUES (:a)"), {"a": i})
+        conn.commit()
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = run_sql(
+        ctx,
+        RunSqlInput(sql="SELECT a FROM big_table_cmt -- give me everything"),
+    )
+    assert result.row_count == 500
+    assert result.truncated is True
+
+
+def test_run_sql_trailing_block_comment_does_not_bypass_row_cap(synthetic_db):
+    from sqlalchemy import text
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    with synthetic_db.connect() as conn:
+        conn.execute(text("CREATE TABLE big_table_blk (a INTEGER)"))
+        for i in range(600):
+            conn.execute(text("INSERT INTO big_table_blk (a) VALUES (:a)"), {"a": i})
+        conn.commit()
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = run_sql(
+        ctx,
+        RunSqlInput(sql="SELECT a FROM big_table_blk /* and please /* nested */ everything */"),
+    )
+    assert result.row_count == 500
+    assert result.truncated is True
+
+
+def test_run_sql_rejects_merge_vacuum_analyze_copy(synthetic_db):
+    """Phase 3 closeout review #5: MERGE/VACUUM/ANALYZE/COPY must be
+    rejected at both the tool AST guard and the adapter regex guard."""
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    for stmt in (
+        "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE",
+        "VACUUM",
+        "ANALYZE t",
+        "COPY t FROM '/tmp/x.csv'",
+    ):
+        with pytest.raises(ModelRetry):
+            run_sql(ctx, RunSqlInput(sql=stmt))

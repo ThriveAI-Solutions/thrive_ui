@@ -192,22 +192,31 @@ def test_immunizations_filtered_by_cvx(synthetic_db):
 from agent.tools.get_patient_clinical_data import ProceduresQuery, ProcedureItem
 
 
-def test_procedures_returns_three_sources(synthetic_db):
+def test_procedures_returns_orders_and_problems(synthetic_db):
+    """The claims branch is hard-suppressed in Phase 3 (no patient ID on
+    federated_claims_icd_procedure_detail_v); only orders + problems
+    surface."""
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, ProceduresQuery())
     assert result.domain == "procedures"
     assert result.data_availability == "data_present"
     sources = {i.source for i in result.items}
-    assert sources == {"orders", "problems", "claims"}
+    assert sources == {"orders", "problems"}
+    assert "claims" not in sources
 
 
-def test_procedures_carries_claims_freshness_note(synthetic_db):
+def test_procedures_reliability_note_flags_claims_suppression(synthetic_db):
+    """The reliability_note must inform the model (and the user) that
+    claims data is intentionally absent, so downstream answers can be
+    properly hedged."""
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, ProceduresQuery())
     assert result.reliability_note is not None
-    assert "claims" in result.reliability_note.lower()
+    note = result.reliability_note.lower()
+    assert "claims" in note
+    assert "suppress" in note or "no patient identifier" in note
 
 
 def test_procedures_filtered_by_cpt(synthetic_db):

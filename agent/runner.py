@@ -158,6 +158,15 @@ class AgenticRunner:
             deps=deps,
             message_history=message_history or None,
         )
+        # Parity with stream(): mirror deps.last_dataframe into session_state
+        # so a subsequent turn (or a magic-function slash command) can pick it
+        # up. Wrapped in try/except for non-Streamlit callers (scripts/tests).
+        try:
+            import streamlit as st
+
+            _sync_last_dataframe_to_session_state(deps.last_dataframe, st.session_state)
+        except Exception:
+            pass
         return result.output
 
     async def stream(

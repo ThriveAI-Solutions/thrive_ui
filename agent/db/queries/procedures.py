@@ -26,11 +26,18 @@ def procedures_sql(
     params: dict = {"source_id": source_id}
 
     cpt_filter = ""
-    icdpcs_filter = ""
+    # Suppresses the ICD-10-PCS path on the problems branch when the caller
+    # is filtering by CPT codes (CPT and PCS code systems don't overlap, so
+    # the PCS rows would just be noise alongside the requested CPT rows).
+    problems_pcs_filter = ""
+    # The claims branch is unconditionally suppressed in Phase 3 — see the
+    # WHERE-clause comment near the FROM clause below for the patient-scoping
+    # gap. Will become a real predicate when a JOIN bridge is wired up.
+    claims_filter = "AND 1 = 0"
     if cpt_codes:
         placeholders = ", ".join(f":cpt_{i}" for i in range(len(cpt_codes)))
         cpt_filter = f"AND code IN ({placeholders})"
-        icdpcs_filter = "AND 1 = 0"
+        problems_pcs_filter = "AND 1 = 0"
         for i, c in enumerate(cpt_codes):
             params[f"cpt_{i}"] = c
 
@@ -103,7 +110,7 @@ def procedures_sql(
         FROM {schema_prefix}federated_problems_v
         WHERE source_id = :source_id
           AND code_type IN ({pcs_placeholders})
-          {icdpcs_filter}
+          {problems_pcs_filter}
           {text_filter_problems}
           {date_filter_problems}
 
@@ -127,15 +134,26 @@ def procedures_sql(
             NULL AS facility_name
         FROM {schema_prefix}federated_claims_icd_procedure_detail_v
         WHERE 1=1
-          -- DEFERRED DEFECT: federated_claims_icd_procedure_detail_v has no
-          -- source_id column, so this branch cannot scope by patient and
-          -- currently returns claims rows from ALL patients in the date range.
-          -- The icdpcs_filter ("AND 1 = 0" by default) suppresses claims entirely
-          -- until a JOIN to a patient-bearing claims view (e.g. a member
-          -- demographics view) is added in a follow-up. Tracked as Phase 3
-          -- carry-over; do not enable the claims branch in production until
-          -- patient scoping is in place.
-          {icdpcs_filter}
+          -- DEFERRED DEFECT (HIPAA-relevant): the claims procedure view has
+          -- no patient identifier — not source_id, patient_id, umrn, or any
+          -- direct join key. Its only foreign keys are claim_line_identifier
+          -- and source_file_name. So this branch cannot be scoped to the
+          -- requested source_id; without suppression it would return claims
+          -- rows from EVERY patient in the date range.
+          --
+          -- Phase 3 hard-suppresses via claims_filter = "AND 1 = 0" (above).
+          -- A real fix needs a 3-hop bridge:
+          --   claims_icd_procedure_detail_v.claim_line_identifier
+          --   → federated_claims_summary_v.claim_line_identifier
+          --     (gives payer_member_identifier)
+          --   → internal_source_reference_v WHERE source_name='claims_process'
+          --     (assuming source_id stores payer_member_identifier; needs
+          --      live-warehouse confirmation)
+          --   → patient_id → source_id (empi_rank=1)
+          -- Tracked as Phase 4 carry-over. Do not lift the suppression
+          -- without that bridge in place AND a unit test asserting that
+          -- ProceduresQuery for patient A never returns patient B's rows.
+          {claims_filter}
           {date_filter_claims}
 
         ORDER BY event_date DESC

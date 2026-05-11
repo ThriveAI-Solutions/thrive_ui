@@ -266,9 +266,11 @@ EXAMPLES_DOCS: List[_Doc] = [
         "text": (
             "Q: 'Has this patient had any invasive procedures in date range?'\n"
             "Tool sequence: get_patient_clinical_data({domain:'procedures', "
-            "date_range:{...}}). Result UNIONs orders, problems (ICD-10-PCS), and the "
-            "claims feed; the claims feed lags by up to 30 days — include the freshness "
-            "caveat from reliability_note."
+            "date_range:{...}}). Result UNIONs orders (CPT) and problems "
+            "(ICD-10-PCS only). The claims-feed branch is currently suppressed "
+            "because the claims procedure view has no patient identifier — "
+            "results may under-report procedures historically captured only "
+            "via claims. Always surface the reliability_note from the result."
         ),
     },
 ]

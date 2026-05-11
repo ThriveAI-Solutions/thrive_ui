@@ -21,10 +21,34 @@ from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 
 
+# Mirror agent.tools.run_sql._FORBIDDEN_KEYWORDS. The two lists must stay
+# in sync: this adapter-level regex is the belt-and-suspenders backstop
+# for the tool-level AST guard, and a gap on either side defeats both.
 _FORBIDDEN_RE = re.compile(
-    r"\b(?:INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|REPLACE)\b",
+    r"\b(?:INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE"
+    r"|GRANT|REVOKE|REPLACE|MERGE|VACUUM|ANALYZE|COPY)\b",
     re.IGNORECASE,
 )
+
+
+def _strip_trailing_sql_comments(sql: str) -> str:
+    """Strip trailing whitespace, semicolons, and SQL comments.
+
+    Without this, an attacker (or a careless caller) can defeat
+    LIMIT injection by ending the query with `-- anything`: the
+    regex below would see no LIMIT, append ` LIMIT 501`, and the
+    appended text would land inside the comment — leaving the
+    query effectively un-capped.
+    """
+    prev = None
+    while sql != prev:
+        prev = sql
+        sql = sql.rstrip().rstrip(";").rstrip()
+        # Trailing /* ... */ block comment (may span lines).
+        sql = re.sub(r"/\*.*?\*/\s*\Z", "", sql, flags=re.DOTALL)
+        # Trailing -- line comment (anchored to end of string).
+        sql = re.sub(r"--[^\n]*\Z", "", sql)
+    return sql
 
 
 def _inject_limit(sql: str, row_cap: int) -> str:
@@ -35,8 +59,14 @@ def _inject_limit(sql: str, row_cap: int) -> str:
 
     If the SQL already has a LIMIT smaller than row_cap, leave it alone
     (the user explicitly asked for fewer rows; respect that).
+
+    Known limitation: queries that end in `LIMIT N OFFSET M` aren't
+    recognized as already-limited and will get a second `LIMIT row_cap+1`
+    appended, producing a syntax error. `run_sql` callers are guided
+    away from OFFSET in the system prompt; revisit if it becomes a real
+    pattern.
     """
-    stripped = sql.rstrip().rstrip(";").rstrip()
+    stripped = _strip_trailing_sql_comments(sql)
     limit_match = re.search(r"\blimit\b\s+(\d+)\s*$", stripped, re.IGNORECASE)
     if limit_match:
         user_limit = int(limit_match.group(1))
