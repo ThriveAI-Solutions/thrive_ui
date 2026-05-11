@@ -31,3 +31,12 @@ def test_prompt_explains_search_codes_use():
     p = SYSTEM_PROMPT.lower()
     assert "search_codes" in SYSTEM_PROMPT
     assert "cvx" in p or "rxnorm" in p
+
+
+def test_system_prompt_documents_run_sql():
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    assert "run_sql" in SYSTEM_PROMPT
+    # The prompt should make clear run_sql is a fallback for when the
+    # curated tools cannot answer (Phase 3 design §3.4).
+    assert "escape hatch" in SYSTEM_PROMPT.lower() or "fallback" in SYSTEM_PROMPT.lower()
