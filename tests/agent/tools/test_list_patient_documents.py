@@ -68,3 +68,17 @@ def test_no_selection_raises_model_retry(synthetic_db):
     ctx.deps = _deps(synthetic_db, selected=None)
     with pytest.raises(ModelRetry, match="No patient is currently selected"):
         list_patient_documents(ctx, DocumentIndexQuery())
+
+
+def test_list_patient_documents_sets_last_dataframe(synthetic_db):
+    """After list_patient_documents returns, ctx.deps.last_dataframe
+    should hold a pandas DataFrame of the result documents."""
+    import pandas as pd
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _john())
+
+    result = list_patient_documents(ctx, DocumentIndexQuery(date_range=None))
+
+    assert isinstance(ctx.deps.last_dataframe, pd.DataFrame)
+    assert len(ctx.deps.last_dataframe) == len(result.documents)

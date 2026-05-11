@@ -13,6 +13,7 @@ from pydantic_ai import ModelRetry, RunContext
 
 from agent.deps import AgentDeps
 from agent.db.queries.documents import documents_sql
+from agent.dataframe_adapters import document_index_result_to_df
 
 
 class DateRange(BaseModel):
@@ -62,18 +63,22 @@ def list_patient_documents(
     )
     rows = adapter.fetch_all(sql, params)
     if not rows:
-        return DocumentIndexResult(documents=[], data_availability="no_records_found")
-    entries = [
-        DocumentEntry(
-            source_id=r["source_id"],
-            event_datetime=str(r["event_datetime"]) if r.get("event_datetime") else None,
-            name=r.get("name"),
-            mnemonic=r.get("mnemonic"),
-            status=r.get("status"),
-            encounter_id=r.get("encounter_id"),
-            place_of_service=r.get("place_of_service"),
-            location_name=r.get("location_name"),
-        )
-        for r in rows
-    ]
-    return DocumentIndexResult(documents=entries, data_availability="data_present")
+        result = DocumentIndexResult(documents=[], data_availability="no_records_found")
+    else:
+        entries = [
+            DocumentEntry(
+                source_id=r["source_id"],
+                event_datetime=str(r["event_datetime"]) if r.get("event_datetime") else None,
+                name=r.get("name"),
+                mnemonic=r.get("mnemonic"),
+                status=r.get("status"),
+                encounter_id=r.get("encounter_id"),
+                place_of_service=r.get("place_of_service"),
+                location_name=r.get("location_name"),
+            )
+            for r in rows
+        ]
+        result = DocumentIndexResult(documents=entries, data_availability="data_present")
+
+    ctx.deps.last_dataframe = document_index_result_to_df(result)
+    return result
