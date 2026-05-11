@@ -157,3 +157,49 @@ def test_run_sql_result_to_df_empty():
     df = run_sql_result_to_df(result)
     assert len(df) == 0
     assert df.columns.tolist() == ["a"]
+
+
+def test_cohort_result_to_df_happy_path():
+    from agent.tools.search_patients_by_criteria import CohortResult, PatientMatch
+    from agent.dataframe_adapters import cohort_result_to_df
+    from datetime import date
+
+    result = CohortResult(
+        total_count=147,
+        sample=[
+            PatientMatch(
+                source_id="src-1",
+                display_name="John Smith",
+                age=70,
+                gender="M",
+                last_date_of_visit=date(2026, 4, 1),
+                practice_name="Kaleida",
+            ),
+            PatientMatch(
+                source_id="src-2",
+                display_name="Jane Doe",
+                age=68,
+                gender="F",
+                last_date_of_visit=date(2025, 11, 20),
+                practice_name="Kaleida",
+            ),
+        ],
+        data_availability="data_present",
+    )
+
+    df = cohort_result_to_df(result)
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 2
+    assert df["source_id"].tolist() == ["src-1", "src-2"]
+    assert df["display_name"].tolist() == ["John Smith", "Jane Doe"]
+    assert df["age"].tolist() == [70, 68]
+
+
+def test_cohort_result_to_df_empty_sample():
+    from agent.tools.search_patients_by_criteria import CohortResult
+    from agent.dataframe_adapters import cohort_result_to_df
+
+    result = CohortResult(total_count=0, sample=[], data_availability="no_records_found")
+    df = cohort_result_to_df(result)
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 0

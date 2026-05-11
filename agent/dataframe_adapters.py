@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from agent.tools.get_patient_clinical_data import ClinicalResult
     from agent.tools.list_patient_documents import DocumentIndexResult
     from agent.tools.run_sql import RunSqlResult
+    from agent.tools.search_patients_by_criteria import CohortResult
 
 
 def clinical_result_to_df(result: "ClinicalResult") -> pd.DataFrame:
@@ -46,3 +47,15 @@ def run_sql_result_to_df(result: "RunSqlResult") -> pd.DataFrame:
     downstream charts don't fail on missing keys.
     """
     return pd.DataFrame(result.rows, columns=result.columns)
+
+
+def cohort_result_to_df(result: "CohortResult") -> pd.DataFrame:
+    """Flatten CohortResult.sample into a DataFrame with the
+    canonical cohort columns.
+
+    Empty sample returns a zero-row DataFrame (consistent with the
+    other adapters in this module).
+    """
+    if not result.sample:
+        return pd.DataFrame()
+    return pd.DataFrame([match.model_dump(mode="json") for match in result.sample])
