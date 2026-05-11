@@ -83,14 +83,7 @@ StreamEvent = Annotated[
 # --- Final response --------------------------------------------------
 
 
-class Artifact(BaseModel):
-    """Variant definitions deferred to Phase 3 (chart, summary, dataframe).
-
-    For Phase 1 we only need the wrapper shape so AgentResponse validates.
-    """
-
-    artifact_type: str
-    payload: dict
+from agent.artifacts import Artifact  # noqa: E402  (kept here for forward-ref readability)
 
 
 class AgentResponse(BaseModel):

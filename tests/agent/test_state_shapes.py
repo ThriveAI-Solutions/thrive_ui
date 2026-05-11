@@ -6,8 +6,8 @@ from agent.state import (
     ToolCallCompleted,
     FinalResponseEvent,
     AgentResponse,
-    Artifact,
 )
+from agent.artifacts import Artifact
 
 
 def test_tool_call_started_event():
@@ -56,3 +56,37 @@ def test_tool_call_completed_carries_reliability_note():
         reliability_note="LOINC coverage ~50%",
     )
     assert evt.reliability_note == "LOINC coverage ~50%"
+
+
+def test_agent_response_artifacts_accepts_union_variants():
+    from agent.state import AgentResponse
+    from agent.artifacts import (
+        ChartArtifact,
+        DataFrameArtifact,
+        SqlArtifact,
+        SummaryArtifact,
+    )
+
+    response = AgentResponse(
+        text="ok",
+        artifacts=[
+            SqlArtifact(sql="SELECT 1"),
+            DataFrameArtifact(columns=["a"], rows=[[1]], row_count=1),
+            ChartArtifact(plotly_json="{}"),
+            SummaryArtifact(text="ok"),
+        ],
+    )
+    assert len(response.artifacts) == 4
+    assert response.artifacts[0].kind == "sql"
+    assert response.artifacts[1].kind == "dataframe"
+    assert response.artifacts[2].kind == "chart"
+    assert response.artifacts[3].kind == "summary"
+
+
+def test_agent_response_artifacts_rejects_unknown_variant():
+    import pytest
+    from pydantic import ValidationError
+    from agent.state import AgentResponse
+
+    with pytest.raises(ValidationError):
+        AgentResponse(text="ok", artifacts=[{"kind": "spaghetti"}])
