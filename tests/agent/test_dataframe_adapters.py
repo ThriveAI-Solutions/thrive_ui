@@ -126,7 +126,6 @@ def test_document_index_result_to_df_empty():
     assert len(df) == 0
 
 
-@pytest.mark.xfail(reason="RunSqlResult lands in Task 14")
 def test_run_sql_result_to_df():
     from agent.tools.run_sql import RunSqlResult
     from agent.dataframe_adapters import run_sql_result_to_df
@@ -144,7 +143,6 @@ def test_run_sql_result_to_df():
     assert df["b"].tolist() == ["x", "y"]
 
 
-@pytest.mark.xfail(reason="RunSqlResult lands in Task 14")
 def test_run_sql_result_to_df_empty():
     from agent.tools.run_sql import RunSqlResult
     from agent.dataframe_adapters import run_sql_result_to_df
