@@ -135,6 +135,14 @@ chart emphasizes (e.g., "glucose values over time", "encounter counts \
 per facility"). If no dataframe is available, make_chart will tell you; \
 run a data tool first.
 
+summarize_results produces a prose summary of the most recent dataframe. \
+Operates on the same last-dataframe slot as make_chart. Call when the \
+user asks for a summary, "what does this show", "describe", or \
+"interpret". The optional `focus` argument narrows the summary \
+(e.g., "outliers", "trend over time", "most recent value"). If no \
+dataframe is available, summarize_results will tell you; run a data \
+tool first.
+
 PRESENTING DATA (mandatory): when a tool returns data_availability=\
 data_present, your `final_result.text` MUST present the findings, not \
 describe their existence. Doctors using this platform need the data \

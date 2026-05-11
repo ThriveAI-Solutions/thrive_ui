@@ -46,3 +46,9 @@ def test_system_prompt_documents_make_chart():
     from agent.system_prompt import SYSTEM_PROMPT
 
     assert "make_chart" in SYSTEM_PROMPT
+
+
+def test_system_prompt_documents_summarize_results():
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    assert "summarize_results" in SYSTEM_PROMPT

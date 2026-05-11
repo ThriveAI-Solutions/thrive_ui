@@ -42,6 +42,7 @@ from agent.tools.make_chart import make_chart
 from agent.tools.run_sql import run_sql
 from agent.tools.search_codes import search_codes
 from agent.tools.search_knowledge_base import search_knowledge_base
+from agent.tools.summarize_results import summarize_results
 
 
 _DEFAULT_MAX_TOOL_CALLS = 7
@@ -138,6 +139,7 @@ class AgenticRunner:
         self._agent.tool(search_codes)
         self._agent.tool(run_sql)
         self._agent.tool(make_chart)
+        self._agent.tool(summarize_results)
 
     async def run(
         self,

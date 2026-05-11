@@ -98,3 +98,24 @@ def test_render_artifacts_emits_plotly_chart_for_chart_artifact():
     assert len(emitted) == 1
     # Message.type is stored as a string (the enum value)
     assert emitted[0].type == "plotly_chart"
+
+
+def test_render_artifacts_emits_summary_for_summary_artifact():
+    from utils.chat_bot_helper import render_agent_artifacts
+    from agent.state import AgentResponse
+    from agent.artifacts import SummaryArtifact
+    from unittest.mock import patch
+
+    response = AgentResponse(
+        text="here's a summary",
+        artifacts=[SummaryArtifact(text="five rows; mean=3")],
+    )
+
+    emitted: list = []
+    with patch("utils.chat_bot_helper.add_message", side_effect=emitted.append):
+        render_agent_artifacts(response, question="describe")
+
+    assert len(emitted) == 1
+    # Message.type is stored as a string (the enum value)
+    assert emitted[0].type == "summary"
+    assert emitted[0].content == "five rows; mean=3"

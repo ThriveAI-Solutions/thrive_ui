@@ -126,3 +126,12 @@ def test_runner_registers_make_chart():
     runner = AgenticRunner(model=TestModel())
     tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
     assert "make_chart" in tool_names
+
+
+def test_runner_registers_summarize_results():
+    from agent.runner import AgenticRunner
+    from pydantic_ai.models.test import TestModel
+
+    runner = AgenticRunner(model=TestModel())
+    tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
+    assert "summarize_results" in tool_names

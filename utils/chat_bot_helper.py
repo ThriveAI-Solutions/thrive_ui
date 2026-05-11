@@ -491,8 +491,18 @@ def render_agent_artifacts(response, question: str) -> None:
                 )
             )
         elif isinstance(artifact, SummaryArtifact):
-            # Wired in PR 5.
-            continue
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    artifact.text,
+                    MessageType.SUMMARY,
+                    None,
+                    question,
+                    None,
+                    0,
+                    group_id=get_current_group_id(),
+                )
+            )
 
 
 def set_question(question: str, render=True):
