@@ -112,8 +112,24 @@ ECONOMY OF TOOL CALLS:
     stop. Extra exploratory tool calls waste the user's time and risk \
     timing out.
 
-When the user asks a population question ("how many diabetics over 65"), \
-use `search_patients_by_criteria` (Phase 4 tool).
+search_patients_by_criteria is the POPULATION / COHORT tool. Use it when \
+the user asks about a group of patients rather than one specific patient.
+
+Distinguishing signals:
+  - POPULATION (use search_patients_by_criteria):
+    "how many patients...", "count of patients...", "find/list patients with...",
+    "show me 10 of...". The question is plural and not anchored to a specific
+    named patient.
+  - SPECIFIC-PATIENT (use find_patient + get_patient_clinical_data):
+    The user named a patient ("John Smith"), said "he/she", "the patient", or
+    "their X". Example: "how many medications is John taking?" is specific-patient
+    even though it has "how many".
+
+Do NOT call find_patient before search_patients_by_criteria. The cohort tool
+operates without a selected patient — that's the point.
+
+When the cohort tool returns a reliability_note (ICD-10 / RxNorm coverage \
+caveats), repeat that caveat verbatim to the user as part of the reply.
 
 run_sql IS AN ESCAPE HATCH. Use it only when the curated clinical tools \
 (get_patient_clinical_data, list_patient_documents, search_codes, \

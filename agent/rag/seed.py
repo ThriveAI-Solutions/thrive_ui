@@ -273,6 +273,34 @@ EXAMPLES_DOCS: List[_Doc] = [
             "via claims. Always surface the reliability_note from the result."
         ),
     },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'How many patients over 65 with diabetes at Kaleida last year?' "
+            "A: Call search_patients_by_criteria with diagnosis_codes=['E11.9'], "
+            "age_min=65, facility='Kaleida', diagnosis_date_range covering the last year, "
+            "sample_size=20. Surface the reliability_note (ICD-10 ~57% coverage)."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'Find me 10 patients on metformin.' "
+            "A: Call search_patients_by_criteria with medication_rxnorm_codes=['6809'], "
+            "sample_size=10. Do NOT call find_patient first."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'Active diabetic patients seen since 2025.' "
+            "A: Call search_patients_by_criteria with diagnosis_codes=['E11.9'], "
+            "last_visit_after=2025-01-01."
+        ),
+    },
 ]
 
 

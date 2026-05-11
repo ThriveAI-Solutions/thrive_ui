@@ -52,3 +52,12 @@ def test_system_prompt_documents_summarize_results():
     from agent.system_prompt import SYSTEM_PROMPT
 
     assert "summarize_results" in SYSTEM_PROMPT
+
+
+def test_system_prompt_documents_search_patients_by_criteria():
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    assert "search_patients_by_criteria" in SYSTEM_PROMPT
+    # The prompt must teach the population-vs-specific-patient routing rule
+    # (Phase 4 design §3.3). Look for either phrase, since wording can evolve.
+    assert "population" in SYSTEM_PROMPT.lower() or "cohort" in SYSTEM_PROMPT.lower()
