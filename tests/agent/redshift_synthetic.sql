@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS federated_orders_v;
 DROP TABLE IF EXISTS federated_vaccination_v;
 DROP TABLE IF EXISTS federated_vitals_v;
 DROP TABLE IF EXISTS federated_documents_v;
+DROP TABLE IF EXISTS federated_claims_icd_procedure_detail_v;
 DROP TABLE IF EXISTS metric_federated_data_v;
 
 -- Two patients named "John Smith" + one Jane Smith. Tests disambiguation.
