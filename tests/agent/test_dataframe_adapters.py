@@ -95,26 +95,35 @@ def test_clinical_result_to_df_demographics_single_row():
 
 
 def test_document_index_result_to_df():
-    from agent.tools.list_patient_documents import DocumentIndexResult, DocumentItem
+    from agent.tools.list_patient_documents import DocumentEntry, DocumentIndexResult
 
     result = DocumentIndexResult(
-        items=[
-            DocumentItem(
+        documents=[
+            DocumentEntry(
                 source_id="src-1",
-                document_date="2026-03-01",
-                document_name="H&P",
+                event_datetime="2026-03-01",
+                name="H&P",
                 mnemonic="HP",
+                status=None,
+                encounter_id=None,
                 place_of_service=None,
                 location_name=None,
-                encounter_id=None,
             )
         ],
-        row_count=1,
-        truncated=False,
+        data_availability="data_present",
     )
     df = document_index_result_to_df(result)
     assert len(df) == 1
-    assert df["document_name"].iloc[0] == "H&P"
+    assert df["name"].iloc[0] == "H&P"
+
+
+def test_document_index_result_to_df_empty():
+    from agent.tools.list_patient_documents import DocumentIndexResult
+
+    result = DocumentIndexResult(documents=[], data_availability="no_records_found")
+    df = document_index_result_to_df(result)
+    assert isinstance(df, pd.DataFrame)
+    assert len(df) == 0
 
 
 @pytest.mark.xfail(reason="RunSqlResult lands in Task 14")

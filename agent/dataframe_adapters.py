@@ -34,9 +34,9 @@ def clinical_result_to_df(result: "ClinicalResult") -> pd.DataFrame:
 
 
 def document_index_result_to_df(result: "DocumentIndexResult") -> pd.DataFrame:
-    if not result.items:
+    if not result.documents:
         return pd.DataFrame()
-    return pd.DataFrame([item.model_dump(mode="json") for item in result.items])
+    return pd.DataFrame([entry.model_dump(mode="json") for entry in result.documents])
 
 
 def run_sql_result_to_df(result: "RunSqlResult") -> pd.DataFrame:

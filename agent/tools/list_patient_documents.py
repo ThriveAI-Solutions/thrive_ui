@@ -36,26 +36,10 @@ class DocumentEntry(BaseModel):
     location_name: Optional[str]
 
 
-class DocumentItem(BaseModel):
-    """Flat document metadata row — used by DataFrame adapters and artifact layer."""
-
-    source_id: str
-    document_date: Optional[str]
-    document_name: Optional[str]
-    mnemonic: Optional[str]
-    place_of_service: Optional[str]
-    location_name: Optional[str]
-    encounter_id: Optional[str]
-
-
 class DocumentIndexResult(BaseModel):
-    documents: List[DocumentEntry] = []
-    data_availability: Literal["data_present", "no_records_found", "error"] = "no_records_found"
+    documents: List[DocumentEntry]
+    data_availability: Literal["data_present", "no_records_found", "error"]
     note: str = "Note bodies are not stored in this warehouse; retrieval requires HEALTHeLINK or source EHR access."
-    # Artifact-layer fields (used by DataFrame adapters and Task 8+)
-    items: List[DocumentItem] = []
-    row_count: int = 0
-    truncated: bool = False
 
 
 def list_patient_documents(
