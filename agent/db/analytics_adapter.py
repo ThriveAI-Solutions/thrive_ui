@@ -27,6 +27,31 @@ _FORBIDDEN_RE = re.compile(
 )
 
 
+def _inject_limit(sql: str, row_cap: int) -> str:
+    """Return SQL bounded by min(existing LIMIT, row_cap+1).
+
+    The +1 is a sentinel for truncation detection. The caller trims
+    the extra row and flips `truncated=True`.
+
+    If the SQL already has a LIMIT smaller than row_cap, leave it alone
+    (the user explicitly asked for fewer rows; respect that).
+    """
+    stripped = sql.rstrip().rstrip(";").rstrip()
+    limit_match = re.search(r"\blimit\b\s+(\d+)\s*$", stripped, re.IGNORECASE)
+    if limit_match:
+        user_limit = int(limit_match.group(1))
+        if user_limit <= row_cap:
+            return stripped
+        # User wrote LIMIT 9999 but our cap is 500 — replace with cap+1
+        return re.sub(
+            r"\blimit\b\s+\d+\s*$",
+            f"LIMIT {row_cap + 1}",
+            stripped,
+            flags=re.IGNORECASE,
+        )
+    return f"{stripped} LIMIT {row_cap + 1}"
+
+
 def _install_sqlite_query_only(engine: Engine) -> None:
     @event.listens_for(engine, "connect")
     def _set_query_only(dbapi_connection, connection_record):  # noqa: ARG001
@@ -89,6 +114,45 @@ class AnalyticsDbAdapter:
         with self.engine.connect() as conn:
             result = conn.execute(text(sql), params or {})
             return [dict(row._mapping) for row in result]
+
+    def run_arbitrary_sql(
+        self,
+        sql: str,
+        row_cap: int,
+        timeout_s: int,
+    ) -> tuple[list[str], list[list], bool]:
+        """Execute caller-supplied SQL with row cap + timeout.
+
+        Returns (columns, rows, truncated). Rows is a list of lists
+        (positional values matching `columns`), to keep the boundary
+        explicit and friendly for JSON serialization downstream.
+
+        Defenses (Phase 3 design §3.4):
+          1. _FORBIDDEN_RE rejects writes before the query hits the engine.
+          2. LIMIT injection: if there's no LIMIT, append LIMIT row_cap+1;
+             otherwise keep the smaller of the user's LIMIT and row_cap.
+          3. Statement timeout: SET statement_timeout = <ms> for
+             postgres/redshift sessions. SQLite has no equivalent and
+             relies on the row cap.
+          4. Truncation flag: if row_cap+1 rows were returned, drop the
+             last one and mark truncated=True.
+        """
+        if _FORBIDDEN_RE.search(sql):
+            raise ValueError("Adapter is read-only; statement contains write keyword.")
+
+        bounded_sql = _inject_limit(sql, row_cap)
+        self.sql_log.append({"sql": bounded_sql, "params": {}})
+
+        with self.engine.connect() as conn:
+            if self.dialect in ("postgres", "redshift"):
+                conn.exec_driver_sql(f"SET statement_timeout = {int(timeout_s * 1000)}")
+            cursor_result = conn.execute(text(bounded_sql))
+            columns = list(cursor_result.keys())
+            raw_rows = [list(row) for row in cursor_result.fetchall()]
+
+        if len(raw_rows) > row_cap:
+            return columns, raw_rows[:row_cap], True
+        return columns, raw_rows, False
 
     def pop_sql_log(self) -> list[dict]:
         """Return the accumulated SQL log and reset it.
