@@ -80,6 +80,43 @@ class CohortSampleEvent(BaseModel):
     payload: dict  # CohortResult shape (total_count, sample, data_availability, reliability_note)
 
 
+class ThinkingDeltaEvent(BaseModel):
+    """One chunk of reasoning text from the model's current turn.
+
+    Emitted while a ModelRequest node is streaming a ThinkingPart.
+    Renderer accumulates these into a transient placeholder so the
+    user can watch the model reason instead of staring at a frozen UI.
+    """
+
+    kind: Literal["thinking_delta"] = "thinking_delta"
+    delta: str
+    turn_index: int  # which model_request_node this delta belongs to
+
+
+class ThinkingCompletedEvent(BaseModel):
+    """End of the current turn's thinking. Carries the full accumulated
+    text so the renderer can persist it as a MessageType.THINKING row
+    that survives Streamlit reruns.
+    """
+
+    kind: Literal["thinking_completed"] = "thinking_completed"
+    text: str
+    elapsed_ms: int
+    turn_index: int
+
+
+class AssistantTextDeltaEvent(BaseModel):
+    """Plain assistant text emitted between tool calls (rare with
+    output_type=AgentResponse, but possible). Rendered live in the
+    same placeholder as thinking; not persisted because the final
+    response covers it.
+    """
+
+    kind: Literal["assistant_text_delta"] = "assistant_text_delta"
+    delta: str
+    turn_index: int
+
+
 StreamEvent = Annotated[
     Union[
         ToolCallStarted,
@@ -88,6 +125,9 @@ StreamEvent = Annotated[
         CapReachedEvent,
         PatientChooserEvent,
         CohortSampleEvent,
+        ThinkingDeltaEvent,
+        ThinkingCompletedEvent,
+        AssistantTextDeltaEvent,
     ],
     Field(discriminator="kind"),
 ]

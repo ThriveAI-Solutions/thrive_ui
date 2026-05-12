@@ -16,7 +16,7 @@ Import notes (pydantic-ai 1.0.8):
 from __future__ import annotations
 from typing import Any, Literal
 
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -46,9 +46,17 @@ def build_model() -> Any:
     if provider == "ollama":
         host = ai_keys.get("ollama_host", "http://localhost:11434")
         model_name = ai_keys.get("ollama_model", "qwen3.6:27b")
+        # Ollama's OpenAI-compat layer surfaces reasoning as ThinkingPart only
+        # when `think=True` is forwarded in the request body. Non-thinking
+        # models silently ignore it, so it's safe to leave on by default.
+        # Override per deployment via [agent].ollama_think = false.
+        agent_cfg = secrets.get("agent", {})
+        think_enabled = bool(agent_cfg.get("ollama_think", True))
+        settings = OpenAIChatModelSettings(extra_body={"think": True}) if think_enabled else None
         return OpenAIChatModel(
             model_name,
             provider=OpenAIProvider(base_url=f"{host.rstrip('/')}/v1"),
+            settings=settings,
         )
 
     if provider == "anthropic":

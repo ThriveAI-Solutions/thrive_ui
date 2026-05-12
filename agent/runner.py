@@ -19,6 +19,14 @@ from pydantic_ai import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
 )
+from pydantic_ai.messages import (
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
+    ThinkingPart,
+    ThinkingPartDelta,
+)
 from pydantic_ai.models import Model
 
 from agent.audit import summarize_result
@@ -27,11 +35,14 @@ from agent.instructions import selection_instructions
 from agent.models import build_model
 from agent.state import (
     AgentResponse,
+    AssistantTextDeltaEvent,
     CapReachedEvent,
     CohortSampleEvent,
     FinalResponseEvent,
     PatientChooserEvent,
     StreamEvent,
+    ThinkingCompletedEvent,
+    ThinkingDeltaEvent,
     ToolCallCompleted,
     ToolCallStarted,
 )
@@ -186,6 +197,8 @@ class AgenticRunner:
         loop = asyncio.get_event_loop()
         start = loop.time()
         tool_count = 0
+        turn_index = 0  # increments per model_request_node so the renderer
+        # can scope a transient placeholder to one turn's reasoning
         wall_clock_cap = _max_wall_clock_s()
         tool_call_cap = _max_tool_calls()
         # tool_call_id -> {tool_name, args, started_at, started_perf}
@@ -200,6 +213,79 @@ class AgenticRunner:
                 if loop.time() - start > wall_clock_cap:
                     yield CapReachedEvent(reason="wall_clock")
                     return
+
+                if Agent.is_model_request_node(node):
+                    # Stream reasoning + plain text deltas from the model so
+                    # the UI shows signs of life instead of dead air. Tool
+                    # call parts are NOT consumed here — they're handled by
+                    # the call_tools_node branch below via the normal
+                    # FunctionToolCallEvent flow.
+                    turn_index += 1
+                    thinking_buf = ""
+                    thinking_started_perf: float | None = None
+                    try:
+                        async with node.stream(run.ctx) as req_stream:
+                            async for ev in req_stream:
+                                if isinstance(ev, PartStartEvent):
+                                    if isinstance(ev.part, ThinkingPart):
+                                        if thinking_started_perf is None:
+                                            thinking_started_perf = loop.time()
+                                        initial = ev.part.content or ""
+                                        if initial:
+                                            thinking_buf += initial
+                                            yield ThinkingDeltaEvent(
+                                                delta=initial,
+                                                turn_index=turn_index,
+                                            )
+                                    elif isinstance(ev.part, TextPart):
+                                        initial = ev.part.content or ""
+                                        if initial:
+                                            yield AssistantTextDeltaEvent(
+                                                delta=initial,
+                                                turn_index=turn_index,
+                                            )
+                                elif isinstance(ev, PartDeltaEvent):
+                                    if isinstance(ev.delta, ThinkingPartDelta):
+                                        chunk = ev.delta.content_delta or ""
+                                        if chunk:
+                                            if thinking_started_perf is None:
+                                                thinking_started_perf = loop.time()
+                                            thinking_buf += chunk
+                                            yield ThinkingDeltaEvent(
+                                                delta=chunk,
+                                                turn_index=turn_index,
+                                            )
+                                    elif isinstance(ev.delta, TextPartDelta):
+                                        chunk = ev.delta.content_delta or ""
+                                        if chunk:
+                                            yield AssistantTextDeltaEvent(
+                                                delta=chunk,
+                                                turn_index=turn_index,
+                                            )
+                                # PartEndEvent and other events are ignored:
+                                # we close the buffers after the stream exits.
+                    except AssertionError as e:
+                        # FunctionModel test stubs without stream_function raise
+                        # AssertionError mentioning `stream_function` on entry.
+                        # Catch only that exact case so real invariant failures
+                        # in pydantic-ai (malformed deltas, broken adapters)
+                        # still propagate instead of being silently swallowed.
+                        # Iteration advances internally even when we skip the
+                        # streaming surface, so the run completes normally
+                        # without any thinking events for this turn.
+                        if "stream_function" not in str(e):
+                            raise
+                    if thinking_buf:
+                        elapsed_ms = max(
+                            0,
+                            int((loop.time() - (thinking_started_perf or loop.time())) * 1000),
+                        )
+                        yield ThinkingCompletedEvent(
+                            text=thinking_buf,
+                            elapsed_ms=elapsed_ms,
+                            turn_index=turn_index,
+                        )
+                    continue
 
                 if Agent.is_call_tools_node(node):
                     async with node.stream(run.ctx) as handle_stream:

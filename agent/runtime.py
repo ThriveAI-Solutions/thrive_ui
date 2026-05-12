@@ -17,11 +17,14 @@ from agent.observability import configure_observability
 from agent.runner import AgenticRunner
 from agent.state import (
     AgentResponse,
+    AssistantTextDeltaEvent,
     CapReachedEvent,
     CohortSampleEvent,
     FinalResponseEvent,
     PatientChooserEvent,
     StreamEvent,
+    ThinkingCompletedEvent,
+    ThinkingDeltaEvent,
     ToolCallCompleted,
     ToolCallStarted,
 )
@@ -130,8 +133,18 @@ def run_agentic_message_flow(my_question: str) -> None:
             prior_history = st.session_state.get("agent_message_history") or None
 
             async def consume() -> None:
-                async for event in runner.stream(my_question, deps=deps, message_history=prior_history):
-                    _render_event(event)
+                # Per-flow state for live placeholders. Two buckets keyed by
+                # turn_index so thinking and plain assistant text get distinct
+                # chat_message containers (different headers, different
+                # lifecycles). The finally block drains anything still open
+                # if the generator dies mid-stream — otherwise a partial
+                # "🤔 Thinking..." panel would stay frozen on screen.
+                renderer_state: dict[str, Any] = {"thinking": {}, "text": {}}
+                try:
+                    async for event in runner.stream(my_question, deps=deps, message_history=prior_history):
+                        _render_event(event, renderer_state)
+                finally:
+                    _drain_placeholders(renderer_state)
 
             _run_async(consume())
             sqlite_session.commit()
@@ -142,8 +155,71 @@ def run_agentic_message_flow(my_question: str) -> None:
         st.session_state["my_question"] = None
 
 
-def _render_event(event: StreamEvent) -> None:
+def _drain_placeholders(state: dict[str, Any]) -> None:
+    """Clear any open transient placeholders. Called from a finally block in
+    consume() so a mid-stream death (CapReachedEvent, exception, network
+    drop) doesn't leave a partial "🤔 Thinking..." panel frozen on screen.
+    Idempotent — safe to call multiple times."""
+    for bucket in ("thinking", "text"):
+        slots = state.get(bucket) or {}
+        for slot in slots.values():
+            try:
+                slot["placeholder"].empty()
+            except Exception:
+                pass
+        slots.clear()
+
+
+def _open_slot(state: dict[str, Any], bucket: str, turn_index: int) -> dict[str, Any]:
+    """Return the existing live-update slot for (bucket, turn_index), or
+    create one with a fresh chat_message + st.empty() placeholder."""
+    slot = state[bucket].get(turn_index)
+    if slot is None:
+        container = st.chat_message(RoleType.ASSISTANT.value)
+        slot = {"placeholder": container.empty(), "buf": ""}
+        state[bucket][turn_index] = slot
+    return slot
+
+
+def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> None:
     from utils.chat_bot_helper import add_message
+
+    state = state if state is not None else {"thinking": {}, "text": {}}
+    state.setdefault("thinking", {})
+    state.setdefault("text", {})
+
+    if isinstance(event, ThinkingDeltaEvent):
+        slot = _open_slot(state, "thinking", event.turn_index)
+        slot["buf"] += event.delta
+        slot["placeholder"].markdown("🤔 **Thinking...**\n\n" + slot["buf"])
+        return
+
+    if isinstance(event, AssistantTextDeltaEvent):
+        # Plain assistant narration between tool calls. Lives in its own
+        # bucket with no "Thinking..." header so the user can tell the two
+        # apart at a glance. Not persisted — the FinalResponseEvent's TEXT
+        # row covers it on rerun.
+        slot = _open_slot(state, "text", event.turn_index)
+        slot["buf"] += event.delta
+        slot["placeholder"].markdown(slot["buf"])
+        return
+
+    if isinstance(event, ThinkingCompletedEvent):
+        slot = state["thinking"].pop(event.turn_index, None)
+        if slot is not None:
+            # Drop the transient placeholder; the persisted MessageType.THINKING
+            # row that follows replaces it visually.
+            slot["placeholder"].empty()
+        if event.text.strip():
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    event.text,
+                    MessageType.THINKING,
+                    elapsed_time=event.elapsed_ms / 1000.0,
+                )
+            )
+        return
 
     if isinstance(event, ToolCallStarted):
         # In-flight tool call card.
@@ -218,6 +294,10 @@ def _render_event(event: StreamEvent) -> None:
         return
 
     if isinstance(event, FinalResponseEvent):
+        # Drain any open transient placeholders before the final TEXT row
+        # lands, otherwise a plain-text live preview would briefly double up
+        # with the persisted answer.
+        _drain_placeholders(state)
         response = event.response
         add_message(
             Message(
@@ -263,6 +343,8 @@ def _render_event(event: StreamEvent) -> None:
         return
 
     if isinstance(event, CapReachedEvent):
+        # Cap fires mid-stream; clear any frozen "Thinking..." panels first.
+        _drain_placeholders(state)
         add_message(
             Message(
                 RoleType.ASSISTANT,
