@@ -14,6 +14,8 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from agent.result_compaction import CompactingListResult
+
 
 class DateRange(BaseModel):
     start: Optional[date] = None
@@ -43,7 +45,9 @@ class PatientMatch(BaseModel):
     practice_name: Optional[str] = None
 
 
-class CohortResult(BaseModel):
+class CohortResult(CompactingListResult):
+    _list_field = "sample"
+
     total_count: int
     sample: List[PatientMatch]
     data_availability: Literal["data_present", "no_records_found", "error"]

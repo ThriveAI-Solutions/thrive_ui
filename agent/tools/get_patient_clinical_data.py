@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import ModelRetry, RunContext
 
 from agent.deps import AgentDeps
+from agent.result_compaction import CompactingListResult
 from agent.db.queries.clinical import demographics_sql, encounters_sql
 from agent.db.queries.labs import labs_sql
 from agent.db.queries.diagnoses import diagnoses_sql
@@ -234,7 +235,9 @@ ClinicalItem = Annotated[
 ]
 
 
-class ClinicalResult(BaseModel):
+class ClinicalResult(CompactingListResult):
+    _list_field = "items"
+
     domain: str
     items: List[ClinicalItem]
     data_availability: DataAvailability

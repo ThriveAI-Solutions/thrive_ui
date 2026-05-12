@@ -13,6 +13,7 @@ from pydantic_ai import RunContext
 
 from agent.deps import AgentDeps
 from agent.db.queries.patient import find_patient_sql, related_source_ids_sql
+from agent.result_compaction import CompactingListResult
 
 
 class PatientSearchQuery(BaseModel):
@@ -35,7 +36,9 @@ class PatientMatch(BaseModel):
     most_recent_activity: Optional[date]
 
 
-class PatientSearchResults(BaseModel):
+class PatientSearchResults(CompactingListResult):
+    _list_field = "matches"
+
     matches: List[PatientMatch]
     total_unique: int
     truncated: bool

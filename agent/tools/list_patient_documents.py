@@ -14,6 +14,7 @@ from pydantic_ai import ModelRetry, RunContext
 from agent.deps import AgentDeps
 from agent.db.queries.documents import documents_sql
 from agent.dataframe_adapters import document_index_result_to_df
+from agent.result_compaction import CompactingListResult
 
 
 class DateRange(BaseModel):
@@ -37,7 +38,9 @@ class DocumentEntry(BaseModel):
     location_name: Optional[str]
 
 
-class DocumentIndexResult(BaseModel):
+class DocumentIndexResult(CompactingListResult):
+    _list_field = "documents"
+
     documents: List[DocumentEntry]
     data_availability: Literal["data_present", "no_records_found", "error"]
     note: str = "Note bodies are not stored in this warehouse; retrieval requires HEALTHeLINK or source EHR access."
