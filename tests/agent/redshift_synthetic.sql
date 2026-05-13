@@ -81,12 +81,13 @@ CREATE TABLE federated_demographic_v (
     first_name TEXT,
     last_name TEXT,
     date_of_birth DATE,
-    gender TEXT
+    gender TEXT,
+    address TEXT
 );
 INSERT INTO federated_demographic_v VALUES
-    ('src-john-1962', '1', 'John', 'Smith', '1962-05-01', 'M'),
-    ('src-john-1971', '2', 'John', 'Smith', '1971-08-12', 'M'),
-    ('src-jane-1985', '3', 'Jane', 'Smith', '1985-02-20', 'F');
+    ('src-john-1962', '1', 'John', 'Smith', '1962-05-01', 'M', '12 Elm St, Buffalo NY 14223'),
+    ('src-john-1971', '2', 'John', 'Smith', '1971-08-12', 'M', '88 Oak Ave, Buffalo NY 14201'),
+    ('src-jane-1985', '3', 'Jane', 'Smith', '1985-02-20', 'F', '440 Pine Rd, Pittsburgh PA 15213');
 
 -- Phase 2 domains -----------------------------------------------------
 
