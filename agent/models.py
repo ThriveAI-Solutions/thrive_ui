@@ -46,9 +46,13 @@ def build_model() -> Any:
     if provider == "ollama":
         host = ai_keys.get("ollama_host", "http://localhost:11434")
         model_name = ai_keys.get("ollama_model", "qwen3.6:27b")
-        # Ollama's OpenAI-compat layer surfaces reasoning as ThinkingPart only
-        # when `think=True` is forwarded in the request body. Non-thinking
-        # models silently ignore it, so it's safe to leave on by default.
+        # Ollama's OpenAI-compat layer forwards `think` from extra_body to
+        # /api/chat. Per Ollama docs, the `think` field is a boolean: true
+        # surfaces ThinkingPart deltas, false disables thinking. Hybrid
+        # models like qwen3.6 default to thinking-ON when the field is
+        # absent, so we MUST send the explicit boolean — omitting it lets
+        # the model keep thinking. Non-thinking models ignore the field
+        # either way.
         # Two-level config so a deployment can rotate models with different
         # thinking semantics (e.g. qwen3.6 off for tool-call accuracy,
         # gpt-oss on for chain-of-thought):
@@ -61,7 +65,7 @@ def build_model() -> Any:
             think_enabled = bool(per_model[model_name])
         else:
             think_enabled = bool(agent_cfg.get("ollama_think", True))
-        settings = OpenAIChatModelSettings(extra_body={"think": True}) if think_enabled else None
+        settings = OpenAIChatModelSettings(extra_body={"think": think_enabled})
         return OpenAIChatModel(
             model_name,
             provider=OpenAIProvider(base_url=f"{host.rstrip('/')}/v1"),

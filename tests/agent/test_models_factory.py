@@ -65,12 +65,15 @@ def test_build_model_ollama_thinking_on_by_default(monkeypatch):
 
 
 def test_build_model_ollama_global_think_off(monkeypatch):
+    """Disabled path must send `think: false` explicitly — qwen3 hybrid
+    models default to thinking-ON when the field is absent, so omitting
+    it is not equivalent to disabling."""
     monkeypatch.setattr(
         "agent.models._read_secrets",
         lambda: _ollama_secrets("qwen3.6:27b", {"ollama_think": False}),
     )
     model = build_model()
-    assert model.settings is None
+    assert model.settings == {"extra_body": {"think": False}}
 
 
 def test_build_model_ollama_per_model_disables_thinking(monkeypatch):
@@ -82,7 +85,7 @@ def test_build_model_ollama_per_model_disables_thinking(monkeypatch):
         ),
     )
     model = build_model()
-    assert model.settings is None
+    assert model.settings == {"extra_body": {"think": False}}
 
 
 def test_build_model_ollama_per_model_overrides_global_off(monkeypatch):
@@ -107,4 +110,4 @@ def test_build_model_ollama_per_model_miss_falls_back_to_global(monkeypatch):
         ),
     )
     model = build_model()
-    assert model.settings is None
+    assert model.settings == {"extra_body": {"think": False}}
