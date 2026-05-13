@@ -46,3 +46,65 @@ def test_build_model_unknown_provider_raises(monkeypatch):
     )
     with pytest.raises(ValueError, match="Unknown provider"):
         build_model()
+
+
+def _ollama_secrets(model_name: str, agent_cfg: dict) -> dict:
+    return {
+        "ai_keys": {"provider": "ollama", "ollama_model": model_name},
+        "agent": agent_cfg,
+    }
+
+
+def test_build_model_ollama_thinking_on_by_default(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: _ollama_secrets("qwen3.6:27b", {}),
+    )
+    model = build_model()
+    assert model.settings == {"extra_body": {"think": True}}
+
+
+def test_build_model_ollama_global_think_off(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: _ollama_secrets("qwen3.6:27b", {"ollama_think": False}),
+    )
+    model = build_model()
+    assert model.settings is None
+
+
+def test_build_model_ollama_per_model_disables_thinking(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: _ollama_secrets(
+            "qwen3.6:27b",
+            {"ollama_think": True, "ollama_think_per_model": {"qwen3.6:27b": False}},
+        ),
+    )
+    model = build_model()
+    assert model.settings is None
+
+
+def test_build_model_ollama_per_model_overrides_global_off(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: _ollama_secrets(
+            "gpt-oss:20b",
+            {"ollama_think": False, "ollama_think_per_model": {"gpt-oss:20b": True}},
+        ),
+    )
+    model = build_model()
+    assert model.settings == {"extra_body": {"think": True}}
+
+
+def test_build_model_ollama_per_model_miss_falls_back_to_global(monkeypatch):
+    """Model not present in per-model map should use the global default."""
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: _ollama_secrets(
+            "gemma4:26b",
+            {"ollama_think": False, "ollama_think_per_model": {"qwen3.6:27b": True}},
+        ),
+    )
+    model = build_model()
+    assert model.settings is None

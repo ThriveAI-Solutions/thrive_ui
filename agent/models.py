@@ -49,9 +49,18 @@ def build_model() -> Any:
         # Ollama's OpenAI-compat layer surfaces reasoning as ThinkingPart only
         # when `think=True` is forwarded in the request body. Non-thinking
         # models silently ignore it, so it's safe to leave on by default.
-        # Override per deployment via [agent].ollama_think = false.
+        # Two-level config so a deployment can rotate models with different
+        # thinking semantics (e.g. qwen3.6 off for tool-call accuracy,
+        # gpt-oss on for chain-of-thought):
+        #   [agent].ollama_think                — global default (default True)
+        #   [agent.ollama_think_per_model]      — map of model_name -> bool,
+        #                                         overrides the global default
         agent_cfg = secrets.get("agent", {})
-        think_enabled = bool(agent_cfg.get("ollama_think", True))
+        per_model = agent_cfg.get("ollama_think_per_model", {}) or {}
+        if model_name in per_model:
+            think_enabled = bool(per_model[model_name])
+        else:
+            think_enabled = bool(agent_cfg.get("ollama_think", True))
         settings = OpenAIChatModelSettings(extra_body={"think": True}) if think_enabled else None
         return OpenAIChatModel(
             model_name,
