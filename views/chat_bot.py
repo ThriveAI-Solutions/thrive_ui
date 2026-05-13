@@ -70,26 +70,18 @@ def _clear_selected_patient() -> None:
         st.session_state.pop(k, None)
 
 
-def _render_selected_patient_banner() -> None:
+def _render_selected_patient_sidebar() -> None:
     src = st.session_state.get("selected_patient_source_id")
     if not src:
         return
     name = st.session_state.get("selected_patient_display_name", "Unknown")
     dob = st.session_state.get("selected_patient_dob", "")
-    src_short = (src[:10] + "...") if len(src) > 13 else src
 
-    with st.container(border=True):
-        col_label, col_switch, col_clear = st.columns([6, 1, 1])
-        with col_label:
-            st.markdown(f"📋 **Selected:** {name}" + (f" (b. {dob})" if dob else "") + f" · `{src_short}`")
-        with col_switch:
-            if st.button("Switch", key="switch_patient_btn"):
-                _clear_selected_patient()
-                st.rerun()
-        with col_clear:
-            if st.button("Clear", key="clear_patient_btn"):
-                _clear_selected_patient()
-                st.rerun()
+    with st.sidebar.container(border=True):
+        st.markdown(f"📋 **{name}**" + (f"  \n_b. {dob}_" if dob else ""))
+        if st.button("Clear patient", key="clear_patient_sidebar_btn", width="stretch"):
+            _clear_selected_patient()
+            st.rerun()
 
 
 set_user_preferences_in_session_state()
@@ -116,6 +108,8 @@ if len(st.session_state.messages) > max_messages:
 
 
 st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
+
+_render_selected_patient_sidebar()
 
 # LLM Selection UI
 with st.sidebar.expander("🤖 LLM Selection", expanded=False):
@@ -425,8 +419,6 @@ if st.session_state.get("show_question_history", True):
 if st.session_state.messages == []:
     with st.chat_message(RoleType.ASSISTANT.value):
         st.markdown("Ask me a question about your data")
-
-_render_selected_patient_banner()
 
 # Populate messages in a dedicated container so we can keep a footer below
 messages_container = st.container()
