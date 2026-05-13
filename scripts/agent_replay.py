@@ -37,9 +37,11 @@ import chromadb  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
+from datetime import date, datetime  # noqa: E402
+
 from agent.audit import AuditLogger  # noqa: E402
 from agent.db.analytics_adapter import AnalyticsDbAdapter  # noqa: E402
-from agent.deps import AgentDeps  # noqa: E402
+from agent.deps import AgentDeps, SelectedPatient  # noqa: E402
 from agent.rag.chroma_adapter import ChromaRagAdapter  # noqa: E402
 from agent.runner import AgenticRunner  # noqa: E402
 from agent.state import (  # noqa: E402
@@ -203,15 +205,47 @@ def _format_sql_block(sql: str, params: dict | None) -> list[str]:
     return lines
 
 
+def _auto_select_first(payload: dict) -> SelectedPatient | None:
+    """Pick the first patient from a find_patient chooser payload, mimicking
+    what the UI does when the user clicks the top row. Without this in the
+    CLI, follow-up clinical-data turns refuse with 'no patient slot.'"""
+    matches = payload.get("matches") or payload.get("sample") or []
+    if not isinstance(matches, list) or not matches:
+        return None
+    first = matches[0]
+    if not isinstance(first, dict):
+        return None
+    src = first.get("source_id")
+    if not src:
+        return None
+    raw_dob = first.get("dob") or first.get("date_of_birth")
+    parsed_dob = None
+    if raw_dob:
+        try:
+            parsed_dob = date.fromisoformat(raw_dob) if isinstance(raw_dob, str) else raw_dob
+        except (TypeError, ValueError):
+            parsed_dob = None
+    return SelectedPatient(
+        source_id=src,
+        display_name=first.get("display_name") or first.get("full_name") or "",
+        dob=parsed_dob,
+        selected_at=datetime.now(),
+        selection_origin="agent_disambiguation",
+    )
+
+
 async def _run_one_turn(
     runner: AgenticRunner,
     question: str,
     deps: AgentDeps,
     message_history: list | None,
+    auto_select: bool,
 ) -> tuple[object | None, str | None, list]:
     """Stream a single agent turn and print events. Returns
     (final_response, cap_reason, all_messages) — all_messages is the full
-    pydantic-ai message log to thread into the next turn's message_history."""
+    pydantic-ai message log to thread into the next turn's message_history.
+    When auto_select is True, populate deps.selected_patient on first
+    PatientChooserEvent so follow-up clinical questions can proceed."""
     final_response = None
     cap_reason = None
     all_messages: list = []
@@ -259,6 +293,13 @@ async def _run_one_turn(
         elif isinstance(ev, PatientChooserEvent):
             n = ev.payload.get("total_unique", 0) if isinstance(ev.payload, dict) else 0
             print(f"   {C.MAGENTA}👥 patient chooser surfaced ({n} unique matches){C.RESET}")
+            if auto_select and isinstance(ev.payload, dict) and deps.selected_patient is None:
+                picked = _auto_select_first(ev.payload)
+                if picked is not None:
+                    deps.selected_patient = picked
+                    print(
+                        f"   {C.MAGENTA}↳ auto-selected: {picked.display_name} (source_id={picked.source_id}){C.RESET}"
+                    )
 
         elif isinstance(ev, CohortSampleEvent):
             sample = ev.payload.get("sample", []) if isinstance(ev.payload, dict) else []
@@ -283,7 +324,7 @@ async def _run_one_turn(
     return final_response, cap_reason, all_messages
 
 
-async def _replay(questions: list[str], model_override: str | None, role: str) -> int:
+async def _replay(questions: list[str], model_override: str | None, role: str, auto_select: bool) -> int:
     """Run one or more turns through the same deps + runner, threading
     message_history between turns so follow-up questions see prior context
     (the same way the Streamlit UI does)."""
@@ -301,6 +342,8 @@ async def _replay(questions: list[str], model_override: str | None, role: str) -
         print(f"  {C.DIM}model:{C.RESET}     {model_override} (CLI override)")
     print(f"  {C.DIM}session:{C.RESET}   {deps.session_id}")
     print(f"  {C.DIM}turns:{C.RESET}     {len(questions)}")
+    if auto_select:
+        print(f"  {C.DIM}select:{C.RESET}    auto-pick first patient on chooser")
     print()
 
     message_history: list | None = None
@@ -312,7 +355,9 @@ async def _replay(questions: list[str], model_override: str | None, role: str) -
             print(f"  {C.DIM}history:{C.RESET}   {len(message_history)} prior messages threaded")
         print()
 
-        final_response, cap_reason, all_messages = await _run_one_turn(runner, question, deps, message_history)
+        final_response, cap_reason, all_messages = await _run_one_turn(
+            runner, question, deps, message_history, auto_select
+        )
 
         # Promote the worst exit status seen across all turns.
         if cap_reason:
@@ -356,6 +401,13 @@ def main() -> int:
         help="Synthetic user role for the replay (default: doctor).",
     )
     parser.add_argument(
+        "--auto-select",
+        action="store_true",
+        help="When find_patient surfaces a chooser, auto-pick the first match (mimics "
+        "the user clicking the top row in the live UI). Without this, follow-up "
+        "clinical-data turns refuse with 'no patient slot.'",
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="Disable ANSI colors (auto-disabled when piped).",
@@ -366,7 +418,7 @@ def main() -> int:
         _disable_color()
 
     questions = [args.question, *args.then]
-    return asyncio.run(_replay(questions, args.model, args.user_role))
+    return asyncio.run(_replay(questions, args.model, args.user_role, args.auto_select))
 
 
 if __name__ == "__main__":
