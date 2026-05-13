@@ -36,6 +36,9 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
             getattr(criteria, "facility", None),
             getattr(criteria, "last_visit_after", None),
             getattr(criteria, "last_visit_before", None),
+            getattr(criteria, "zip_code", None),
+            getattr(criteria, "city", None),
+            getattr(criteria, "state", None),
         )
     ):
         raise ValueError("cohort_sql requires at least one search criterion; refusing to issue an unfiltered scan.")
@@ -80,6 +83,25 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
             f"JOIN (SELECT DISTINCT patient_id FROM {schema_prefix}metric_federated_data_v "
             f"WHERE code IN ({placeholders}) "
             f"AND code_type IN ('RxNorm', 'NDC')) med ON med.patient_id = p.patient_id"
+        )
+
+    # --- geographic filters (JOIN federated_demographic_v on source_id) -
+    geo_clauses: list[str] = []
+    if getattr(criteria, "zip_code", None):
+        geo_clauses.append("LOWER(d.address) LIKE :geo_zip")
+        params["geo_zip"] = f"%{criteria.zip_code.lower()}%"
+    if getattr(criteria, "city", None):
+        geo_clauses.append("LOWER(d.address) LIKE :geo_city")
+        params["geo_city"] = f"%{criteria.city.lower()}%"
+    if getattr(criteria, "state", None):
+        geo_clauses.append("LOWER(d.address) LIKE :geo_state")
+        # Bracket the 2-letter code with spaces to reduce false matches
+        # like "CA" inside "Cathedral".
+        params["geo_state"] = f"% {criteria.state.lower()} %"
+    if geo_clauses:
+        join_clauses.append(
+            f"JOIN {schema_prefix}federated_demographic_v d "
+            f"ON d.source_id = isr.source_id AND " + " AND ".join(geo_clauses)
         )
 
     # --- demographic / visit filters ----------------------------------
