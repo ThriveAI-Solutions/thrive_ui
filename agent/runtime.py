@@ -98,8 +98,10 @@ def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
 def run_agentic_message_flow(my_question: str) -> None:
     """Drop-in replacement for the Vanna branch in normal_message_flow.
 
-    Renders user message, runs the agent with streaming, persists
-    each tool call and the final response as orm.Message rows.
+    Runs the agent with streaming and persists each tool call and the
+    final response as orm.Message rows. The USER row for `my_question`
+    is already in session_state.messages — set_question() at
+    chat_bot_helper.py:535 wrote it before the rerun landed us here.
 
     Multi-turn continuity: prior `agent_message_history` (list of
     pydantic-ai ModelMessage) is threaded into the run; the post-run
@@ -107,25 +109,14 @@ def run_agentic_message_flow(my_question: str) -> None:
     as `pending_user_question` so the patient-chooser click handler
     can re-trigger this flow with the same prompt.
     """
-    from utils.chat_bot_helper import add_message
-
     # Stash the question for chooser-click resume before any errors can
     # short-circuit us out.
     st.session_state["pending_user_question"] = my_question
 
-    # Outer try ensures my_question is always cleared, even if
-    # add_message or SessionLocal raises before we reach the agent
-    # call — otherwise the chat_bot.py loop would re-fire the same
-    # question on the next rerun and the user would see no response.
+    # Outer try ensures my_question is always cleared even if the agent
+    # call raises — otherwise the chat_bot.py loop would re-fire the
+    # same question on the next rerun and the user would see no response.
     try:
-        add_message(
-            Message(
-                RoleType.USER,
-                my_question,
-                MessageType.TEXT,
-            )
-        )
-
         sqlite_session = SessionLocal()
         try:
             deps = build_agent_deps(sqlite_session)
