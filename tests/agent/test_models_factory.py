@@ -1,5 +1,9 @@
+import json
+
+import httpx
 import pytest
-from agent.models import build_model
+
+from agent.models import _sanitize_null_content, build_model
 
 
 def test_build_model_ollama(monkeypatch):
@@ -98,6 +102,72 @@ def test_build_model_ollama_per_model_overrides_global_off(monkeypatch):
     )
     model = build_model()
     assert model.settings == {"extra_body": {"reasoning_effort": "high"}}
+
+
+def _build_chat_request(body: dict, *, path: str = "/v1/chat/completions") -> httpx.Request:
+    return httpx.Request(
+        "POST",
+        f"http://aillm01:11434{path}",
+        content=json.dumps(body).encode(),
+        headers={"content-type": "application/json"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_sanitize_rewrites_null_content_to_empty_string():
+    """Ollama 0.23.x rejects content:null; ensure the hook rewrites
+    every null-content message in-place before the request goes out."""
+    body = {
+        "model": "qwen3.6:27b",
+        "messages": [
+            {"role": "system", "content": "you are helpful"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None, "tool_calls": [{"id": "c1"}]},
+        ],
+    }
+    req = _build_chat_request(body)
+    await _sanitize_null_content(req)
+    rewritten = json.loads(req.content)
+    assert [m["content"] for m in rewritten["messages"]] == [
+        "you are helpful",
+        "hi",
+        "",
+    ]
+    # content-length header must be updated so httpx doesn't truncate.
+    assert int(req.headers["content-length"]) == len(req.content)
+
+
+@pytest.mark.asyncio
+async def test_sanitize_skips_when_no_null_content():
+    """No null content => body untouched, no needless re-serialization."""
+    body = {"model": "x", "messages": [{"role": "user", "content": "hi"}]}
+    req = _build_chat_request(body)
+    original = bytes(req.content)
+    await _sanitize_null_content(req)
+    assert req.content == original
+
+
+@pytest.mark.asyncio
+async def test_sanitize_ignores_non_chat_completion_paths():
+    """Embeddings, tags, etc. must pass through unchanged."""
+    body = {"messages": [{"role": "user", "content": None}]}
+    req = _build_chat_request(body, path="/api/tags")
+    original = bytes(req.content)
+    await _sanitize_null_content(req)
+    assert req.content == original
+
+
+@pytest.mark.asyncio
+async def test_sanitize_tolerates_non_json_body():
+    """Non-JSON body must not raise — hook is purely defensive."""
+    req = httpx.Request(
+        "POST",
+        "http://aillm01:11434/v1/chat/completions",
+        content=b"not json at all",
+        headers={"content-type": "text/plain"},
+    )
+    await _sanitize_null_content(req)
+    assert req.content == b"not json at all"
 
 
 def test_build_model_ollama_per_model_miss_falls_back_to_global(monkeypatch):

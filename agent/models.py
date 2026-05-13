@@ -14,8 +14,10 @@ Import notes (pydantic-ai 1.0.8):
 """
 
 from __future__ import annotations
+import json
 from typing import Any, Literal
 
+import httpx
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -31,6 +33,47 @@ def _read_secrets() -> dict:
     import streamlit as st
 
     return dict(st.secrets)
+
+
+async def _sanitize_null_content(request: httpx.Request) -> None:
+    """Ollama 0.23.x's /v1/chat/completions rejects request bodies that
+    contain any message with `content: null`, returning a 400 with
+    `invalid message content type: <nil>`. Pydantic-ai correctly emits
+    null content for assistant messages that hold only tool_calls (the
+    OpenAI spec mandates this shape). Rewrite null -> empty string on
+    the wire so the request lands. Pure defensive workaround — remove
+    once Ollama accepts the spec-compliant shape again.
+    """
+    if "chat/completions" not in str(request.url):
+        return
+    if not request.content:
+        return
+    try:
+        body = json.loads(request.content)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return
+    changed = False
+    for msg in messages:
+        if isinstance(msg, dict) and msg.get("content") is None:
+            msg["content"] = ""
+            changed = True
+    if not changed:
+        return
+    new_body = json.dumps(body).encode()
+    request._content = new_body
+    request.headers["content-length"] = str(len(new_body))
+
+
+def _ollama_http_client() -> httpx.AsyncClient:
+    """httpx client with the null-content sanitizer hook and timeouts
+    sized for slow local models on aillm01."""
+    return httpx.AsyncClient(
+        event_hooks={"request": [_sanitize_null_content]},
+        timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0),
+    )
 
 
 def build_model() -> Any:
@@ -73,7 +116,10 @@ def build_model() -> Any:
         settings = OpenAIChatModelSettings(extra_body={"reasoning_effort": reasoning_effort})
         return OpenAIChatModel(
             model_name,
-            provider=OpenAIProvider(base_url=f"{host.rstrip('/')}/v1"),
+            provider=OpenAIProvider(
+                base_url=f"{host.rstrip('/')}/v1",
+                http_client=_ollama_http_client(),
+            ),
             settings=settings,
         )
 
