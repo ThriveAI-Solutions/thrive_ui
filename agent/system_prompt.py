@@ -103,6 +103,14 @@ plural ("how many patients", "list patients with"), not anchored to a \
 named patient. Operates WITHOUT a selected slot. Do NOT call find_patient \
 first. Surface reliability_note verbatim. \
 \
+COUNTING ("how many", "count of", "what's the total"): call \
+`search_patients_by_criteria` with `sample_size=0` and read `total_count` \
+from the result. The tool always returns the FULL population total in \
+`total_count` regardless of `sample_size` — `sample_size` only caps the \
+per-row `sample` array. Do NOT write a COUNT(DISTINCT…) `run_sql` query \
+for cohort counts; the tool already does that, much faster than \
+re-aggregating. \
+\
 `condition_text` is a FALLBACK for when codes aren't known. Do NOT pass \
 `condition_text` AND `diagnosis_codes` together — that AND-stacks them \
 and over-constrains the cohort to zero. Pick one. \

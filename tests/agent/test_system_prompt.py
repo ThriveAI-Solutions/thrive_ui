@@ -87,6 +87,21 @@ def test_system_prompt_mentions_geo_filters_with_caveat():
     )
 
 
+def test_system_prompt_directs_count_questions_to_sample_size_zero():
+    """gpt-oss:32b regression on 2026-05-13: 'how many people in NY have
+    diabetes' burned 6 turns trying to write COUNT(DISTINCT) SQL via
+    run_sql, never reading the cohort tool's `total_count` field that
+    was already designed for exactly this. The prompt must explicitly
+    direct counting questions to sample_size=0 + total_count."""
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    assert "sample_size=0" in lower or "sample_size = 0" in lower
+    assert "total_count" in lower
+    # Must explicitly steer AWAY from run_sql for cohort counts.
+    assert "do not write" in lower or "do not use" in lower or "do not run" in lower
+
+
 def test_system_prompt_forces_named_diagnoses_through_search_codes():
     """gpt-oss:32b regression on 2026-05-13: 'people in zip 14223 with high
     blood pressure' was routed via condition_text='high blood pressure',

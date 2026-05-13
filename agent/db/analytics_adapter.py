@@ -137,11 +137,20 @@ class AnalyticsDbAdapter:
         s = (self.schema or "").rstrip(".")
         return f"{s}." if s else ""
 
+    # Statement-level timeout for the curated query path (cohort, find_patient,
+    # get_patient_clinical_data, etc.). Without this, a broad cohort query
+    # ('all NY + 3 diabetes codes') ran 13 minutes on the dev warehouse on
+    # 2026-05-13 before the runner's wall_clock cap noticed. 30s mirrors the
+    # default run_arbitrary_sql limit.
+    _CURATED_QUERY_TIMEOUT_S = 30
+
     def fetch_all(self, sql: str, params: Optional[dict] = None) -> list[dict]:
         if _FORBIDDEN_RE.search(sql):
             raise ValueError("Adapter is read-only; statement contains write keyword.")
         self.sql_log.append({"sql": sql, "params": dict(params or {})})
         with self.engine.connect() as conn:
+            if self.dialect in ("postgres", "redshift"):
+                conn.exec_driver_sql(f"SET statement_timeout = {int(self._CURATED_QUERY_TIMEOUT_S * 1000)}")
             result = conn.execute(text(sql), params or {})
             return [dict(row._mapping) for row in result]
 

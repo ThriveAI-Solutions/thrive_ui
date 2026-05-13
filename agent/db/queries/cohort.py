@@ -16,6 +16,33 @@ from __future__ import annotations
 from typing import Tuple
 
 
+# WNY-relevant US state aliases. The warehouse's state column has rows in
+# both 2-letter ("NY") and full-name ("NEW YORK") forms; matching only one
+# silently drops the other half. Extend this map as new states show up in
+# practice; unknown inputs fall back to a single-form exact match.
+_STATE_ALIAS_MAP = {
+    "NY": ("NY", "NEW YORK"),
+    "NEW YORK": ("NY", "NEW YORK"),
+    "PA": ("PA", "PENNSYLVANIA"),
+    "PENNSYLVANIA": ("PA", "PENNSYLVANIA"),
+    "OH": ("OH", "OHIO"),
+    "OHIO": ("OH", "OHIO"),
+    "NJ": ("NJ", "NEW JERSEY"),
+    "NEW JERSEY": ("NJ", "NEW JERSEY"),
+    "CA": ("CA", "CALIFORNIA"),
+    "CALIFORNIA": ("CA", "CALIFORNIA"),
+    "FL": ("FL", "FLORIDA"),
+    "FLORIDA": ("FL", "FLORIDA"),
+    "TX": ("TX", "TEXAS"),
+    "TEXAS": ("TX", "TEXAS"),
+}
+
+
+def _state_aliases(state_input: str) -> tuple[str, ...]:
+    key = state_input.strip().upper()
+    return _STATE_ALIAS_MAP.get(key, (key,))
+
+
 def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
     """Build the SELECT for search_patients_by_criteria.
 
@@ -99,11 +126,16 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
         where_clauses.append("LOWER(p.city) LIKE :geo_city")
         params["geo_city"] = f"%{criteria.city.lower()}%"
     if getattr(criteria, "state", None):
-        # state is "NY" most often, occasionally "NEW YORK"; exact match on
-        # uppercased input handles the common case. The reliability note
-        # documents the long-tail variant.
-        where_clauses.append("UPPER(p.state) = :geo_state")
-        params["geo_state"] = criteria.state.upper()
+        # internal_patient_profile_v.state holds both 2-letter codes
+        # ("NY") and full names ("NEW YORK") inconsistently. Match either
+        # form when we can map the input to its alias; fall back to a
+        # single-form exact match for unknown inputs. Without this,
+        # state="NY" silently misses every "NEW YORK" row and vice versa.
+        forms = _state_aliases(criteria.state)
+        placeholders = ", ".join(f":geo_state_{i}" for i in range(len(forms)))
+        where_clauses.append(f"UPPER(p.state) IN ({placeholders})")
+        for i, form in enumerate(forms):
+            params[f"geo_state_{i}"] = form
 
     # --- demographic / visit filters ----------------------------------
     if getattr(criteria, "age_min", None) is not None:

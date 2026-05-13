@@ -73,11 +73,33 @@ def test_city_filter_matches_substring(synthetic_db):
     assert "src-jane-1985" not in src_ids, f"Pittsburgh should not match Buffalo; got {src_ids}"
 
 
-def test_state_filter_exact_match_on_uppercased(synthetic_db):
-    # Lower-case input "ny" should be uppercased before comparison.
+def test_state_filter_matches_both_2letter_and_full_name():
+    """Live regression on 2026-05-13: the warehouse state column carries
+    both 'NY' and 'NEW YORK' inconsistently. The tool must accept either
+    form as input AND emit SQL that catches both forms in the data,
+    otherwise half the population is silently dropped."""
+    sql, params = cohort_sql(_make(state="NY"), schema_prefix="dw.")
+    forms = sorted(v for k, v in params.items() if k.startswith("geo_state_"))
+    assert forms == ["NEW YORK", "NY"], f"expected both alias forms, got {forms}"
+    assert "UPPER(p.state) IN" in sql
+
+    # Same when the user passes the full form.
+    sql2, params2 = cohort_sql(_make(state="new york"), schema_prefix="dw.")
+    forms2 = sorted(v for k, v in params2.items() if k.startswith("geo_state_"))
+    assert forms2 == ["NEW YORK", "NY"]
+
+
+def test_state_filter_unknown_state_falls_back_to_single_form():
+    """States not in the alias map should still emit a working SQL clause —
+    just the upper-cased input. Don't crash on rare states."""
+    sql, params = cohort_sql(_make(state="VT"), schema_prefix="dw.")
+    forms = [v for k, v in params.items() if k.startswith("geo_state_")]
+    assert forms == ["VT"]
+    assert "UPPER(p.state) IN" in sql
+
+
+def test_state_filter_exact_match_against_synthetic(synthetic_db):
     sql, params = cohort_sql(_make(state="ny"), schema_prefix="")
-    assert "UPPER(p.state) = :geo_state" in sql
-    assert params["geo_state"] == "NY"
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     src_ids = sorted(r._mapping["source_id"] for r in rows)
