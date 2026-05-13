@@ -3,6 +3,7 @@ import time
 import pandas as pd
 import streamlit as st
 
+from agent.session_reset import reset_agent_session
 from orm.functions import (
     get_recent_messages,
     save_user_settings,
@@ -84,6 +85,60 @@ def _render_selected_patient_sidebar() -> None:
             st.rerun()
 
 
+_RESET_CONFIRM_WINDOW_SECONDS = 5.0
+
+
+def _render_reset_agent_sidebar() -> None:
+    """Sidebar container that clears all agent-side conversation state.
+
+    Two-state UX:
+      - Idle: a single "Reset agent" button. Clicking it arms the
+        confirmation by stamping st.session_state['_pending_agent_reset_at'].
+      - Armed (within 5s of arming): "Confirm reset" and "Cancel" buttons.
+        Confirm calls reset_agent_session(); Cancel pops the arming flag.
+
+    The arming flag is checked lazily on each render and on click — no
+    background timers. Expired arming silently returns to Idle.
+    """
+    armed_at = st.session_state.get("_pending_agent_reset_at")
+    now = time.time()
+    is_armed = isinstance(armed_at, (int, float)) and (now - armed_at) <= _RESET_CONFIRM_WINDOW_SECONDS
+
+    with st.sidebar.container(border=True):
+        if is_armed:
+            st.caption("Click again to confirm — this clears your current chat.")
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button(
+                    "🧹 Confirm reset",
+                    key="confirm_agent_reset_btn",
+                    type="primary",
+                    width="stretch",
+                ):
+                    reset_agent_session(st.session_state)
+                    st.toast("Agent session reset.")
+                    st.rerun()
+            with cancel_col:
+                if st.button(
+                    "Cancel",
+                    key="cancel_agent_reset_btn",
+                    width="stretch",
+                ):
+                    st.session_state.pop("_pending_agent_reset_at", None)
+                    st.rerun()
+        else:
+            if st.button(
+                "🧹 Reset agent",
+                key="reset_agent_btn",
+                help=(
+                    "Clear the current chat and agent memory. Does not log you out or delete history from the database."
+                ),
+                width="stretch",
+            ):
+                st.session_state["_pending_agent_reset_at"] = now
+                st.rerun()
+
+
 set_user_preferences_in_session_state()
 
 # Initialize session state variables
@@ -109,6 +164,7 @@ if len(st.session_state.messages) > max_messages:
 st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
 
 _render_selected_patient_sidebar()
+_render_reset_agent_sidebar()
 
 # LLM Selection UI
 with st.sidebar.expander("🤖 LLM Selection", expanded=False):
