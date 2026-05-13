@@ -87,10 +87,9 @@ def _render_selected_patient_sidebar() -> None:
 set_user_preferences_in_session_state()
 
 # Initialize session state variables
-if "messages" not in st.session_state or st.session_state.messages == []:
-    st.session_state.messages = get_recent_messages()
-if st.session_state.messages is None:
-    st.session_state.messages = []
+if "_messages_loaded" not in st.session_state:
+    st.session_state.messages = get_recent_messages() or []
+    st.session_state._messages_loaded = True
 
 # Manage session state memory by limiting messages for performance
 from utils.config_helper import get_max_session_messages
