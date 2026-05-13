@@ -109,15 +109,47 @@ def _build_model_override(model_name: str):
     )
 
 
+class _NullRagAdapter:
+    """Stub RAG used when the real ChromaDB can't be opened (e.g. another
+    process holds the SQLite file, or this user lacks write perms).
+    `search_knowledge_base` will return an empty list — tools that depend
+    on RAG retrieval will degrade, but the rest of the agent (system
+    prompt routing, schema catalog injection via the run_sql prepare
+    hook, all clinical-data tools) works unchanged."""
+
+    def search(self, query: str, kind: str | None = None, limit: int = 5):
+        return []
+
+    def upsert(self, *args, **kwargs):
+        return None
+
+
 def _build_deps(role: str) -> AgentDeps:
     """Stub the session-state bits build_agent_deps reads from Streamlit;
     everything else (Redshift adapter, ChromaDB) uses the same factories
-    the live app does so behavior matches."""
+    the live app does so behavior matches.
+
+    ChromaDB has a quirk: opening even a read-only PersistentClient
+    requires write access to chroma.sqlite3 (it touches a lock file).
+    On the dev server `streamlitadmin` can't write the streamlituser-
+    owned file, so we fall back to a no-op stub. The agent's
+    schema-context flow (the run_sql prepare hook) reads from the
+    in-process RUN_SQL_EXAMPLES constant, not chromadb, so most
+    prompt-iteration runs don't need real RAG. Pass `--require-rag` to
+    fail loudly if the stub would be used."""
     import streamlit as st
 
     analytics_db = AnalyticsDbAdapter.from_streamlit_secrets()
     chroma_path = st.secrets.get("rag_model", {}).get("chroma_path", "./chromadb")
-    rag = ChromaRagAdapter(chromadb.PersistentClient(path=chroma_path))
+    try:
+        rag = ChromaRagAdapter(chromadb.PersistentClient(path=chroma_path))
+    except Exception as exc:
+        print(
+            f"{C.YELLOW}⚠  ChromaDB unavailable ({exc.__class__.__name__}: {exc}); "
+            f"using no-op RAG stub. search_knowledge_base will return empty.{C.RESET}",
+            flush=True,
+        )
+        rag = _NullRagAdapter()
 
     # In-memory ORM session — AuditLogger writes here are throwaway and
     # are tolerated to fail silently in the runner.
