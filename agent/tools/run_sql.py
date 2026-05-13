@@ -15,8 +15,10 @@ import sqlparse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
+from pydantic_ai.tools import ToolDefinition
 
 from agent.dataframe_adapters import run_sql_result_to_df
+from agent.db.sql_context import schema_context_for_sql
 from agent.deps import AgentDeps, QueryMeta
 
 
@@ -149,3 +151,16 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
         truncated=truncated,
     )
     return result
+
+
+async def _augment_run_sql_description(
+    ctx: RunContext[AgentDeps],
+    tool_def: ToolDefinition,
+) -> ToolDefinition:
+    """Inject the fully-qualified schema catalog + few-shot SQL into run_sql's
+    LLM-visible description. Schema prefix follows the configured analytics_db
+    so production gets `dw.` and SQLite tests get bare names."""
+    adapter = getattr(ctx.deps, "analytics_db", None)
+    prefix = getattr(adapter, "schema_prefix", "") if adapter is not None else ""
+    tool_def.description = (tool_def.description or "") + "\n\n" + schema_context_for_sql(prefix)
+    return tool_def

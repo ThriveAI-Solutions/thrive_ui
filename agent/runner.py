@@ -52,7 +52,7 @@ from agent.tools.find_patient import find_patient
 from agent.tools.get_patient_clinical_data import get_patient_clinical_data
 from agent.tools.list_patient_documents import list_patient_documents
 from agent.tools.make_chart import make_chart
-from agent.tools.run_sql import run_sql
+from agent.tools.run_sql import run_sql, _augment_run_sql_description
 from agent.tools.search_codes import search_codes
 from agent.tools.search_knowledge_base import search_knowledge_base
 from agent.tools.summarize_results import summarize_results
@@ -151,7 +151,7 @@ class AgenticRunner:
         self._agent.tool(search_knowledge_base)
         self._agent.tool(list_patient_documents)
         self._agent.tool(search_codes)
-        self._agent.tool(run_sql)
+        self._agent.tool(run_sql, prepare=_augment_run_sql_description)
         self._agent.tool(make_chart)
         self._agent.tool(summarize_results)
         self._agent.tool(search_patients_by_criteria)
