@@ -25,6 +25,12 @@ def _populated_session():
         "last_failed_sql": "select bad",
         "pending_sql_error": True,
         "retry_failed_sql": "select bad",
+        "use_retry_context": True,
+        "retry_error_msg": "boom 2",
+        "retry_user_feedback": "fix the date",
+        "pending_question": "what's the count for jane?",
+        "show_failed_sql_open": True,
+        "retry_feedback_persist": "previous user input",
         "streamed_summary": "summary text",
         "streamed_summary_for_question": "what's the count?",
         "streamed_summary_elapsed_time": 1.23,
@@ -139,3 +145,10 @@ def test_messages_not_in_reset_keys():
     """The `messages` key is set to [] by reset_agent_session, not popped.
     Adding it to RESET_KEYS would invert that semantics."""
     assert "messages" not in RESET_KEYS
+
+
+def test_messages_loaded_sentinel_not_in_reset_keys():
+    """_messages_loaded must be preserved across resets. If it were popped,
+    the next rerun would re-hydrate messages from SQLite, silently undoing
+    the reset's chat-clear effect."""
+    assert "_messages_loaded" not in RESET_KEYS

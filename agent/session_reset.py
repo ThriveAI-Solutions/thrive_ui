@@ -31,6 +31,13 @@ RESET_KEYS: tuple[str, ...] = (
     "streamed_summary",
     "streamed_summary_for_question",
     "streamed_summary_elapsed_time",
+    # SQL-error retry context (threaded between turns by chat_bot_helper)
+    "use_retry_context",
+    "retry_error_msg",
+    "retry_user_feedback",
+    "pending_question",
+    "show_failed_sql_open",
+    "retry_feedback_persist",
     # vanna cache
     "_vn_instance",
     # confirm-button arming flag (popped so the UI returns to Idle)
