@@ -153,14 +153,23 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
     return result
 
 
+# Captured once at module load. The prepare hook is invoked per model turn
+# within an agent run; pydantic-ai re-uses the same ToolDefinition object,
+# so an in-place append grew the description by ~5800 chars per turn and
+# pushed smaller models (gemma4:31b) past the point where they reliably
+# retain correct tool names. Always rebuild from this stable base instead.
+_RUN_SQL_BASE_DESCRIPTION = (run_sql.__doc__ or "").strip()
+
+
 async def _augment_run_sql_description(
     ctx: RunContext[AgentDeps],
     tool_def: ToolDefinition,
 ) -> ToolDefinition:
     """Inject the fully-qualified schema catalog + few-shot SQL into run_sql's
     LLM-visible description. Schema prefix follows the configured analytics_db
-    so production gets `dw.` and SQLite tests get bare names."""
+    so production gets `dw.` and SQLite tests get bare names. Idempotent across
+    multiple invocations on the same ToolDefinition."""
     adapter = getattr(ctx.deps, "analytics_db", None)
     prefix = getattr(adapter, "schema_prefix", "") if adapter is not None else ""
-    tool_def.description = (tool_def.description or "") + "\n\n" + schema_context_for_sql(prefix)
+    tool_def.description = _RUN_SQL_BASE_DESCRIPTION + "\n\n" + schema_context_for_sql(prefix)
     return tool_def
