@@ -235,3 +235,45 @@ def test_cohort_criteria_still_rejects_truly_empty():
 
     with pytest.raises(ValidationError):
         CohortCriteria()
+
+
+def test_geo_only_attaches_geo_reliability(synthetic_db):
+    from agent.tools.search_patients_by_criteria import (
+        CohortCriteria,
+        search_patients_by_criteria,
+        _RELIABILITY_GEO,
+    )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    out = search_patients_by_criteria(ctx, CohortCriteria(zip_code="14223"))
+    assert out.reliability_note == _RELIABILITY_GEO
+
+
+def test_dx_plus_geo_concatenates_both_notes(synthetic_db):
+    from agent.tools.search_patients_by_criteria import (
+        CohortCriteria,
+        search_patients_by_criteria,
+        _RELIABILITY_DX,
+        _RELIABILITY_GEO,
+    )
+    from sqlalchemy import text as _sql_text
+
+    # Insert a diagnosis row matching src-john-1962 so dx filter has data.
+    with synthetic_db.begin() as conn:
+        conn.execute(
+            _sql_text(
+                "INSERT INTO metric_federated_data_v "
+                "(patient_id, code, code_type, start_date, is_claims_data) "
+                "VALUES (1, 'I10', 'ICD-10', '2025-01-01', 0)"
+            )
+        )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    out = search_patients_by_criteria(
+        ctx,
+        CohortCriteria(diagnosis_codes=["I10"], zip_code="14223"),
+    )
+    assert _RELIABILITY_DX in (out.reliability_note or "")
+    assert _RELIABILITY_GEO in (out.reliability_note or "")

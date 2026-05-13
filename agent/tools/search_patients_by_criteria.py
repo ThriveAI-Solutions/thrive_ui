@@ -109,6 +109,10 @@ _RELIABILITY_RX = (
     "RxNorm + NDC coverage in medications is ~100%, but cohort counts are still "
     "subject to data-refresh cadence. Some matches may come from claims data refreshed monthly."
 )
+_RELIABILITY_GEO = (
+    "Geographic filtering is best-effort against a free-text address "
+    "field; some matches may be missed. Address structure varies by source feed."
+)
 
 
 def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCriteria) -> CohortResult:
@@ -179,11 +183,14 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
         for r in sample_rows
     ]
 
-    reliability = None
+    reliability_parts: list[str] = []
     if criteria.diagnosis_codes:
-        reliability = _RELIABILITY_DX
+        reliability_parts.append(_RELIABILITY_DX)
     elif criteria.medication_rxnorm_codes:
-        reliability = _RELIABILITY_RX
+        reliability_parts.append(_RELIABILITY_RX)
+    if criteria.zip_code or criteria.city or criteria.state:
+        reliability_parts.append(_RELIABILITY_GEO)
+    reliability = " ".join(reliability_parts) if reliability_parts else None
 
     result = CohortResult(
         total_count=total_count,
