@@ -140,9 +140,14 @@ class AnalyticsDbAdapter:
     # Statement-level timeout for the curated query path (cohort, find_patient,
     # get_patient_clinical_data, etc.). Without this, a broad cohort query
     # ('all NY + 3 diabetes codes') ran 13 minutes on the dev warehouse on
-    # 2026-05-13 before the runner's wall_clock cap noticed. 30s mirrors the
-    # default run_arbitrary_sql limit.
-    _CURATED_QUERY_TIMEOUT_S = 30
+    # 2026-05-13 before the runner's wall_clock cap noticed.
+    #
+    # 240s = wide tolerance for the live HEALTHeLINK Redshift cluster, which
+    # under contention will take 30-90s to satisfy queries that complete in
+    # <1s when idle. The runner's max_wall_clock_s should be set to ≥300 in
+    # secrets.toml so the agent has room to think + answer after a slow query
+    # consumes most of this budget.
+    _CURATED_QUERY_TIMEOUT_S = 240
 
     def fetch_all(self, sql: str, params: Optional[dict] = None) -> list[dict]:
         if _FORBIDDEN_RE.search(sql):

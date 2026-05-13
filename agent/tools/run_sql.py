@@ -24,7 +24,10 @@ from agent.deps import AgentDeps, QueryMeta
 
 
 _ROW_CAP = 500
-_TIMEOUT_S = 30
+# Match the curated-query path (analytics_adapter._CURATED_QUERY_TIMEOUT_S = 240).
+# 240s is wide tolerance for the live HEALTHeLINK Redshift cluster, which
+# under contention takes 30-90s for queries that complete in <1s when idle.
+_TIMEOUT_S = 240
 
 _FORBIDDEN_KEYWORDS = {
     "INSERT",
