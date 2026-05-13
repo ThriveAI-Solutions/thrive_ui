@@ -1,9 +1,8 @@
 import json
 
-import httpx
 import pytest
 
-from agent.models import _sanitize_null_content, build_model
+from agent.models import _sanitize_null_content_body, build_model
 
 
 def test_build_model_ollama(monkeypatch):
@@ -104,19 +103,8 @@ def test_build_model_ollama_per_model_overrides_global_off(monkeypatch):
     assert model.settings == {"extra_body": {"reasoning_effort": "high"}}
 
 
-def _build_chat_request(body: dict, *, path: str = "/v1/chat/completions") -> httpx.Request:
-    return httpx.Request(
-        "POST",
-        f"http://aillm01:11434{path}",
-        content=json.dumps(body).encode(),
-        headers={"content-type": "application/json"},
-    )
-
-
-@pytest.mark.asyncio
-async def test_sanitize_rewrites_null_content_to_empty_string():
-    """Ollama 0.23.x rejects content:null; ensure the hook rewrites
-    every null-content message in-place before the request goes out."""
+def test_sanitize_rewrites_null_content_to_empty_string():
+    """Every message with content:null gets rewritten to empty string."""
     body = {
         "model": "qwen3.6:27b",
         "messages": [
@@ -125,49 +113,36 @@ async def test_sanitize_rewrites_null_content_to_empty_string():
             {"role": "assistant", "content": None, "tool_calls": [{"id": "c1"}]},
         ],
     }
-    req = _build_chat_request(body)
-    await _sanitize_null_content(req)
-    rewritten = json.loads(req.content)
+    out = _sanitize_null_content_body(json.dumps(body).encode())
+    assert out is not None
+    rewritten = json.loads(out)
     assert [m["content"] for m in rewritten["messages"]] == [
         "you are helpful",
         "hi",
         "",
     ]
-    # content-length header must be updated so httpx doesn't truncate.
-    assert int(req.headers["content-length"]) == len(req.content)
 
 
-@pytest.mark.asyncio
-async def test_sanitize_skips_when_no_null_content():
-    """No null content => body untouched, no needless re-serialization."""
+def test_sanitize_returns_none_when_no_null_content():
+    """No-op signal so the transport can skip Request rebuild."""
     body = {"model": "x", "messages": [{"role": "user", "content": "hi"}]}
-    req = _build_chat_request(body)
-    original = bytes(req.content)
-    await _sanitize_null_content(req)
-    assert req.content == original
+    assert _sanitize_null_content_body(json.dumps(body).encode()) is None
 
 
-@pytest.mark.asyncio
-async def test_sanitize_ignores_non_chat_completion_paths():
-    """Embeddings, tags, etc. must pass through unchanged."""
-    body = {"messages": [{"role": "user", "content": None}]}
-    req = _build_chat_request(body, path="/api/tags")
-    original = bytes(req.content)
-    await _sanitize_null_content(req)
-    assert req.content == original
+def test_sanitize_returns_none_for_non_json_body():
+    """Defensive: malformed body must not raise; just signal no rewrite."""
+    assert _sanitize_null_content_body(b"not json at all") is None
 
 
-@pytest.mark.asyncio
-async def test_sanitize_tolerates_non_json_body():
-    """Non-JSON body must not raise — hook is purely defensive."""
-    req = httpx.Request(
-        "POST",
-        "http://aillm01:11434/v1/chat/completions",
-        content=b"not json at all",
-        headers={"content-type": "text/plain"},
-    )
-    await _sanitize_null_content(req)
-    assert req.content == b"not json at all"
+def test_sanitize_returns_none_for_empty_body():
+    """Empty body (GET, etc.) must not raise."""
+    assert _sanitize_null_content_body(b"") is None
+
+
+def test_sanitize_returns_none_when_messages_missing():
+    """Body without a messages array — leave it alone."""
+    body = {"model": "x", "input": "hi"}
+    assert _sanitize_null_content_body(json.dumps(body).encode()) is None
 
 
 def test_build_model_ollama_per_model_miss_falls_back_to_global(monkeypatch):

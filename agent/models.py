@@ -35,43 +35,71 @@ def _read_secrets() -> dict:
     return dict(st.secrets)
 
 
-async def _sanitize_null_content(request: httpx.Request) -> None:
-    """Ollama 0.23.x's /v1/chat/completions rejects request bodies that
+def _sanitize_null_content_body(raw: bytes) -> bytes | None:
+    """Walk a chat-completions JSON body and replace `content: null`
+    with empty string on any message that has it. Returns the rewritten
+    body, or None if no rewrite was needed / body was not JSON we can
+    parse. Pure function — kept separate from the transport so it's
+    easy to unit-test.
+
+    Ollama 0.23.x's /v1/chat/completions rejects request bodies that
     contain any message with `content: null`, returning a 400 with
     `invalid message content type: <nil>`. Pydantic-ai correctly emits
     null content for assistant messages that hold only tool_calls (the
-    OpenAI spec mandates this shape). Rewrite null -> empty string on
-    the wire so the request lands. Pure defensive workaround — remove
-    once Ollama accepts the spec-compliant shape again.
+    OpenAI spec mandates this shape). Pure defensive workaround —
+    remove once Ollama accepts the spec-compliant shape again.
     """
-    if "chat/completions" not in str(request.url):
-        return
-    if not request.content:
-        return
+    if not raw:
+        return None
     try:
-        body = json.loads(request.content)
+        body = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return
+        return None
     messages = body.get("messages")
     if not isinstance(messages, list):
-        return
+        return None
     changed = False
     for msg in messages:
         if isinstance(msg, dict) and msg.get("content") is None:
             msg["content"] = ""
             changed = True
     if not changed:
-        return
-    new_body = json.dumps(body).encode()
-    request._content = new_body
-    request.headers["content-length"] = str(len(new_body))
+        return None
+    return json.dumps(body).encode()
+
+
+class _NullContentSanitizingTransport(httpx.AsyncHTTPTransport):
+    """Custom transport that rewrites null content on chat-completions
+    requests before sending. We use a transport instead of an event
+    hook because event hooks can only mutate the existing Request, and
+    httpx reads bytes from `Request.stream` (not `Request.content`) on
+    the send path. Setting `_content` post-hoc desyncs from the stream
+    and trips a `LocalProtocolError: Too little data for declared
+    Content-Length`. A transport can construct a fresh Request with
+    consistent stream + content + headers."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if "chat/completions" in str(request.url):
+            raw = await request.aread()
+            rewritten = _sanitize_null_content_body(raw)
+            if rewritten is not None:
+                headers = httpx.Headers(request.headers)
+                headers["content-length"] = str(len(rewritten))
+                request = httpx.Request(
+                    method=request.method,
+                    url=request.url,
+                    headers=headers,
+                    content=rewritten,
+                    extensions=request.extensions,
+                )
+        return await super().handle_async_request(request)
 
 
 def _ollama_http_client() -> httpx.AsyncClient:
-    """httpx client with the null-content sanitizer hook and timeouts
-    sized for slow local models on aillm01."""
+    """httpx client wired with the null-content sanitizing transport and
+    timeouts sized for slow local models on aillm01."""
     return httpx.AsyncClient(
-        event_hooks={"request": [_sanitize_null_content]},
+        transport=_NullContentSanitizingTransport(),
         timeout=httpx.Timeout(connect=30.0, read=600.0, write=30.0, pool=30.0),
     )
 
