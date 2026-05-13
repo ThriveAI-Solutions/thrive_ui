@@ -38,9 +38,15 @@ def _populated_session():
         "user_id": 42,
         "user_role": 1,
         "user_theme": "welltellai",
-        "show_sql": True,
-        "show_table": True,
         "show_chart": False,
+        "show_elapsed_time": True,
+        "show_followup": False,
+        "show_question_history": True,
+        "show_sql": True,
+        "show_suggested": False,
+        "show_table": True,
+        "speak_summary": False,
+        "voice_input": False,
         "agentic_mode": True,
         "llm_fallback": False,
         "confirm_magic_commands": True,
@@ -75,9 +81,15 @@ PRESERVED_KEYS = (
     "user_id",
     "user_role",
     "user_theme",
-    "show_sql",
-    "show_table",
     "show_chart",
+    "show_elapsed_time",
+    "show_followup",
+    "show_question_history",
+    "show_sql",
+    "show_suggested",
+    "show_table",
+    "speak_summary",
+    "voice_input",
     "agentic_mode",
     "llm_fallback",
     "confirm_magic_commands",
@@ -121,3 +133,9 @@ def test_reset_keys_includes_pending_reset_flag():
     """The arming flag itself must be in the pop list — otherwise the
     confirm UI would stay 'armed' across a successful reset."""
     assert "_pending_agent_reset_at" in RESET_KEYS
+
+
+def test_messages_not_in_reset_keys():
+    """The `messages` key is set to [] by reset_agent_session, not popped.
+    Adding it to RESET_KEYS would invert that semantics."""
+    assert "messages" not in RESET_KEYS
