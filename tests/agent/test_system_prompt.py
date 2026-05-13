@@ -85,3 +85,21 @@ def test_system_prompt_mentions_geo_filters_with_caveat():
         or "internal_patient_profile_v" in lower
         or "100% coverage" in lower
     )
+
+
+def test_system_prompt_forces_named_diagnoses_through_search_codes():
+    """gpt-oss:32b regression on 2026-05-13: 'people in zip 14223 with high
+    blood pressure' was routed via condition_text='high blood pressure',
+    matching ZERO rows because the conditions column stores 'Essential
+    hypertension'. The prompt must push named diagnoses through
+    search_codes(icd10) → diagnosis_codes, mirroring the existing rule for
+    labs / vaccines / meds."""
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    # Must explicitly invoke search_codes for ICD-10 in cohort context.
+    assert "diagnoses referenced by name" in lower
+    assert 'search_codes(vocabulary="icd10"' in SYSTEM_PROMPT
+    # Must call out the failure mode that condition_text masks.
+    assert "high blood pressure" in lower
+    assert "essential hypertension" in lower

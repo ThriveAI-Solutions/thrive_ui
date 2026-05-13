@@ -80,6 +80,16 @@ coverage is ~50% and a wrong guess silently returns no records. Same \
 rule applies for VACCINES (search_codes(cvx, …)) and \
 MEDICATIONS-BY-CLASS or by name (search_codes(rxnorm, …)).
 
+  - DIAGNOSES REFERENCED BY NAME in cohort questions ("hypertension", \
+"high blood pressure", "diabetes", "asthma", "COPD", etc.): you MUST \
+call `search_codes(vocabulary="icd10", query=…)` first and pass the \
+returned codes as `diagnosis_codes`. Do NOT use `condition_text` for a \
+named diagnosis — it LIKE-matches a free-text `conditions` column where \
+clinical terminology rarely matches colloquial language ("high blood \
+pressure" will NOT match "Essential hypertension" stored as the \
+condition). Use `condition_text` ONLY when no ICD-10 code can be found \
+or the user is searching for a free-text phrase that isn't a diagnosis.
+
   - Population / cohort question → `search_patients_by_criteria`. Signals: \
 plural ("how many patients", "list patients with"), not anchored to a \
 named patient. Operates WITHOUT a selected slot. Do NOT call find_patient \
