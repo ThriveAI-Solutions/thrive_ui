@@ -207,3 +207,31 @@ def test_last_dataframe_populated_on_success(synthetic_db):
     result = search_patients_by_criteria(ctx, CohortCriteria(medication_rxnorm_codes=["6809"]))
     assert isinstance(ctx.deps.last_dataframe, pd.DataFrame)
     assert len(ctx.deps.last_dataframe) == len(result.sample)
+
+
+def test_cohort_criteria_accepts_zip_code_alone():
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    c = CohortCriteria(zip_code="14223")
+    assert c.zip_code == "14223"
+
+
+def test_cohort_criteria_accepts_city_alone():
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    c = CohortCriteria(city="Buffalo")
+    assert c.city == "Buffalo"
+
+
+def test_cohort_criteria_accepts_state_alone():
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    c = CohortCriteria(state="NY")
+    assert c.state == "NY"
+
+
+def test_cohort_criteria_still_rejects_truly_empty():
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    with pytest.raises(ValidationError):
+        CohortCriteria()

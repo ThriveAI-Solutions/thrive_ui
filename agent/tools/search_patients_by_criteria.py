@@ -40,6 +40,9 @@ class CohortCriteria(BaseModel):
     facility: Optional[str] = None
     last_visit_after: Optional[date] = None
     last_visit_before: Optional[date] = None
+    zip_code: Optional[str] = None  # 5-digit ZIP, substring on address
+    city: Optional[str] = None  # case-insensitive substring on address
+    state: Optional[str] = None  # 2-letter USPS code, bracketed-substring on address
     sample_size: int = Field(default=20, ge=0, le=100)
 
     @model_validator(mode="after")
@@ -57,13 +60,17 @@ class CohortCriteria(BaseModel):
                 self.facility,
                 self.last_visit_after,
                 self.last_visit_before,
+                self.zip_code,
+                self.city,
+                self.state,
             )
         ):
             raise ValueError(
                 "search_patients_by_criteria requires at least one criterion "
                 "(diagnosis_codes, medication_rxnorm_codes, condition_text, "
-                "age_min/age_max, gender, facility, last_visit_after, or "
-                "last_visit_before). Do not call without a filter."
+                "age_min/age_max, gender, facility, last_visit_after, "
+                "last_visit_before, zip_code, city, or state). "
+                "Do not call without a filter."
             )
         return self
 
