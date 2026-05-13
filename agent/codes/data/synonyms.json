@@ -1,0 +1,293 @@
+{
+  "_meta": {
+    "version": "2026-05-13",
+    "scope": "Top chronic conditions for WNY / HealtheLink agent. Each entry maps a canonical clinical term + common abbreviations + lay synonyms to the code family pulled from the matching vocabulary's data file.",
+    "review_required": "STARTER CONTENT — generated from public ICD-10-CM knowledge for engineering demonstration. Clinical informaticist must review code-family completeness, synonym coverage, and any subtype-specific routing before this is used in production decision-support.",
+    "source": "Public CMS ICD-10-CM tabular reference; no proprietary terminology services consulted",
+    "format": "{ vocabulary: { canonical_term: { synonyms: [...], codes: [...] } } }",
+    "matching": "search_codes lowercases the query and looks up: (1) canonical key directly, then (2) any string in any synonyms[] list. First match wins; codes are returned in the listed order."
+  },
+  "icd10": {
+    "hypertension": {
+      "synonyms": [
+        "high blood pressure",
+        "htn",
+        "elevated blood pressure",
+        "essential hypertension",
+        "primary hypertension",
+        "hypertensive"
+      ],
+      "codes": [
+        "I10",
+        "I11.0",
+        "I11.9",
+        "I12.0",
+        "I12.9",
+        "I13.0",
+        "I13.10",
+        "I13.11",
+        "I13.2",
+        "I16.0",
+        "I16.1",
+        "I16.9"
+      ]
+    },
+    "diabetes mellitus": {
+      "synonyms": [
+        "diabetes",
+        "dm",
+        "sugar diabetes",
+        "sugar",
+        "diabetic",
+        "type 2 diabetes",
+        "type 1 diabetes",
+        "type ii diabetes",
+        "type i diabetes",
+        "t2dm",
+        "t1dm",
+        "t2 dm",
+        "t1 dm",
+        "niddm",
+        "iddm"
+      ],
+      "codes": [
+        "E11.9",
+        "E11.65",
+        "E11.21",
+        "E11.22",
+        "E11.40",
+        "E10.9",
+        "E10.65",
+        "E13.9"
+      ]
+    },
+    "type 2 diabetes": {
+      "synonyms": ["t2dm", "type ii diabetes", "niddm", "adult onset diabetes"],
+      "codes": ["E11.9", "E11.65", "E11.21", "E11.22", "E11.40"]
+    },
+    "type 1 diabetes": {
+      "synonyms": ["t1dm", "type i diabetes", "iddm", "juvenile diabetes", "insulin-dependent diabetes"],
+      "codes": ["E10.9", "E10.65"]
+    },
+    "hyperlipidemia": {
+      "synonyms": [
+        "high cholesterol",
+        "high lipids",
+        "elevated cholesterol",
+        "dyslipidemia",
+        "hypercholesterolemia",
+        "mixed hyperlipidemia"
+      ],
+      "codes": ["E78.5", "E78.0", "E78.2"]
+    },
+    "coronary artery disease": {
+      "synonyms": [
+        "cad",
+        "coronary heart disease",
+        "chd",
+        "ischemic heart disease",
+        "ihd",
+        "atherosclerotic heart disease",
+        "ashd"
+      ],
+      "codes": ["I25.10", "I25.110", "I25.119", "I25.9"]
+    },
+    "myocardial infarction": {
+      "synonyms": [
+        "mi",
+        "heart attack",
+        "acute mi",
+        "ami",
+        "stemi",
+        "nstemi",
+        "acute myocardial infarction"
+      ],
+      "codes": ["I21.9", "I22.9"]
+    },
+    "heart failure": {
+      "synonyms": [
+        "chf",
+        "congestive heart failure",
+        "hf",
+        "systolic heart failure",
+        "diastolic heart failure",
+        "hfref",
+        "hfpef",
+        "cardiac failure"
+      ],
+      "codes": ["I50.9", "I50.20", "I50.30"]
+    },
+    "atrial fibrillation": {
+      "synonyms": [
+        "afib",
+        "a-fib",
+        "a fib",
+        "af",
+        "paroxysmal atrial fibrillation",
+        "paf",
+        "irregular heartbeat",
+        "irregular heart rhythm"
+      ],
+      "codes": ["I48.0", "I48.91"]
+    },
+    "stroke": {
+      "synonyms": [
+        "cva",
+        "cerebrovascular accident",
+        "cerebral infarction",
+        "ischemic stroke",
+        "brain attack"
+      ],
+      "codes": ["I63.9", "I63.50"]
+    },
+    "transient ischemic attack": {
+      "synonyms": ["tia", "mini-stroke", "mini stroke", "transient cerebral ischemia"],
+      "codes": ["G45.9"]
+    },
+    "asthma": {
+      "synonyms": [
+        "reactive airway disease",
+        "rad",
+        "moderate persistent asthma",
+        "severe persistent asthma",
+        "intermittent asthma",
+        "asthmatic"
+      ],
+      "codes": ["J45.909", "J45.40", "J45.50"]
+    },
+    "copd": {
+      "synonyms": [
+        "chronic obstructive pulmonary disease",
+        "emphysema",
+        "chronic bronchitis",
+        "chronic obstructive lung disease",
+        "cold",
+        "copd exacerbation"
+      ],
+      "codes": ["J44.9", "J44.0", "J44.1"]
+    },
+    "chronic kidney disease": {
+      "synonyms": [
+        "ckd",
+        "chronic renal failure",
+        "crf",
+        "chronic renal insufficiency",
+        "kidney failure",
+        "renal failure",
+        "end stage renal disease",
+        "esrd",
+        "ckd stage 3",
+        "ckd stage 4",
+        "ckd stage 5"
+      ],
+      "codes": ["N18.1", "N18.2", "N18.3", "N18.4", "N18.5", "N18.6", "N18.9"]
+    },
+    "depression": {
+      "synonyms": [
+        "major depressive disorder",
+        "mdd",
+        "depressive disorder",
+        "clinical depression",
+        "unipolar depression",
+        "recurrent depression"
+      ],
+      "codes": ["F32.9", "F33.9"]
+    },
+    "anxiety": {
+      "synonyms": [
+        "anxiety disorder",
+        "generalized anxiety disorder",
+        "gad",
+        "anxious",
+        "anxiety disorder unspecified"
+      ],
+      "codes": ["F41.1", "F41.9"]
+    },
+    "obesity": {
+      "synonyms": [
+        "morbid obesity",
+        "severe obesity",
+        "obese",
+        "overweight",
+        "high bmi",
+        "bariatric"
+      ],
+      "codes": ["E66.9", "E66.01"]
+    },
+    "hypothyroidism": {
+      "synonyms": [
+        "underactive thyroid",
+        "low thyroid",
+        "thyroid deficiency"
+      ],
+      "codes": ["E03.9"]
+    },
+    "gerd": {
+      "synonyms": [
+        "gastroesophageal reflux disease",
+        "gastro-esophageal reflux",
+        "acid reflux",
+        "heartburn",
+        "reflux"
+      ],
+      "codes": ["K21.9"]
+    },
+    "osteoarthritis": {
+      "synonyms": [
+        "oa",
+        "degenerative joint disease",
+        "djd",
+        "joint pain",
+        "wear and tear arthritis"
+      ],
+      "codes": ["M19.90"]
+    },
+    "osteoporosis": {
+      "synonyms": [
+        "low bone density",
+        "thinning bones",
+        "age-related osteoporosis",
+        "senile osteoporosis"
+      ],
+      "codes": ["M81.0"]
+    },
+    "alzheimer disease": {
+      "synonyms": [
+        "alzheimers",
+        "alzheimer's",
+        "alzheimer's disease",
+        "ad"
+      ],
+      "codes": ["G30.9"]
+    },
+    "dementia": {
+      "synonyms": [
+        "cognitive decline",
+        "memory loss disorder",
+        "senile dementia",
+        "unspecified dementia"
+      ],
+      "codes": ["F03.90", "G30.9"]
+    },
+    "obstructive sleep apnea": {
+      "synonyms": ["osa", "sleep apnea", "obstructive apnea"],
+      "codes": ["G47.33"]
+    },
+    "chronic low back pain": {
+      "synonyms": ["low back pain", "lbp", "back pain", "lumbago"],
+      "codes": ["M54.5"]
+    },
+    "headache": {
+      "synonyms": ["cephalgia", "head pain"],
+      "codes": ["R51"]
+    },
+    "hepatitis b": {
+      "synonyms": ["hep b", "hbv", "viral hepatitis b", "chronic hepatitis b"],
+      "codes": ["B16.9", "B18.1"]
+    },
+    "hepatitis c": {
+      "synonyms": ["hep c", "hcv", "viral hepatitis c", "chronic hepatitis c"],
+      "codes": ["B17.10", "B18.2"]
+    }
+  }
+}
