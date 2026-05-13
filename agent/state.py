@@ -106,14 +106,28 @@ class ThinkingCompletedEvent(BaseModel):
 
 
 class AssistantTextDeltaEvent(BaseModel):
-    """Plain assistant text emitted between tool calls (rare with
-    output_type=AgentResponse, but possible). Rendered live in the
-    same placeholder as thinking; not persisted because the final
-    response covers it.
+    """One chunk of plain assistant text from the current turn.
+
+    Rare with output_type=AgentResponse since the model is routed through
+    the synthetic final_result tool, but the model can still emit narration
+    between tool calls. Rendered live in a transient placeholder; the
+    AssistantTextCompletedEvent at end of turn carries the full accumulated
+    text so the renderer can persist a row that survives reruns.
     """
 
     kind: Literal["assistant_text_delta"] = "assistant_text_delta"
     delta: str
+    turn_index: int
+
+
+class AssistantTextCompletedEvent(BaseModel):
+    """End of the current turn's plain assistant text. Carries the full
+    accumulated text so the renderer can persist it as a MessageType.TEXT
+    row that survives Streamlit reruns. Symmetric with ThinkingCompletedEvent.
+    """
+
+    kind: Literal["assistant_text_completed"] = "assistant_text_completed"
+    text: str
     turn_index: int
 
 
@@ -128,6 +142,7 @@ StreamEvent = Annotated[
         ThinkingDeltaEvent,
         ThinkingCompletedEvent,
         AssistantTextDeltaEvent,
+        AssistantTextCompletedEvent,
     ],
     Field(discriminator="kind"),
 ]

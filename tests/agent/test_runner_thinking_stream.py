@@ -22,6 +22,7 @@ from pydantic_ai.messages import ModelMessage
 from agent.deps import AgentDeps
 from agent.runner import AgenticRunner
 from agent.state import (
+    AssistantTextCompletedEvent,
     AssistantTextDeltaEvent,
     FinalResponseEvent,
     ThinkingCompletedEvent,
@@ -93,7 +94,8 @@ async def test_thinking_only_turn_emits_deltas_and_completed():
 @pytest.mark.asyncio
 async def test_text_deltas_emitted_for_plain_text_parts():
     """If the model yields raw str deltas (TextPart), they should surface
-    as AssistantTextDeltaEvent. No ThinkingCompletedEvent because no
+    as AssistantTextDeltaEvent followed by AssistantTextCompletedEvent
+    carrying the accumulated text. No ThinkingCompletedEvent because no
     ThinkingPart was streamed."""
 
     async def stream(_messages: list[ModelMessage], _info: AgentInfo):
@@ -116,6 +118,15 @@ async def test_text_deltas_emitted_for_plain_text_parts():
     assert [d.delta for d in text_deltas] == ["Picking ", "a tool…"]
     assert all(d.turn_index == 1 for d in text_deltas)
     assert not [e for e in events if isinstance(e, ThinkingCompletedEvent)]
+
+    text_completed = [e for e in events if isinstance(e, AssistantTextCompletedEvent)]
+    assert len(text_completed) == 1
+    assert text_completed[0].turn_index == 1
+    assert text_completed[0].text == "Picking a tool…"
+    # Completion must arrive before the FinalResponseEvent so the renderer
+    # can dedupe response.text against it.
+    finals = [e for e in events if isinstance(e, FinalResponseEvent)]
+    assert events.index(text_completed[0]) < events.index(finals[0])
 
 
 @pytest.mark.asyncio
@@ -141,6 +152,7 @@ async def test_no_thinking_no_text_emits_nothing_extra():
     assert not [e for e in events if isinstance(e, ThinkingDeltaEvent)]
     assert not [e for e in events if isinstance(e, ThinkingCompletedEvent)]
     assert not [e for e in events if isinstance(e, AssistantTextDeltaEvent)]
+    assert not [e for e in events if isinstance(e, AssistantTextCompletedEvent)]
     assert any(isinstance(e, FinalResponseEvent) for e in events)
 
 

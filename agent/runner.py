@@ -35,6 +35,7 @@ from agent.instructions import selection_instructions
 from agent.models import build_model
 from agent.state import (
     AgentResponse,
+    AssistantTextCompletedEvent,
     AssistantTextDeltaEvent,
     CapReachedEvent,
     CohortSampleEvent,
@@ -223,6 +224,7 @@ class AgenticRunner:
                     turn_index += 1
                     thinking_buf = ""
                     thinking_started_perf: float | None = None
+                    text_buf = ""
                     try:
                         async with node.stream(run.ctx) as req_stream:
                             async for ev in req_stream:
@@ -240,6 +242,7 @@ class AgenticRunner:
                                     elif isinstance(ev.part, TextPart):
                                         initial = ev.part.content or ""
                                         if initial:
+                                            text_buf += initial
                                             yield AssistantTextDeltaEvent(
                                                 delta=initial,
                                                 turn_index=turn_index,
@@ -258,6 +261,7 @@ class AgenticRunner:
                                     elif isinstance(ev.delta, TextPartDelta):
                                         chunk = ev.delta.content_delta or ""
                                         if chunk:
+                                            text_buf += chunk
                                             yield AssistantTextDeltaEvent(
                                                 delta=chunk,
                                                 turn_index=turn_index,
@@ -283,6 +287,16 @@ class AgenticRunner:
                         yield ThinkingCompletedEvent(
                             text=thinking_buf,
                             elapsed_ms=elapsed_ms,
+                            turn_index=turn_index,
+                        )
+                    if text_buf:
+                        # End-of-turn flush so the streamed narration survives
+                        # rerun as a persisted MessageType.TEXT row. Renderer
+                        # dedupes against FinalResponseEvent.response.text to
+                        # avoid double-rendering when the model echoes the
+                        # final answer here as well as via final_result.
+                        yield AssistantTextCompletedEvent(
+                            text=text_buf,
                             turn_index=turn_index,
                         )
                     continue

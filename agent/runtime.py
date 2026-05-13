@@ -17,6 +17,7 @@ from agent.observability import configure_observability
 from agent.runner import AgenticRunner
 from agent.state import (
     AgentResponse,
+    AssistantTextCompletedEvent,
     AssistantTextDeltaEvent,
     CapReachedEvent,
     CohortSampleEvent,
@@ -188,11 +189,28 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
     if isinstance(event, AssistantTextDeltaEvent):
         # Plain assistant narration between tool calls. Lives in its own
         # bucket with no "Thinking..." header so the user can tell the two
-        # apart at a glance. Not persisted — the FinalResponseEvent's TEXT
-        # row covers it on rerun.
+        # apart at a glance. Persisted on the matching AssistantTextCompletedEvent.
         slot = _open_slot(state, "text", event.turn_index)
         slot["buf"] += event.delta
         slot["placeholder"].markdown(slot["buf"])
+        return
+
+    if isinstance(event, AssistantTextCompletedEvent):
+        slot = state["text"].pop(event.turn_index, None)
+        if slot is not None:
+            slot["placeholder"].empty()
+        if event.text.strip():
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    event.text,
+                    MessageType.TEXT,
+                )
+            )
+            # Remember the last persisted narration so FinalResponseEvent
+            # can skip its own response.text row if the model echoed the
+            # same content via TextPart on the final turn.
+            state["last_persisted_text"] = event.text
         return
 
     if isinstance(event, ThinkingCompletedEvent):
@@ -290,13 +308,20 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
         # with the persisted answer.
         _drain_placeholders(state)
         response = event.response
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                response.text,
-                MessageType.TEXT,
+        # Dedupe: if the model already streamed the same final text as a
+        # TextPart on the last turn, AssistantTextCompletedEvent already
+        # persisted it. Skip the redundant row so the user doesn't see the
+        # answer twice. Strip-equality is enough — both come from the same
+        # model output and won't drift in whitespace meaningfully.
+        last_streamed = state.get("last_persisted_text", "")
+        if response.text.strip() and response.text.strip() != last_streamed.strip():
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    response.text,
+                    MessageType.TEXT,
+                )
             )
-        )
         # Translate AgentResponse.artifacts into renderable chat
         # messages (Phase 3 design §3.3). The question comes from
         # session_state where it was stashed by run_agentic_message_flow
