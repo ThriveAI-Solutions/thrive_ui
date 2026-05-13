@@ -156,7 +156,7 @@ def _drain_placeholders(state: dict[str, Any]) -> None:
         slots = state.get(bucket) or {}
         for slot in slots.values():
             try:
-                slot["placeholder"].empty()
+                slot["outer"].empty()
             except Exception:
                 pass
         slots.clear()
@@ -164,13 +164,30 @@ def _drain_placeholders(state: dict[str, Any]) -> None:
 
 def _open_slot(state: dict[str, Any], bucket: str, turn_index: int) -> dict[str, Any]:
     """Return the existing live-update slot for (bucket, turn_index), or
-    create one with a fresh chat_message + st.empty() placeholder."""
+    create one anchored to a fresh outer st.empty().
+
+    The chat_message bubble is rendered INSIDE the outer placeholder on
+    each delta via `outer.container()`, so calling `outer.empty()` later
+    removes both the bubble's avatar and its content. The prior pattern
+    of placing st.empty() inside a chat_message left orphaned empty
+    avatar bubbles after the placeholder was cleared.
+    """
     slot = state[bucket].get(turn_index)
     if slot is None:
-        container = st.chat_message(RoleType.ASSISTANT.value)
-        slot = {"placeholder": container.empty(), "buf": ""}
+        outer = st.empty()
+        slot = {"outer": outer, "buf": ""}
         state[bucket][turn_index] = slot
     return slot
+
+
+def _write_slot(slot: dict[str, Any], header: str | None = None) -> None:
+    """Re-render the slot's buffer into the outer placeholder as a fresh
+    chat_message + markdown. Called on every delta. `header` (e.g.
+    "🤔 **Thinking...**") is prepended when present."""
+    body = (f"{header}\n\n{slot['buf']}") if header else slot["buf"]
+    with slot["outer"].container():
+        with st.chat_message(RoleType.ASSISTANT.value):
+            st.markdown(body)
 
 
 def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> None:
@@ -183,7 +200,7 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
     if isinstance(event, ThinkingDeltaEvent):
         slot = _open_slot(state, "thinking", event.turn_index)
         slot["buf"] += event.delta
-        slot["placeholder"].markdown("🤔 **Thinking...**\n\n" + slot["buf"])
+        _write_slot(slot, header="🤔 **Thinking...**")
         return
 
     if isinstance(event, AssistantTextDeltaEvent):
@@ -192,13 +209,13 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
         # apart at a glance. Persisted on the matching AssistantTextCompletedEvent.
         slot = _open_slot(state, "text", event.turn_index)
         slot["buf"] += event.delta
-        slot["placeholder"].markdown(slot["buf"])
+        _write_slot(slot)
         return
 
     if isinstance(event, AssistantTextCompletedEvent):
         slot = state["text"].pop(event.turn_index, None)
         if slot is not None:
-            slot["placeholder"].empty()
+            slot["outer"].empty()
         if event.text.strip():
             add_message(
                 Message(
@@ -216,9 +233,9 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
     if isinstance(event, ThinkingCompletedEvent):
         slot = state["thinking"].pop(event.turn_index, None)
         if slot is not None:
-            # Drop the transient placeholder; the persisted MessageType.THINKING
+            # Drop the transient bubble; the persisted MessageType.THINKING
             # row that follows replaces it visually.
-            slot["placeholder"].empty()
+            slot["outer"].empty()
         if event.text.strip():
             add_message(
                 Message(
