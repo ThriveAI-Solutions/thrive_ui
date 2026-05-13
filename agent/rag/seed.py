@@ -304,5 +304,60 @@ EXAMPLES_DOCS: List[_Doc] = [
 ]
 
 
+# Few-shot SQL templates for run_sql's tool description. The "{p}" token
+# is replaced with the analytics_db.schema_prefix at render time
+# (production "dw." / SQLite tests "") so the same source-of-truth
+# example works across environments.
+RUN_SQL_EXAMPLES: List[_Doc] = [
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: List patients in a given zip with a given ICD-10 diagnosis.\n"
+            "SQL:\n"
+            "  SELECT isr.source_id, p.full_name, p.age, p.gender, p.last_date_of_visit\n"
+            "  FROM {p}internal_patient_profile_v p\n"
+            "  JOIN {p}internal_source_reference_v isr\n"
+            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+            "  JOIN {p}federated_demographic_v d ON d.source_id = isr.source_id\n"
+            "  JOIN (SELECT DISTINCT patient_id FROM {p}metric_federated_data_v\n"
+            "        WHERE code = :icd10 AND code_type IN ('ICD-10','ICD10','SNOMED')) dx\n"
+            "    ON dx.patient_id = p.patient_id\n"
+            "  WHERE d.address ILIKE :zip_pat\n"
+            "  LIMIT 100;"
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: Count distinct patients seen since a date, grouped by practice.\n"
+            "SQL:\n"
+            "  SELECT p.practice_name, COUNT(DISTINCT isr.source_id) AS patient_count\n"
+            "  FROM {p}internal_patient_profile_v p\n"
+            "  JOIN {p}internal_source_reference_v isr\n"
+            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+            "  WHERE p.last_date_of_visit >= :since\n"
+            "  GROUP BY p.practice_name\n"
+            "  ORDER BY patient_count DESC;"
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: For one source_id, the most recent A1C result (LOINC 4548-4).\n"
+            "SQL:\n"
+            "  SELECT result, clean_result, unit, datetime\n"
+            "  FROM {p}federated_results_v\n"
+            "  WHERE source_id = :source_id\n"
+            "    AND code = '4548-4' AND code_type = 'LOINC'\n"
+            "  ORDER BY datetime DESC\n"
+            "  LIMIT 1;"
+        ),
+    },
+]
+
+
 def all_seed_docs() -> List[_Doc]:
-    return [*SCHEMA_DOCS, *IDENTITY_DOCS, *FRESHNESS_DOCS, *EXAMPLES_DOCS]
+    return [*SCHEMA_DOCS, *IDENTITY_DOCS, *FRESHNESS_DOCS, *EXAMPLES_DOCS, *RUN_SQL_EXAMPLES]
