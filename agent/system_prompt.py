@@ -72,6 +72,14 @@ query)` then feed codes into `get_patient_clinical_data`. Vocabularies: \
 icd10, loinc, cvx, rxnorm, cpt. One call per concept is enough (one \
 search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
 
+  - LAB TESTS REFERENCED BY NAME: you MUST call \
+`search_codes(vocabulary="loinc", query=…)` first for ANY named lab \
+(hepatitis panel, A1C / HbA1c, lipid panel, BMP, CMP, CBC, TSH, hCG, \
+Measles/Rubeola IgM/IgG, etc.). Do NOT guess LOINC codes from memory — \
+coverage is ~50% and a wrong guess silently returns no records. Same \
+rule applies for VACCINES (search_codes(cvx, …)) and \
+MEDICATIONS-BY-CLASS or by name (search_codes(rxnorm, …)).
+
   - Population / cohort question → `search_patients_by_criteria`. Signals: \
 plural ("how many patients", "list patients with"), not anchored to a \
 named patient. Operates WITHOUT a selected slot. Do NOT call find_patient \

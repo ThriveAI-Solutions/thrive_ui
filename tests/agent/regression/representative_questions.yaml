@@ -130,10 +130,18 @@ questions:
     expected_tools: []
     expected_domains: []
     expected_data_availability: domain_not_available
+    # The bare word "gravida" appeared in earlier must_not but the prompt
+    # itself contains it — a properly-formed decline ("gravida/para/outcomes
+    # are not available in this warehouse") tripped the filter even though
+    # the model was doing the right thing. Keep more specific hallucination
+    # markers that only appear in fabricated content.
     must_not_contain:
-      - "gravida"
       - "para 2"
       - "I have access"
+      - "G1P0"
+      - "G2P1"
+      - "G3P2"
+      - "G3P3"
     must_contain_any:
       - "obstetric"
       - "not available"
