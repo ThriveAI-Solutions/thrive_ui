@@ -46,13 +46,17 @@ def build_model() -> Any:
     if provider == "ollama":
         host = ai_keys.get("ollama_host", "http://localhost:11434")
         model_name = ai_keys.get("ollama_model", "qwen3.6:27b")
-        # Ollama's OpenAI-compat layer forwards `think` from extra_body to
-        # /api/chat. Per Ollama docs, the `think` field is a boolean: true
-        # surfaces ThinkingPart deltas, false disables thinking. Hybrid
-        # models like qwen3.6 default to thinking-ON when the field is
-        # absent, so we MUST send the explicit boolean — omitting it lets
-        # the model keep thinking. Non-thinking models ignore the field
-        # either way.
+        # Use `reasoning_effort` (Ollama OpenAI-compat documented field) to
+        # control thinking, not the native /api/chat `think` boolean.
+        # Verified empirically against qwen3.6:27b on Ollama 0.23.2:
+        #   reasoning_effort=high → reasoning deltas in `reasoning` channel,
+        #                           clean `content` channel.
+        #   reasoning_effort=none → no reasoning, clean `content`.
+        #   think=true via extra_body → also works but spills thinking
+        #                               into `content` as <think>…</think>
+        #                               on some streams; less reliable.
+        #   think=false via extra_body → broken on Ollama 0.23.2's OpenAI-
+        #                                compat layer (empty content returned).
         # Two-level config so a deployment can rotate models with different
         # thinking semantics (e.g. qwen3.6 off for tool-call accuracy,
         # gpt-oss on for chain-of-thought):
@@ -65,7 +69,8 @@ def build_model() -> Any:
             think_enabled = bool(per_model[model_name])
         else:
             think_enabled = bool(agent_cfg.get("ollama_think", True))
-        settings = OpenAIChatModelSettings(extra_body={"think": think_enabled})
+        reasoning_effort = "high" if think_enabled else "none"
+        settings = OpenAIChatModelSettings(extra_body={"reasoning_effort": reasoning_effort})
         return OpenAIChatModel(
             model_name,
             provider=OpenAIProvider(base_url=f"{host.rstrip('/')}/v1"),
