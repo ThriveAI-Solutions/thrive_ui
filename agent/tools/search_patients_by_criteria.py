@@ -40,9 +40,9 @@ class CohortCriteria(BaseModel):
     facility: Optional[str] = None
     last_visit_after: Optional[date] = None
     last_visit_before: Optional[date] = None
-    zip_code: Optional[str] = None  # 5-digit ZIP, substring on address
-    city: Optional[str] = None  # case-insensitive substring on address
-    state: Optional[str] = None  # 2-letter USPS code, bracketed-substring on address
+    zip_code: Optional[str] = None  # 5-digit ZIP, exact match on p.zip_code
+    city: Optional[str] = None  # case-insensitive substring on p.city
+    state: Optional[str] = None  # 2-letter USPS code, exact match on uppercased p.state
     sample_size: int = Field(default=20, ge=0, le=100)
 
     @model_validator(mode="after")
@@ -110,8 +110,11 @@ _RELIABILITY_RX = (
     "subject to data-refresh cadence. Some matches may come from claims data refreshed monthly."
 )
 _RELIABILITY_GEO = (
-    "Geographic filtering is best-effort against a free-text address "
-    "field; some matches may be missed. Address structure varies by source feed."
+    "Geographic filters use structured columns on internal_patient_profile_v "
+    "(zip_code, city, state). zip_code coverage is ~100%. City strings vary "
+    "in casing and abbreviation; substring matching handles common cases but "
+    "may miss heavily abbreviated forms. State filtering matches 'NY'-style "
+    "codes; addresses recorded as 'NEW YORK' may be missed."
 )
 
 
@@ -139,9 +142,9 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
       - gender: "M", "F", or "U".
       - facility: substring match against practice_name (case-insensitive).
       - last_visit_after / last_visit_before: date bounds on last_date_of_visit.
-      - zip_code: 5-digit ZIP code, substring-matched against a free-text address field.
-      - city: city name substring, case-insensitive match against address.
-      - state: 2-letter USPS code, substring-matched against address. Results are best-effort.
+      - zip_code: 5-digit ZIP code, exact match against internal_patient_profile_v.zip_code (~100% coverage).
+      - city: city name, case-insensitive substring match (city strings vary by source).
+      - state: 2-letter USPS code, exact match on uppercased input. May miss long-form 'NEW YORK'.
       - sample_size: 0-100; default 20. Set to 0 for count-only.
 
     Returns CohortResult with total_count + sample. The sample is truncated

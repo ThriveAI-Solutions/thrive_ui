@@ -85,26 +85,25 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
             f"AND code_type IN ('RxNorm', 'NDC')) med ON med.patient_id = p.patient_id"
         )
 
-    # --- geographic filters (JOIN federated_demographic_v on source_id) -
-    geo_clauses: list[str] = []
+    # --- geographic filters (direct on internal_patient_profile_v) -----
+    # Live probe (May 2026) confirmed zip_code/city/state are structured
+    # columns on internal_patient_profile_v with 100% zip coverage. No
+    # JOIN to federated_demographic_v is needed; that view has the same
+    # data but the cohort path already lands on internal_patient_profile_v.
     if getattr(criteria, "zip_code", None):
-        geo_clauses.append("LOWER(address) LIKE :geo_zip")
-        params["geo_zip"] = f"%{criteria.zip_code.lower()}%"
+        where_clauses.append("p.zip_code = :geo_zip")
+        params["geo_zip"] = criteria.zip_code
     if getattr(criteria, "city", None):
-        geo_clauses.append("LOWER(address) LIKE :geo_city")
+        # City strings are inconsistent ("BUFFALO" vs "Buffalo" vs "TN OF TONA");
+        # case-insensitive substring is the safest match.
+        where_clauses.append("LOWER(p.city) LIKE :geo_city")
         params["geo_city"] = f"%{criteria.city.lower()}%"
     if getattr(criteria, "state", None):
-        geo_clauses.append("LOWER(address) LIKE :geo_state")
-        # Leading space prevents false matches inside words (e.g., "CA" in
-        # "Cathedral"). Trailing wildcard allows addresses that end with
-        # the state code (e.g., "...Buffalo NY") to match.
-        params["geo_state"] = f"% {criteria.state.lower()}%"
-    if geo_clauses:
-        geo_where = " AND ".join(geo_clauses)
-        join_clauses.append(
-            f"JOIN (SELECT DISTINCT source_id FROM {schema_prefix}federated_demographic_v "
-            f"WHERE {geo_where}) d ON d.source_id = isr.source_id"
-        )
+        # state is "NY" most often, occasionally "NEW YORK"; exact match on
+        # uppercased input handles the common case. The reliability note
+        # documents the long-tail variant.
+        where_clauses.append("UPPER(p.state) = :geo_state")
+        params["geo_state"] = criteria.state.upper()
 
     # --- demographic / visit filters ----------------------------------
     if getattr(criteria, "age_min", None) is not None:

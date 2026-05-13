@@ -1,12 +1,13 @@
-"""Tests for the geographic JOIN added to cohort_sql.
+"""Tests for the geographic filters added to cohort_sql.
 
-Uses synthetic_db (SQLite + redshift_synthetic.sql) populated with addresses:
-  src-john-1962 → '12 Elm St, Buffalo NY 14223'
-  src-john-1971 → '88 Oak Ave, Buffalo NY 14201'
-  src-jane-1985 → '440 Pine Rd, Pittsburgh PA 15213'
+Uses synthetic_db (SQLite + redshift_synthetic.sql) populated with
+structured geographic columns on internal_patient_profile_v:
+  patient_id=1 (src-john-1962) → zip_code='14223', city='Buffalo', state='NY'
+  patient_id=2 (src-john-1971) → zip_code='14201', city='Buffalo', state='NY'
+  patient_id=3 (src-jane-1985) → zip_code='15213', city='Pittsburgh', state='PA'
 
-SQLite's ILIKE behavior: SQLite treats LIKE as case-insensitive by default,
-which matches Postgres ILIKE semantics for these tests.
+No JOIN to federated_demographic_v — geo filters are direct WHERE clauses
+on p.zip_code / p.city / p.state (pivot confirmed by May 2026 warehouse probe).
 """
 
 from __future__ import annotations
@@ -42,31 +43,59 @@ def _make(**kw):
 
 def test_zip_code_filter_matches_only_that_zip(synthetic_db):
     sql, params = cohort_sql(_make(zip_code="14223"), schema_prefix="")
+    # Structural: the SQL must filter on p.zip_code directly, not via a JOIN
+    assert "p.zip_code = :geo_zip" in sql
+    assert "federated_demographic_v" not in sql
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     src_ids = sorted(r._mapping["source_id"] for r in rows)
-    assert src_ids == ["src-john-1962"], f"expected only 14223 match; got {src_ids}"
+    # patient_id=1 (John 1962, zip 14223) has two active source references
+    # (empi_rank 1 and 2); both come back with the direct WHERE clause.
+    # The important assertion is no Pittsburgh (15213) or 14201 patient appears.
+    assert all(s.startswith("src-john-1962") for s in src_ids), (
+        f"only zip-14223 patient (John 1962) expected; got {src_ids}"
+    )
+    assert "src-jane-1985" not in src_ids, f"Pittsburgh (15213) should not match 14223"
+    assert "src-john-1971" not in src_ids, f"zip 14201 should not match 14223"
 
 
 def test_city_filter_matches_substring(synthetic_db):
     sql, params = cohort_sql(_make(city="Buffalo"), schema_prefix="")
+    assert "LOWER(p.city) LIKE :geo_city" in sql
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     src_ids = sorted(r._mapping["source_id"] for r in rows)
-    assert src_ids == ["src-john-1962", "src-john-1971"], f"got {src_ids}"
+    # All Buffalo patients (patients 1–2 from synthetic fixture + 4–8 who
+    # also have city='Buffalo') — but only the ones active in isr with empi_rank!=99.
+    # At minimum src-john-1962 and src-john-1971 must be present.
+    assert "src-john-1962" in src_ids, f"got {src_ids}"
+    assert "src-john-1971" in src_ids, f"got {src_ids}"
+    assert "src-jane-1985" not in src_ids, f"Pittsburgh should not match Buffalo; got {src_ids}"
 
 
-def test_state_filter_uses_bracketed_pattern(synthetic_db):
-    sql, params = cohort_sql(_make(state="NY"), schema_prefix="")
+def test_state_filter_exact_match_on_uppercased(synthetic_db):
+    # Lower-case input "ny" should be uppercased before comparison.
+    sql, params = cohort_sql(_make(state="ny"), schema_prefix="")
+    assert "UPPER(p.state) = :geo_state" in sql
+    assert params["geo_state"] == "NY"
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     src_ids = sorted(r._mapping["source_id"] for r in rows)
-    assert src_ids == ["src-john-1962", "src-john-1971"], f"got {src_ids}"
+    assert "src-john-1962" in src_ids, f"got {src_ids}"
+    assert "src-john-1971" in src_ids, f"got {src_ids}"
+    assert "src-jane-1985" not in src_ids, f"PA should not match NY; got {src_ids}"
+
+    # Upper-case "NY" must produce the same result.
+    sql2, params2 = cohort_sql(_make(state="NY"), schema_prefix="")
+    with synthetic_db.connect() as conn:
+        rows2 = conn.execute(text(sql2), params2).fetchall()
+    src_ids2 = sorted(r._mapping["source_id"] for r in rows2)
+    assert src_ids2 == src_ids, f"'NY' and 'ny' should match identically; got {src_ids2}"
 
 
 def test_zip_combines_with_diagnosis_codes(synthetic_db):
     """Zip + dx is the failing-question pattern: only patients with both."""
-    # First insert a diagnosis row for src-john-1962 so the JOIN has data.
+    # Insert a diagnosis row for patient_id=1 (John 1962, zip=14223).
     with synthetic_db.begin() as conn:
         conn.execute(
             text(
@@ -82,42 +111,14 @@ def test_zip_combines_with_diagnosis_codes(synthetic_db):
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     src_ids = sorted(r._mapping["source_id"] for r in rows)
-    assert src_ids == ["src-john-1962"], f"got {src_ids}"
+    # patient_id=1 (zip 14223) has two active source_ids (ranks 1 and 2).
+    assert all(s.startswith("src-john-1962") for s in src_ids), f"only zip-14223 patient expected; got {src_ids}"
+    assert "src-john-1971" not in src_ids, f"zip 14201 + no I10 should be excluded; got {src_ids}"
 
 
-def test_schema_prefix_qualifies_geo_join_view(synthetic_db):
+def test_geo_filter_uses_internal_patient_profile_v(synthetic_db):
+    """Geo filtering must use p.zip_code on internal_patient_profile_v —
+    no JOIN to federated_demographic_v should appear."""
     sql, _ = cohort_sql(_make(zip_code="14223"), schema_prefix="dw.")
-    assert "dw.federated_demographic_v" in sql
-
-
-def test_state_filter_matches_trailing_state(synthetic_db):
-    """Address ending with state code (no trailing space) must still match."""
-    # Insert a row whose address ends with "NY" (no zip after).
-    with synthetic_db.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO federated_demographic_v "
-                "(source_id, patient_id, first_name, last_name, date_of_birth, gender, address) "
-                "VALUES ('src-trailing-ny', '4', 'Trailing', 'State', '1990-01-01', 'F', '1 Edge Lane, Buffalo NY')"
-            )
-        )
-        # Provide internal_patient_profile_v + internal_source_reference_v
-        # rows so the JOIN chain reaches the new demographic row.
-        conn.execute(
-            text(
-                "INSERT INTO internal_patient_profile_v "
-                "(patient_id, first_name, last_name, full_name, date_of_birth, age, gender, last_date_of_visit, practice_name, conditions) "
-                "VALUES (99, 'Trailing', 'State', 'Trailing State', '1990-01-01', 35, 'F', '2025-01-01', 'BMG', 'none')"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO internal_source_reference_v (patient_id, source_id, empi_rank) "
-                "VALUES (99, 'src-trailing-ny', 1)"
-            )
-        )
-    sql, params = cohort_sql(_make(state="NY"), schema_prefix="")
-    with synthetic_db.connect() as conn:
-        rows = conn.execute(text(sql), params).fetchall()
-    src_ids = sorted(r._mapping["source_id"] for r in rows)
-    assert "src-trailing-ny" in src_ids, f"trailing-state address must match; got {src_ids}"
+    assert "p.zip_code" in sql
+    assert "dw.federated_demographic_v" not in sql

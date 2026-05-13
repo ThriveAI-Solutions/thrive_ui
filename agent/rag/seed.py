@@ -23,7 +23,8 @@ SCHEMA_DOCS: List[_Doc] = [
             "internal_patient_profile_v: consent-aware patient master. Use this as the "
             "primary source for find_patient. Key columns: patient_id (integer, "
             "warehouse-internal), first_name, last_name, full_name, date_of_birth, "
-            "age, gender, last_date_of_visit, practice_name, provider_name, conditions. "
+            "age, gender, last_date_of_visit, practice_name, provider_name, conditions, "
+            "address_1, address_2, city, state, zip_code (5-digit, ~100% coverage). "
             "Patients in this view have given consent to be shown to other users; "
             "do NOT use federated_demographic_v for UI-visible patient lookup."
         ),
@@ -46,7 +47,8 @@ SCHEMA_DOCS: List[_Doc] = [
             "federated_demographic_v: source-level demographic feed. NOT consent-filtered. "
             "Columns: source_id (varchar 50, canonical join key), patient_id (varchar, "
             "per-source — do not aggregate on this), date_of_birth, first_name, last_name, "
-            "gender, address, phone, race, ethnicity. Use internal_patient_profile_v for "
+            "gender, address_1, address_2, city, state, zip (no underscore on this view), "
+            "phone, race, ethnicity. Use internal_patient_profile_v for "
             "patient lookup; use this view only when joined to a known source_id."
         ),
     },
@@ -330,11 +332,10 @@ RUN_SQL_EXAMPLES: List[_Doc] = [
             "  FROM {p}internal_patient_profile_v p\n"
             "  JOIN {p}internal_source_reference_v isr\n"
             "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
-            "  JOIN {p}federated_demographic_v d ON d.source_id = isr.source_id\n"
             "  JOIN (SELECT DISTINCT patient_id FROM {p}metric_federated_data_v\n"
             "        WHERE code = :icd10 AND code_type IN ('ICD-10','ICD10','SNOMED')) dx\n"
             "    ON dx.patient_id = p.patient_id\n"
-            "  WHERE d.address ILIKE :zip_pat\n"
+            "  WHERE p.zip_code = :zip\n"
             "  LIMIT 100;"
         ),
     },

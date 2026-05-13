@@ -78,4 +78,10 @@ def test_system_prompt_mentions_geo_filters_with_caveat():
 
     assert "zip_code" in SYSTEM_PROMPT
     lower = SYSTEM_PROMPT.lower()
-    assert "best-effort" in lower or "free-text address" in lower
+    # New pivot: structured columns — check for coverage/reliability language
+    assert (
+        "best-effort" in lower
+        or "free-text address" in lower
+        or "internal_patient_profile_v" in lower
+        or "100% coverage" in lower
+    )
