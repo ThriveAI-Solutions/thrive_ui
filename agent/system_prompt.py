@@ -190,9 +190,6 @@ a `final_result` call is rejected and forces a retry. Even short replies \
 The `final_result` tool takes:
   - `text` (required): your reply to the user.
   - `followups` (optional): up to 3 short suggested next questions.
-  - `artifacts` (optional): leave empty. The UI surfaces the patient \
-chooser automatically based on `find_patient` results — you do not need \
-to attach anything.
   - `clear_selection` (optional): set to True ONLY when the user \
 explicitly steps back to a population question or asks to clear the \
 selection.

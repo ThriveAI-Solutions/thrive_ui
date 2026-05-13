@@ -151,13 +151,21 @@ StreamEvent = Annotated[
 # --- Final response --------------------------------------------------
 
 
-from agent.artifacts import Artifact  # noqa: E402  (kept here for forward-ref readability)
-
-
 class AgentResponse(BaseModel):
+    """LLM-facing structured output.
+
+    Deliberately flat — no nested unions or $defs — because local models
+    (qwen3.6 on Ollama in particular) silently fail to call the synthetic
+    `final_result` tool when its JSON schema gets complex. The artifact
+    types still live in agent/artifacts.py for use by individual tools
+    (make_chart returns a ChartArtifact, summarize_results returns a
+    SummaryArtifact), but those flow through the tool-call card path,
+    not via this response object. The patient chooser and cohort sample
+    DataFrame are auto-surfaced by AgenticRunner.stream() events.
+    """
+
     text: str
     followups: List[str] = []
-    artifacts: List[Artifact] = []
     clear_selection: bool = False
     cap_reached: bool = False
 

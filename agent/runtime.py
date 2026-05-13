@@ -339,21 +339,6 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
                     MessageType.TEXT,
                 )
             )
-        # Translate AgentResponse.artifacts into renderable chat
-        # messages (Phase 3 design §3.3). The question comes from
-        # session_state where it was stashed by run_agentic_message_flow
-        # at line 110 — at this point the agent has been called with it.
-        question = st.session_state.get("pending_user_question", "")
-        try:
-            from utils.chat_bot_helper import render_agent_artifacts
-
-            render_agent_artifacts(response, question=question)
-        except Exception:
-            # Artifact rendering failure should not block the rest of
-            # the FinalResponseEvent handling. Log and continue.
-            import traceback
-
-            traceback.print_exc()
         # Honor clear_selection: drop both the slot AND the conversation
         # history, since "start fresh" means no carry-over context.
         if response.clear_selection:
