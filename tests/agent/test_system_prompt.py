@@ -61,3 +61,21 @@ def test_system_prompt_documents_search_patients_by_criteria():
     # The prompt must teach the population-vs-specific-patient routing rule
     # (Phase 4 design §3.3). Look for either phrase, since wording can evolve.
     assert "population" in SYSTEM_PROMPT.lower() or "cohort" in SYSTEM_PROMPT.lower()
+
+
+def test_system_prompt_forbids_stacking_condition_text_with_codes():
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    # Don't-stack rule must be explicit, not a soft preference.
+    assert "do not pass" in lower or "do not stack" in lower or "do not combine" in lower
+    assert "condition_text" in SYSTEM_PROMPT
+    assert "diagnosis_codes" in SYSTEM_PROMPT
+
+
+def test_system_prompt_mentions_geo_filters_with_caveat():
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    assert "zip_code" in SYSTEM_PROMPT
+    lower = SYSTEM_PROMPT.lower()
+    assert "best-effort" in lower or "free-text address" in lower

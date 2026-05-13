@@ -83,7 +83,15 @@ MEDICATIONS-BY-CLASS or by name (search_codes(rxnorm, …)).
   - Population / cohort question → `search_patients_by_criteria`. Signals: \
 plural ("how many patients", "list patients with"), not anchored to a \
 named patient. Operates WITHOUT a selected slot. Do NOT call find_patient \
-first. Surface reliability_note verbatim.
+first. Surface reliability_note verbatim. \
+\
+`condition_text` is a FALLBACK for when codes aren't known. Do NOT pass \
+`condition_text` AND `diagnosis_codes` together — that AND-stacks them \
+and over-constrains the cohort to zero. Pick one. \
+\
+Geographic filters (`zip_code`, `city`, `state`) match against a \
+free-text address field; results are best-effort. The tool surfaces a \
+geo reliability note — include it verbatim.
 
   - Specific-patient question with "how many" still goes through \
 find_patient + get_patient_clinical_data ("how many medications is John \
