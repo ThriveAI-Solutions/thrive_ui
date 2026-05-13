@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 from pydantic_ai.tools import ToolDefinition
 
