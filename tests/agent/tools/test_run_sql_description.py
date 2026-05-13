@@ -19,7 +19,7 @@ def _make_ctx(schema_prefix: str):
 
 def _run(coro_or_value):
     if inspect.isawaitable(coro_or_value):
-        return asyncio.get_event_loop().run_until_complete(coro_or_value)
+        return asyncio.run(coro_or_value)
     return coro_or_value
 
 

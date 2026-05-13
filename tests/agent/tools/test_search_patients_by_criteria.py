@@ -250,6 +250,22 @@ def test_geo_only_attaches_geo_reliability(synthetic_db):
     assert out.reliability_note == _RELIABILITY_GEO
 
 
+def test_geo_no_records_still_attaches_geo_reliability(synthetic_db):
+    """A geo query that finds nothing should STILL surface the geo caveat —
+    'no one in zip 99999' could be a real negative or a data-quality miss."""
+    from agent.tools.search_patients_by_criteria import (
+        CohortCriteria,
+        search_patients_by_criteria,
+        _RELIABILITY_GEO,
+    )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    out = search_patients_by_criteria(ctx, CohortCriteria(zip_code="99999"))
+    assert out.data_availability == "no_records_found"
+    assert out.reliability_note == _RELIABILITY_GEO
+
+
 def test_dx_plus_geo_concatenates_both_notes(synthetic_db):
     from agent.tools.search_patients_by_criteria import (
         CohortCriteria,

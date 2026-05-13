@@ -88,20 +88,22 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
     # --- geographic filters (JOIN federated_demographic_v on source_id) -
     geo_clauses: list[str] = []
     if getattr(criteria, "zip_code", None):
-        geo_clauses.append("LOWER(d.address) LIKE :geo_zip")
+        geo_clauses.append("LOWER(address) LIKE :geo_zip")
         params["geo_zip"] = f"%{criteria.zip_code.lower()}%"
     if getattr(criteria, "city", None):
-        geo_clauses.append("LOWER(d.address) LIKE :geo_city")
+        geo_clauses.append("LOWER(address) LIKE :geo_city")
         params["geo_city"] = f"%{criteria.city.lower()}%"
     if getattr(criteria, "state", None):
-        geo_clauses.append("LOWER(d.address) LIKE :geo_state")
-        # Bracket the 2-letter code with spaces to reduce false matches
-        # like "CA" inside "Cathedral".
-        params["geo_state"] = f"% {criteria.state.lower()} %"
+        geo_clauses.append("LOWER(address) LIKE :geo_state")
+        # Leading space prevents false matches inside words (e.g., "CA" in
+        # "Cathedral"). Trailing wildcard allows addresses that end with
+        # the state code (e.g., "...Buffalo NY") to match.
+        params["geo_state"] = f"% {criteria.state.lower()}%"
     if geo_clauses:
+        geo_where = " AND ".join(geo_clauses)
         join_clauses.append(
-            f"JOIN {schema_prefix}federated_demographic_v d "
-            f"ON d.source_id = isr.source_id AND " + " AND ".join(geo_clauses)
+            f"JOIN (SELECT DISTINCT source_id FROM {schema_prefix}federated_demographic_v "
+            f"WHERE {geo_where}) d ON d.source_id = isr.source_id"
         )
 
     # --- demographic / visit filters ----------------------------------

@@ -139,6 +139,9 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
       - gender: "M", "F", or "U".
       - facility: substring match against practice_name (case-insensitive).
       - last_visit_after / last_visit_before: date bounds on last_date_of_visit.
+      - zip_code: 5-digit ZIP code, substring-matched against a free-text address field.
+      - city: city name substring, case-insensitive match against address.
+      - state: 2-letter USPS code, substring-matched against address. Results are best-effort.
       - sample_size: 0-100; default 20. Set to 0 for count-only.
 
     Returns CohortResult with total_count + sample. The sample is truncated
@@ -152,11 +155,23 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     sql, params = cohort_sql(criteria, schema_prefix=schema_prefix)
     rows = adapter.fetch_all(sql, params)
 
+    # Compute reliability_note up front so the no_records path also surfaces it
+    # — geo-filter misses are most informative when no rows came back.
+    reliability_parts: list[str] = []
+    if criteria.diagnosis_codes:
+        reliability_parts.append(_RELIABILITY_DX)
+    elif criteria.medication_rxnorm_codes:
+        reliability_parts.append(_RELIABILITY_RX)
+    if criteria.zip_code or criteria.city or criteria.state:
+        reliability_parts.append(_RELIABILITY_GEO)
+    reliability = " ".join(reliability_parts) if reliability_parts else None
+
     if not rows:
         result = CohortResult(
             total_count=0,
             sample=[],
             data_availability="no_records_found",
+            reliability_note=reliability,
         )
         ctx.deps.last_dataframe = cohort_result_to_df(result)
         return result
@@ -182,15 +197,6 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
         )
         for r in sample_rows
     ]
-
-    reliability_parts: list[str] = []
-    if criteria.diagnosis_codes:
-        reliability_parts.append(_RELIABILITY_DX)
-    elif criteria.medication_rxnorm_codes:
-        reliability_parts.append(_RELIABILITY_RX)
-    if criteria.zip_code or criteria.city or criteria.state:
-        reliability_parts.append(_RELIABILITY_GEO)
-    reliability = " ".join(reliability_parts) if reliability_parts else None
 
     result = CohortResult(
         total_count=total_count,

@@ -88,3 +88,36 @@ def test_zip_combines_with_diagnosis_codes(synthetic_db):
 def test_schema_prefix_qualifies_geo_join_view(synthetic_db):
     sql, _ = cohort_sql(_make(zip_code="14223"), schema_prefix="dw.")
     assert "dw.federated_demographic_v" in sql
+
+
+def test_state_filter_matches_trailing_state(synthetic_db):
+    """Address ending with state code (no trailing space) must still match."""
+    # Insert a row whose address ends with "NY" (no zip after).
+    with synthetic_db.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO federated_demographic_v "
+                "(source_id, patient_id, first_name, last_name, date_of_birth, gender, address) "
+                "VALUES ('src-trailing-ny', '4', 'Trailing', 'State', '1990-01-01', 'F', '1 Edge Lane, Buffalo NY')"
+            )
+        )
+        # Provide internal_patient_profile_v + internal_source_reference_v
+        # rows so the JOIN chain reaches the new demographic row.
+        conn.execute(
+            text(
+                "INSERT INTO internal_patient_profile_v "
+                "(patient_id, first_name, last_name, full_name, date_of_birth, age, gender, last_date_of_visit, practice_name, conditions) "
+                "VALUES (99, 'Trailing', 'State', 'Trailing State', '1990-01-01', 35, 'F', '2025-01-01', 'BMG', 'none')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO internal_source_reference_v (patient_id, source_id, empi_rank) "
+                "VALUES (99, 'src-trailing-ny', 1)"
+            )
+        )
+    sql, params = cohort_sql(_make(state="NY"), schema_prefix="")
+    with synthetic_db.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    src_ids = sorted(r._mapping["source_id"] for r in rows)
+    assert "src-trailing-ny" in src_ids, f"trailing-state address must match; got {src_ids}"
