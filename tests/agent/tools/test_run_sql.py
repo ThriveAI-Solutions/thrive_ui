@@ -235,3 +235,27 @@ def test_run_sql_rejects_merge_vacuum_analyze_copy(synthetic_db):
     ):
         with pytest.raises(ModelRetry):
             run_sql(ctx, RunSqlInput(sql=stmt))
+
+
+def test_run_sql_wraps_db_errors_as_model_retry(synthetic_db):
+    """Live regression on 2026-05-13: gpt-oss called run_sql with
+    `SELECT p.source_id FROM dw.internal_patient_profile_v p ...` —
+    the column doesn't exist on that view, psycopg2 raised
+    UndefinedColumn, and the unwrapped SQLAlchemyError killed the whole
+    agent stream. The tool must convert DB errors to ModelRetry so the
+    LLM can read the underlying message and fix its query on the next
+    turn instead of aborting the run."""
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    # Reference a column that doesn't exist on synthetic_db's schema —
+    # SQLite reports OperationalError which sqlalchemy wraps in
+    # SQLAlchemyError. The tool should catch and re-raise as ModelRetry.
+    with pytest.raises(ModelRetry) as excinfo:
+        run_sql(ctx, RunSqlInput(sql="SELECT no_such_column FROM federated_demographic_v"))
+    msg = str(excinfo.value)
+    assert "SQL execution failed" in msg
+    # Underlying DB error should be surfaced verbatim so the model can
+    # actually act on it.
+    assert "no_such_column" in msg.lower() or "no such column" in msg.lower()

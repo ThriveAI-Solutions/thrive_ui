@@ -88,7 +88,15 @@ named diagnosis — it LIKE-matches a free-text `conditions` column where \
 clinical terminology rarely matches colloquial language ("high blood \
 pressure" will NOT match "Essential hypertension" stored as the \
 condition). Use `condition_text` ONLY when no ICD-10 code can be found \
-or the user is searching for a free-text phrase that isn't a diagnosis.
+or the user is searching for a free-text phrase that isn't a diagnosis. \
+\
+When calling `search_codes`, query with the CANONICAL clinical term, \
+not the user's colloquial phrasing. Translate first: "high blood \
+pressure" → "hypertension"; "sugar" / "sugar diabetes" → "diabetes"; \
+"heart attack" → "myocardial infarction"; "stroke" → "cerebrovascular"; \
+"clot" → "thrombosis". The codes index matches on canonical display \
+names; querying with the colloquial term returns zero results and \
+strands you with no codes to use.
 
   - Population / cohort question → `search_patients_by_criteria`. Signals: \
 plural ("how many patients", "list patients with"), not anchored to a \

@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import ToolDefinition
+from sqlalchemy.exc import SQLAlchemyError
 
 from agent.dataframe_adapters import run_sql_result_to_df
 from agent.db.sql_context import schema_context_for_sql
@@ -125,6 +126,14 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
         # Adapter-level read-only guard tripped; re-raise as ModelRetry
         # so the LLM gets a chance to fix instead of crashing the run.
         raise ModelRetry(str(exc)) from exc
+    except SQLAlchemyError as exc:
+        # Warehouse rejected the SQL (UndefinedColumn, UndefinedTable,
+        # syntax error, type mismatch, etc). Surface the underlying DB
+        # message as a ModelRetry so the LLM can read it and fix the
+        # query on the next turn instead of crashing the whole stream.
+        # str(exc) on SQLAlchemyError already includes the wrapped
+        # psycopg2 message and the offending SQL fragment.
+        raise ModelRetry(f"SQL execution failed: {exc}") from exc
 
     reliability = None
     if truncated:
