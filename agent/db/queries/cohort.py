@@ -161,11 +161,29 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
         params["cond_text"] = f"%{criteria.condition_text.lower()}%"
 
     sample_size = getattr(criteria, "sample_size", 20)
-    params["sample_size_plus_one"] = int(sample_size) + 1
-
     join_block = "\n        ".join(join_clauses)
     where_block = " AND ".join(where_clauses)
 
+    if int(sample_size) == 0:
+        # Count-only fast path. The COUNT(*) OVER () + LIMIT shape that
+        # the per-row query uses still forces Postgres to compute the
+        # window over the full result before applying the LIMIT, which
+        # for broad cohorts (e.g. all-NY + 3 diagnosis codes) can run
+        # for many minutes. A pure aggregate is cheap regardless of
+        # population size and never touches per-source-id fan-out from
+        # the isr join (so the count is unique-people, not source-rows).
+        sql = f"""
+            SELECT COUNT(DISTINCT p.patient_id) AS total_count
+            FROM {schema_prefix}internal_patient_profile_v p
+            JOIN {schema_prefix}internal_source_reference_v isr
+              ON isr.patient_id = p.patient_id
+              AND isr.empi_rank != 99
+            {join_block}
+            WHERE {where_block}
+        """
+        return sql, params
+
+    params["sample_size_plus_one"] = int(sample_size) + 1
     sql = f"""
         SELECT
             isr.source_id,

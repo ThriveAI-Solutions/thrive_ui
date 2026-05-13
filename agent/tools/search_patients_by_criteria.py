@@ -96,6 +96,9 @@ class CohortResult(CompactingListResult):
 
 
 from pydantic_ai import RunContext
+from pydantic_ai.exceptions import ModelRetry
+from sqlalchemy.exc import SQLAlchemyError
+
 from agent.dataframe_adapters import cohort_result_to_df
 from agent.db.queries.cohort import cohort_sql
 from agent.deps import AgentDeps
@@ -156,7 +159,22 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     schema_prefix = getattr(adapter, "schema_prefix", "")
 
     sql, params = cohort_sql(criteria, schema_prefix=schema_prefix)
-    rows = adapter.fetch_all(sql, params)
+    try:
+        rows = adapter.fetch_all(sql, params)
+    except SQLAlchemyError as exc:
+        # Statement timeout / undefined column / connection drop / etc.
+        # Without this catch the exception bubbled up unwrapped through
+        # pydantic-ai and crashed the entire agent stream (live regression
+        # 2026-05-13 on 'how many people in NY have diabetes' — broad
+        # cohort scan hit the 30s curated-query timeout). ModelRetry lets
+        # the LLM see the failure and either narrow the criteria
+        # (smaller geographic filter, age bound, etc.) or report the
+        # limitation to the user.
+        raise ModelRetry(
+            f"Cohort query failed: {exc}. Try narrowing the criteria "
+            "(add a smaller geographic filter, an age range, or a more "
+            "specific date window) or report this limitation to the user."
+        ) from exc
 
     # Compute reliability_note up front so the no_records path also surfaces it
     # — geo-filter misses are most informative when no rows came back.
@@ -168,6 +186,21 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     if criteria.zip_code or criteria.city or criteria.state:
         reliability_parts.append(_RELIABILITY_GEO)
     reliability = " ".join(reliability_parts) if reliability_parts else None
+
+    # Count-only fast path: cohort_sql emits a single COUNT(DISTINCT) row
+    # when sample_size==0. Surface total_count even if it's zero — the
+    # absence of a row would have been caught above as a SQL error.
+    if int(criteria.sample_size) == 0:
+        total_count = int(rows[0]["total_count"]) if rows else 0
+        availability = "data_present" if total_count > 0 else "no_records_found"
+        result = CohortResult(
+            total_count=total_count,
+            sample=[],
+            data_availability=availability,
+            reliability_note=reliability,
+        )
+        ctx.deps.last_dataframe = cohort_result_to_df(result)
+        return result
 
     if not rows:
         result = CohortResult(

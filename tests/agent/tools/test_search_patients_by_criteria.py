@@ -250,6 +250,53 @@ def test_geo_only_attaches_geo_reliability(synthetic_db):
     assert out.reliability_note == _RELIABILITY_GEO
 
 
+def test_cohort_wraps_db_errors_as_model_retry(synthetic_db):
+    """Live regression on 2026-05-13: 'how many people in NY have diabetes'
+    triggered the new 30s curated-query timeout, the SQLAlchemyError
+    propagated unwrapped through pydantic-ai, and the entire agent
+    stream crashed. The cohort tool must convert DB errors to ModelRetry
+    so the LLM gets a chance to narrow the criteria instead of dying."""
+    from agent.tools.search_patients_by_criteria import (
+        CohortCriteria,
+        search_patients_by_criteria,
+    )
+    from pydantic_ai.exceptions import ModelRetry
+    from sqlalchemy.exc import OperationalError
+
+    deps = _deps(synthetic_db, selected=None)
+
+    def boom(sql, params=None):
+        raise OperationalError("statement", {}, Exception("simulated query timeout"))
+
+    deps.analytics_db.fetch_all = boom
+
+    ctx = MagicMock()
+    ctx.deps = deps
+
+    with pytest.raises(ModelRetry) as excinfo:
+        search_patients_by_criteria(ctx, CohortCriteria(state="NY"))
+    msg = str(excinfo.value)
+    assert "Cohort query failed" in msg
+    assert "simulated query timeout" in msg or "OperationalError" in msg
+
+
+def test_cohort_count_only_path_returns_total_count(synthetic_db):
+    """sample_size=0 must take the count-only fast path and return
+    total_count without sample rows. Empty sample, data_present when
+    count > 0."""
+    from agent.tools.search_patients_by_criteria import (
+        CohortCriteria,
+        search_patients_by_criteria,
+    )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    out = search_patients_by_criteria(ctx, CohortCriteria(state="NY", sample_size=0))
+    assert out.data_availability == "data_present"
+    assert out.total_count >= 2  # Both Johns + extras seeded for other tests
+    assert out.sample == []
+
+
 def test_geo_no_records_still_attaches_geo_reliability(synthetic_db):
     """A geo query that finds nothing should STILL surface the geo caveat —
     'no one in zip 99999' could be a real negative or a data-quality miss."""

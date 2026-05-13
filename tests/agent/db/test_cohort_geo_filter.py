@@ -144,3 +144,42 @@ def test_geo_filter_uses_internal_patient_profile_v(synthetic_db):
     sql, _ = cohort_sql(_make(zip_code="14223"), schema_prefix="dw.")
     assert "p.zip_code" in sql
     assert "dw.federated_demographic_v" not in sql
+
+
+def test_sample_size_zero_emits_count_only_fast_path():
+    """sample_size=0 must take the count-only fast path. The full pivot
+    (SELECT source_id, ..., COUNT(*) OVER ()) forces Postgres to compute
+    the window over the full result before LIMIT — burned a 30s timeout
+    on broad cohorts. The count-only shape is a pure aggregate that's
+    cheap regardless of population size, and counts unique patients
+    instead of inflating by per-source-id fan-out."""
+    sql, params = cohort_sql(_make(state="NY", sample_size=0), schema_prefix="dw.")
+    assert "COUNT(DISTINCT p.patient_id) AS total_count" in sql
+    assert "COUNT(*) OVER ()" not in sql
+    assert "LIMIT" not in sql.upper()
+    # No sample_size_plus_one param — that's only for the per-row path.
+    assert "sample_size_plus_one" not in params
+
+
+def test_sample_size_zero_returns_count_against_synthetic(synthetic_db):
+    """End-to-end: sample_size=0 path actually runs and returns a count."""
+    sql, params = cohort_sql(_make(state="NY", sample_size=0), schema_prefix="")
+    with synthetic_db.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    assert len(rows) == 1
+    # Synthetic NY patients: John 1962, John 1971 (Buffalo NY, plus several
+    # extras seeded for other tests). Both Johns + the rest are distinct.
+    total = rows[0]._mapping["total_count"]
+    assert total >= 2, f"expected ≥2 distinct NY patients, got {total}"
+
+
+def test_sample_size_nonzero_keeps_per_row_pivot():
+    """The default (non-zero) sample_size path must keep the per-row SELECT
+    and LIMIT — that's the only way the tool can return sample patient
+    rows alongside the total count."""
+    sql, params = cohort_sql(_make(state="NY", sample_size=20), schema_prefix="dw.")
+    assert "isr.source_id" in sql
+    assert "p.full_name" in sql
+    assert "COUNT(*) OVER ()" in sql
+    assert "LIMIT :sample_size_plus_one" in sql
+    assert params["sample_size_plus_one"] == 21
