@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Any, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import ModelRetry, RunContext
 
 from agent.deps import AgentDeps
@@ -30,22 +30,33 @@ from agent.dataframe_adapters import clinical_result_to_df
 # --- Query shapes (Phase 1 subset) ----------------------------------
 
 
+_STRICT = ConfigDict(extra="forbid")
+
+
 class DateRange(BaseModel):
+    model_config = _STRICT
+
     start: Optional[date] = None
     end: Optional[date] = None
 
 
 class DemographicsQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["demographics"] = "demographics"
 
 
 class EncountersQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["encounters"] = "encounters"
     date_range: Optional[DateRange] = None
     facility_type: Optional[Literal["inpatient", "outpatient", "ed", "ltc", "any"]] = "any"
 
 
 class LabsQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["labs"] = "labs"
     date_range: Optional[DateRange] = None
     loinc_codes: Optional[List[str]] = None
@@ -54,6 +65,8 @@ class LabsQuery(BaseModel):
 
 
 class DiagnosesQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["diagnoses"] = "diagnoses"
     icd10_codes: Optional[List[str]] = None
     condition_text: Optional[str] = None
@@ -61,6 +74,8 @@ class DiagnosesQuery(BaseModel):
 
 
 class MedicationsQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["medications"] = "medications"
     date_range: Optional[DateRange] = None
     rxnorm_codes: Optional[List[str]] = None
@@ -69,6 +84,8 @@ class MedicationsQuery(BaseModel):
 
 
 class ImmunizationsQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["immunizations"] = "immunizations"
     cvx_codes: Optional[List[str]] = None
     vaccine_text: Optional[str] = None
@@ -76,6 +93,8 @@ class ImmunizationsQuery(BaseModel):
 
 
 class ProceduresQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["procedures"] = "procedures"
     date_range: Optional[DateRange] = None
     cpt_codes: Optional[List[str]] = None
@@ -83,6 +102,8 @@ class ProceduresQuery(BaseModel):
 
 
 class ImagingQuery(BaseModel):
+    model_config = _STRICT
+
     domain: Literal["imaging"] = "imaging"
     date_range: Optional[DateRange] = None
     modality: Optional[Literal["xray", "ct", "mri", "us", "pet", "any"]] = "any"

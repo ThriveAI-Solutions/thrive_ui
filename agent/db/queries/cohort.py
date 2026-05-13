@@ -25,8 +25,26 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
 
     Returns (sql, params). The caller passes both into adapter.fetch_all.
     """
+    if not any(
+        (
+            getattr(criteria, "diagnosis_codes", None),
+            getattr(criteria, "medication_rxnorm_codes", None),
+            getattr(criteria, "condition_text", None),
+            getattr(criteria, "age_min", None) is not None,
+            getattr(criteria, "age_max", None) is not None,
+            getattr(criteria, "gender", None),
+            getattr(criteria, "facility", None),
+            getattr(criteria, "last_visit_after", None),
+            getattr(criteria, "last_visit_before", None),
+        )
+    ):
+        raise ValueError("cohort_sql requires at least one search criterion; refusing to issue an unfiltered scan.")
+
     params: dict = {}
     join_clauses: list[str] = []
+    # 1=1 is a structural placeholder so the WHERE always parses when
+    # only JOIN-based filters (codes) are active. The criterion guard
+    # above guarantees this is never an unfiltered scan.
     where_clauses: list[str] = ["1=1"]
 
     # --- diagnosis codes ----------------------------------------------

@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from agent.deps import AgentDeps, SelectedPatient
 from agent.db.analytics_adapter import AnalyticsDbAdapter
@@ -48,9 +49,29 @@ def test_tool_operates_without_selected_patient(synthetic_db):
 
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, selected=None)
-    result = search_patients_by_criteria(ctx, CohortCriteria())
+    # age_min=0 is a permissive criterion; the point of the test is to
+    # confirm the tool does not require selected_patient, not to test
+    # the no-criteria path (which is now refused at the model layer).
+    result = search_patients_by_criteria(ctx, CohortCriteria(age_min=0))
     assert result.data_availability == "data_present"
     assert result.total_count >= 5
+
+
+def test_cohort_criteria_rejects_extra_fields():
+    """Weak models sometimes invent a free-text `query` field; reject it
+    so pydantic-ai surfaces a retry."""
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    with pytest.raises(ValidationError):
+        CohortCriteria(query="diabetic patients over 65")
+
+
+def test_cohort_criteria_rejects_empty_criteria():
+    """All-None criteria would scan the entire patient table — refuse."""
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    with pytest.raises(ValidationError):
+        CohortCriteria()
 
 
 def test_diabetic_kaleida_over_65_acceptance(synthetic_db):

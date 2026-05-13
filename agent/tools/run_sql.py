@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 import sqlparse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
@@ -44,6 +44,8 @@ _FORBIDDEN_TABLE_PREFIXES = ("pg_", "information_schema.")
 
 
 class RunSqlInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sql: str = Field(..., description="A single read-only SQL statement.")
 
     @field_validator("sql")

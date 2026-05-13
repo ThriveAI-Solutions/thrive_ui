@@ -1,6 +1,7 @@
 import pytest
 from datetime import date
 from unittest.mock import MagicMock
+from pydantic import ValidationError
 from agent.deps import AgentDeps
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from agent.tools.find_patient import (
@@ -59,8 +60,8 @@ def test_find_patient_includes_related_source_ids(deps_factory):
 
 
 def test_find_patient_query_validation():
-    with pytest.raises(Exception):
-        PatientSearchQuery(limit=200)  # over le=100
+    with pytest.raises(ValidationError):
+        PatientSearchQuery(last_name="Smith", limit=200)  # over le=100
 
 
 def test_find_patient_no_results_returns_empty(deps_factory):
@@ -69,3 +70,18 @@ def test_find_patient_no_results_returns_empty(deps_factory):
     result = find_patient(ctx, PatientSearchQuery(last_name="NoSuchName"))
     assert result.total_unique == 0
     assert result.matches == []
+
+
+def test_patient_search_query_rejects_extra_fields():
+    """Weak models sometimes pass a free-text `query` field; reject it
+    so pydantic-ai surfaces the validation error and the model retries
+    with the proper structured shape."""
+    with pytest.raises(ValidationError):
+        PatientSearchQuery(query="Denise Marshall")
+
+
+def test_patient_search_query_rejects_empty_criteria():
+    """Calling with all fields None would degenerate to WHERE 1=1 and
+    leak the entire patient table — refuse at the model layer."""
+    with pytest.raises(ValidationError):
+        PatientSearchQuery()

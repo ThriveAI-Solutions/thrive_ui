@@ -7,7 +7,7 @@ pure summary shim; returns a SummaryArtifact.
 from __future__ import annotations
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
@@ -17,6 +17,8 @@ from utils.summary_shim import generate_summary_for_df
 
 
 class SummarizeResultsInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     question: str = Field(
         ...,
         description=(

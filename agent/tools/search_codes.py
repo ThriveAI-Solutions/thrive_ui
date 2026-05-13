@@ -7,7 +7,7 @@ agent/codes/data/*.json).
 from __future__ import annotations
 from typing import List, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import RunContext
 
 from agent.codes.loader import search as _search
@@ -15,6 +15,8 @@ from agent.deps import AgentDeps
 
 
 class CodeSearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     vocabulary: Literal["icd10", "loinc", "cvx", "rxnorm", "cpt"]
     query: str
     limit: int = Field(default=20, le=50)

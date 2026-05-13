@@ -7,7 +7,7 @@ PLOTLY_CHART message type.
 """
 
 from __future__ import annotations
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 
@@ -17,6 +17,8 @@ from utils.chart_shim import generate_chart_for_df
 
 
 class MakeChartInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     question: str = Field(
         ...,
         description=(

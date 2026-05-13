@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_ai import RunContext
 
 from agent.deps import AgentDeps
@@ -17,11 +17,25 @@ from agent.result_compaction import CompactingListResult
 
 
 class PatientSearchQuery(BaseModel):
+    # extra='forbid': weak models sometimes invent a free-text `query`
+    # field; rejecting it surfaces a ValidationError that pydantic-ai
+    # feeds back to the model so it retries with the structured shape.
+    model_config = ConfigDict(extra="forbid")
+
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     dob: Optional[date] = None
     mrn: Optional[str] = None
     limit: int = Field(default=25, le=100)
+
+    @model_validator(mode="after")
+    def _require_at_least_one_criterion(self) -> "PatientSearchQuery":
+        if not any((self.first_name, self.last_name, self.dob, self.mrn)):
+            raise ValueError(
+                "find_patient requires at least one of first_name, "
+                "last_name, dob, or mrn. Do not call without a criterion."
+            )
+        return self
 
 
 class PatientMatch(BaseModel):

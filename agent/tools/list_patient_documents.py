@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import date
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pydantic_ai import ModelRetry, RunContext
 
 from agent.deps import AgentDeps
@@ -18,11 +18,15 @@ from agent.result_compaction import CompactingListResult
 
 
 class DateRange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     start: Optional[date] = None
     end: Optional[date] = None
 
 
 class DocumentIndexQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     document_type: Optional[str] = None
     date_range: Optional[DateRange] = None
 

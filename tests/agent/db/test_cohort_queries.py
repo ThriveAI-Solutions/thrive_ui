@@ -12,6 +12,7 @@ Builds the SELECT for search_patients_by_criteria. Verifies:
 from __future__ import annotations
 from datetime import date
 
+import pytest
 from sqlalchemy import text
 
 from agent.db.queries.cohort import cohort_sql
@@ -42,12 +43,20 @@ def _make(**kw):
 
 
 def test_base_query_returns_all_patients(synthetic_db):
-    sql, params = cohort_sql(_make(), schema_prefix="")
+    # age_min=0 is a permissive criterion that exercises the base SELECT
+    # shape without tripping the empty-criteria guard.
+    sql, params = cohort_sql(_make(age_min=0), schema_prefix="")
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     assert len(rows) >= 5, "expected ≥5 patients in base query"
     # total_count window column present and ≥ rows returned
     assert all(r._mapping["total_count"] >= len(rows) for r in rows)
+
+
+def test_cohort_sql_rejects_empty_criteria():
+    """Direct-caller defense: refuse to issue an unfiltered patient scan."""
+    with pytest.raises(ValueError):
+        cohort_sql(_make())
 
 
 def test_age_min_filter(synthetic_db):
@@ -112,7 +121,7 @@ def test_condition_text_filter(synthetic_db):
 
 def test_sample_size_truncation_sentinel(synthetic_db):
     """LIMIT must be sample_size + 1 so the caller can detect overflow."""
-    sql, params = cohort_sql(_make(sample_size=2), schema_prefix="")
+    sql, params = cohort_sql(_make(sample_size=2, age_min=0), schema_prefix="")
     assert ":sample_size_plus_one" in sql
     assert params["sample_size_plus_one"] == 3
     with synthetic_db.connect() as conn:
@@ -122,7 +131,7 @@ def test_sample_size_truncation_sentinel(synthetic_db):
 
 def test_inactive_empi_rank_99_excluded(synthetic_db):
     """John 1962 has an empi_rank=99 row in source_reference; it must not appear."""
-    sql, params = cohort_sql(_make(), schema_prefix="")
+    sql, params = cohort_sql(_make(age_min=0), schema_prefix="")
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     src_ids = [r._mapping["source_id"] for r in rows]

@@ -12,17 +12,24 @@ from __future__ import annotations
 from datetime import date
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.result_compaction import CompactingListResult
 
 
 class DateRange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     start: Optional[date] = None
     end: Optional[date] = None
 
 
 class CohortCriteria(BaseModel):
+    # extra='forbid': weak models sometimes pass a free-text top-level
+    # field like `query` or `description`. Reject it so pydantic-ai
+    # feeds the validation error back as a retry.
+    model_config = ConfigDict(extra="forbid")
+
     diagnosis_codes: Optional[List[str]] = None
     diagnosis_date_range: Optional[DateRange] = None
     medication_rxnorm_codes: Optional[List[str]] = None
@@ -34,6 +41,31 @@ class CohortCriteria(BaseModel):
     last_visit_after: Optional[date] = None
     last_visit_before: Optional[date] = None
     sample_size: int = Field(default=20, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _require_at_least_one_criterion(self) -> "CohortCriteria":
+        # diagnosis_date_range alone is a no-op (only used to narrow
+        # diagnosis_codes), so it does not count as a criterion.
+        if not any(
+            (
+                self.diagnosis_codes,
+                self.medication_rxnorm_codes,
+                self.condition_text,
+                self.age_min is not None,
+                self.age_max is not None,
+                self.gender,
+                self.facility,
+                self.last_visit_after,
+                self.last_visit_before,
+            )
+        ):
+            raise ValueError(
+                "search_patients_by_criteria requires at least one criterion "
+                "(diagnosis_codes, medication_rxnorm_codes, condition_text, "
+                "age_min/age_max, gender, facility, last_visit_after, or "
+                "last_visit_before). Do not call without a filter."
+            )
+        return self
 
 
 class PatientMatch(BaseModel):
