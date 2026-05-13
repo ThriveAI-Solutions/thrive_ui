@@ -203,29 +203,22 @@ def _format_sql_block(sql: str, params: dict | None) -> list[str]:
     return lines
 
 
-async def _replay(question: str, model_override: str | None, role: str) -> int:
-    deps = _build_deps(role)
-
-    runner_kwargs = {}
-    if model_override:
-        runner_kwargs["model"] = _build_model_override(model_override)
-    runner = AgenticRunner(**runner_kwargs)
-
-    # Header
-    print(f"{C.BOLD}{C.CYAN}════ agent replay ════{C.RESET}")
-    print(f"  {C.DIM}question:{C.RESET}  {question}")
-    print(f"  {C.DIM}role:{C.RESET}      {role}")
-    if model_override:
-        print(f"  {C.DIM}model:{C.RESET}     {model_override} (CLI override)")
-    print(f"  {C.DIM}session:{C.RESET}   {deps.session_id}")
-    print()
-
+async def _run_one_turn(
+    runner: AgenticRunner,
+    question: str,
+    deps: AgentDeps,
+    message_history: list | None,
+) -> tuple[object | None, str | None, list]:
+    """Stream a single agent turn and print events. Returns
+    (final_response, cap_reason, all_messages) — all_messages is the full
+    pydantic-ai message log to thread into the next turn's message_history."""
     final_response = None
     cap_reason = None
+    all_messages: list = []
     cur_thinking_turn = -1
     cur_text_turn = -1
 
-    async for ev in runner.stream(question, deps=deps):
+    async for ev in runner.stream(question, deps=deps, message_history=message_history):
         if isinstance(ev, ThinkingDeltaEvent):
             if cur_thinking_turn != ev.turn_index:
                 print(f"\n{C.GRAY}── thinking (turn {ev.turn_index}) ──{C.RESET}")
@@ -278,6 +271,7 @@ async def _replay(question: str, model_override: str | None, role: str) -> int:
 
         elif isinstance(ev, FinalResponseEvent):
             final_response = ev.response
+            all_messages = list(getattr(ev, "all_messages", []) or [])
             print(f"\n{C.BOLD}{C.GREEN}── final ──{C.RESET}")
             text = getattr(ev.response, "text", None) or "(empty)"
             print(text)
@@ -286,16 +280,69 @@ async def _replay(question: str, model_override: str | None, role: str) -> int:
                 print(f"  {C.DIM}↳ followup: {fu}{C.RESET}")
 
     print()
-    if cap_reason:
-        return 2
-    return 0 if final_response is not None else 1
+    return final_response, cap_reason, all_messages
+
+
+async def _replay(questions: list[str], model_override: str | None, role: str) -> int:
+    """Run one or more turns through the same deps + runner, threading
+    message_history between turns so follow-up questions see prior context
+    (the same way the Streamlit UI does)."""
+    deps = _build_deps(role)
+
+    runner_kwargs = {}
+    if model_override:
+        runner_kwargs["model"] = _build_model_override(model_override)
+    runner = AgenticRunner(**runner_kwargs)
+
+    # Header
+    print(f"{C.BOLD}{C.CYAN}════ agent replay ════{C.RESET}")
+    print(f"  {C.DIM}role:{C.RESET}      {role}")
+    if model_override:
+        print(f"  {C.DIM}model:{C.RESET}     {model_override} (CLI override)")
+    print(f"  {C.DIM}session:{C.RESET}   {deps.session_id}")
+    print(f"  {C.DIM}turns:{C.RESET}     {len(questions)}")
+    print()
+
+    message_history: list | None = None
+    worst_exit = 0  # 0 ok, 1 no-final, 2 cap-reached
+    for i, question in enumerate(questions, start=1):
+        print(f"{C.BOLD}{C.CYAN}━━━ turn {i}/{len(questions)} ━━━{C.RESET}")
+        print(f"  {C.DIM}question:{C.RESET}  {question}")
+        if message_history is not None:
+            print(f"  {C.DIM}history:{C.RESET}   {len(message_history)} prior messages threaded")
+        print()
+
+        final_response, cap_reason, all_messages = await _run_one_turn(runner, question, deps, message_history)
+
+        # Promote the worst exit status seen across all turns.
+        if cap_reason:
+            worst_exit = max(worst_exit, 2)
+        elif final_response is None:
+            worst_exit = max(worst_exit, 1)
+
+        # Thread the cumulative message log into the next turn — this is
+        # exactly what utils.chat_bot_helper does in the live Streamlit
+        # path. Without this, follow-ups lose all coreference.
+        if all_messages:
+            message_history = all_messages
+
+    return worst_exit
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Drive the production agent runner from the CLI; print every streamed event."
     )
-    parser.add_argument("question", help="The user question to send to the agent.")
+    parser.add_argument("question", help="The first user question to send to the agent.")
+    parser.add_argument(
+        "--then",
+        action="append",
+        default=[],
+        metavar="FOLLOWUP",
+        help="Follow-up question(s) to send AFTER the first turn, with prior "
+        "message history threaded (mirrors how the live Streamlit UI runs). "
+        "Repeatable: --then 'q2' --then 'q3' chains turns 2, 3, ...",
+    )
     parser.add_argument(
         "--model",
         default=None,
@@ -318,7 +365,8 @@ def main() -> int:
     if args.no_color or not sys.stdout.isatty():
         _disable_color()
 
-    return asyncio.run(_replay(args.question, args.model, args.user_role))
+    questions = [args.question, *args.then]
+    return asyncio.run(_replay(questions, args.model, args.user_role))
 
 
 if __name__ == "__main__":
