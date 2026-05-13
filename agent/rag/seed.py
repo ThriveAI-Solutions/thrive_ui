@@ -301,6 +301,17 @@ EXAMPLES_DOCS: List[_Doc] = [
             "last_visit_after=2025-01-01."
         ),
     },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'List people in zip 14223 with high blood pressure.' "
+            "A: search_codes(vocabulary='icd10', query='hypertension') → "
+            "search_patients_by_criteria(diagnosis_codes=['I10'], zip_code='14223'). "
+            "Do NOT also pass condition_text — it AND-stacks against the code filter "
+            "and returns zero. Surface the geo reliability note from the result."
+        ),
+    },
 ]
 
 
