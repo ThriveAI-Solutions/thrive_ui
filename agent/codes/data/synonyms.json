@@ -1,11 +1,12 @@
 {
   "_meta": {
-    "version": "2026-05-13",
-    "scope": "Top chronic conditions for WNY / HealtheLink agent. Each entry maps a canonical clinical term + common abbreviations + lay synonyms to the code family pulled from the matching vocabulary's data file.",
-    "review_required": "STARTER CONTENT — generated from public ICD-10-CM knowledge for engineering demonstration. Clinical informaticist must review code-family completeness, synonym coverage, and any subtype-specific routing before this is used in production decision-support.",
-    "source": "Public CMS ICD-10-CM tabular reference; no proprietary terminology services consulted",
+    "version": "2026-05-14",
+    "scope": "Top chronic conditions, common labs, vaccines, medications, and procedures for WNY / HealtheLink agent. Each entry maps a canonical clinical term + common abbreviations + lay synonyms + brand names to the code family pulled from the matching vocabulary's data file.",
+    "review_required": "STARTER CONTENT — generated from public ICD-10-CM / LOINC / CVX / RxNorm / CPT knowledge for engineering demonstration. Clinical informaticist must review code-family completeness, synonym coverage, and any subtype-specific routing before this is used in production decision-support.",
+    "source": "Public CMS ICD-10-CM tabular reference, LOINC short names, CDC CVX code set, RxNorm IN/SCD names, AMA CPT category I descriptors; no proprietary terminology services consulted",
     "format": "{ vocabulary: { canonical_term: { synonyms: [...], codes: [...] } } }",
-    "matching": "search_codes lowercases the query and looks up: (1) canonical key directly, then (2) any string in any synonyms[] list. First match wins; codes are returned in the listed order."
+    "matching": "search_codes lowercases the query and looks up: (1) canonical key directly, then (2) any string in any synonyms[] list. First match wins; codes are returned in the listed order. Class-level entries (e.g. 'statins', 'ssri') are intentionally distinct canonicals that fan out to multiple drug codes — keep class terms OUT of individual drug entries so the class entry wins.",
+    "drift_guard": "loader.py filters out synonym codes not present in the matching vocab's data file (phantom-code protection). Safe to over-list codes in a family; missing ones are silently dropped."
   },
   "icd10": {
     "hypertension": {
@@ -13,9 +14,15 @@
         "high blood pressure",
         "htn",
         "elevated blood pressure",
+        "raised blood pressure",
         "essential hypertension",
         "primary hypertension",
-        "hypertensive"
+        "arterial hypertension",
+        "hypertensive",
+        "hypertensive disease",
+        "hypertensive disorder",
+        "high bp",
+        "elevated bp"
       ],
       "codes": [
         "I10",
@@ -39,6 +46,9 @@
         "sugar diabetes",
         "sugar",
         "diabetic",
+        "high blood sugar disease",
+        "blood sugar disease",
+        "hyperglycemic disorder",
         "type 2 diabetes",
         "type 1 diabetes",
         "type ii diabetes",
@@ -48,7 +58,9 @@
         "t2 dm",
         "t1 dm",
         "niddm",
-        "iddm"
+        "iddm",
+        "dm2",
+        "dm1"
       ],
       "codes": [
         "E11.9",
@@ -62,11 +74,33 @@
       ]
     },
     "type 2 diabetes": {
-      "synonyms": ["t2dm", "type ii diabetes", "niddm", "adult onset diabetes"],
+      "synonyms": [
+        "t2dm",
+        "type ii diabetes",
+        "niddm",
+        "adult onset diabetes",
+        "adult-onset diabetes",
+        "non-insulin dependent diabetes",
+        "non insulin dependent diabetes",
+        "noninsulin-dependent diabetes mellitus",
+        "dm2",
+        "type two diabetes"
+      ],
       "codes": ["E11.9", "E11.65", "E11.21", "E11.22", "E11.40"]
     },
     "type 1 diabetes": {
-      "synonyms": ["t1dm", "type i diabetes", "iddm", "juvenile diabetes", "insulin-dependent diabetes"],
+      "synonyms": [
+        "t1dm",
+        "type i diabetes",
+        "iddm",
+        "juvenile diabetes",
+        "juvenile-onset diabetes",
+        "insulin-dependent diabetes",
+        "insulin dependent diabetes mellitus",
+        "early-onset diabetes",
+        "dm1",
+        "type one diabetes"
+      ],
       "codes": ["E10.9", "E10.65"]
     },
     "hyperlipidemia": {
@@ -74,9 +108,20 @@
         "high cholesterol",
         "high lipids",
         "elevated cholesterol",
+        "elevated lipids",
         "dyslipidemia",
+        "lipid disorder",
+        "lipid disease",
+        "lipidemia",
         "hypercholesterolemia",
-        "mixed hyperlipidemia"
+        "pure hypercholesterolemia",
+        "mixed hyperlipidemia",
+        "combined hyperlipidemia",
+        "high triglycerides",
+        "hypertriglyceridemia",
+        "high blood fats",
+        "abnormal cholesterol",
+        "abnormal lipids"
       ],
       "codes": ["E78.5", "E78.0", "E78.2"]
     },
@@ -88,7 +133,14 @@
         "ischemic heart disease",
         "ihd",
         "atherosclerotic heart disease",
-        "ashd"
+        "ashd",
+        "asccvd",
+        "ascvd",
+        "blocked arteries",
+        "narrowed coronary arteries",
+        "hardening of the arteries of the heart",
+        "coronary atherosclerosis",
+        "chronic ihd"
       ],
       "codes": ["I25.10", "I25.110", "I25.119", "I25.9"]
     },
@@ -100,7 +152,11 @@
         "ami",
         "stemi",
         "nstemi",
-        "acute myocardial infarction"
+        "acute myocardial infarction",
+        "subsequent myocardial infarction",
+        "coronary thrombosis",
+        "coronary occlusion",
+        "infarction of heart"
       ],
       "codes": ["I21.9", "I22.9"]
     },
@@ -113,7 +169,15 @@
         "diastolic heart failure",
         "hfref",
         "hfpef",
-        "cardiac failure"
+        "hfmref",
+        "cardiac failure",
+        "decompensated heart failure",
+        "biventricular heart failure",
+        "left ventricular failure",
+        "right ventricular failure",
+        "left heart failure",
+        "right heart failure",
+        "weak heart"
       ],
       "codes": ["I50.9", "I50.20", "I50.30"]
     },
@@ -124,7 +188,11 @@
         "a fib",
         "af",
         "paroxysmal atrial fibrillation",
+        "persistent atrial fibrillation",
+        "chronic atrial fibrillation",
+        "permanent atrial fibrillation",
         "paf",
+        "auricular fibrillation",
         "irregular heartbeat",
         "irregular heart rhythm"
       ],
@@ -136,22 +204,43 @@
         "cerebrovascular accident",
         "cerebral infarction",
         "ischemic stroke",
-        "brain attack"
+        "thrombotic stroke",
+        "embolic stroke",
+        "brain attack",
+        "brain infarction",
+        "cerebrovascular disease",
+        "acute stroke"
       ],
       "codes": ["I63.9", "I63.50"]
     },
     "transient ischemic attack": {
-      "synonyms": ["tia", "mini-stroke", "mini stroke", "transient cerebral ischemia"],
+      "synonyms": [
+        "tia",
+        "mini-stroke",
+        "mini stroke",
+        "ministroke",
+        "transient cerebral ischemia",
+        "transient cerebral ischemic attack",
+        "warning stroke"
+      ],
       "codes": ["G45.9"]
     },
     "asthma": {
       "synonyms": [
         "reactive airway disease",
         "rad",
+        "bronchial asthma",
         "moderate persistent asthma",
         "severe persistent asthma",
         "intermittent asthma",
-        "asthmatic"
+        "mild persistent asthma",
+        "exercise-induced asthma",
+        "exercise induced asthma",
+        "allergic asthma",
+        "wheezing",
+        "asthmatic",
+        "asthma attack",
+        "asthma exacerbation"
       ],
       "codes": ["J45.909", "J45.40", "J45.50"]
     },
@@ -161,8 +250,15 @@
         "emphysema",
         "chronic bronchitis",
         "chronic obstructive lung disease",
+        "obstructive lung disease",
+        "obstructive airway disease",
+        "chronic airflow obstruction",
         "cold",
-        "copd exacerbation"
+        "copd exacerbation",
+        "aecopd",
+        "acute exacerbation of copd",
+        "smokers lung",
+        "smoker's lung"
       ],
       "codes": ["J44.9", "J44.0", "J44.1"]
     },
@@ -172,13 +268,26 @@
         "chronic renal failure",
         "crf",
         "chronic renal insufficiency",
+        "renal insufficiency",
         "kidney failure",
         "renal failure",
+        "kidney disease",
+        "renal disease",
+        "nephropathy",
+        "uremia",
         "end stage renal disease",
+        "end-stage renal disease",
+        "end stage kidney disease",
         "esrd",
+        "eskd",
+        "ckd stage 1",
+        "ckd stage 2",
         "ckd stage 3",
         "ckd stage 4",
-        "ckd stage 5"
+        "ckd stage 5",
+        "stage 3 ckd",
+        "stage 4 ckd",
+        "stage 5 ckd"
       ],
       "codes": ["N18.1", "N18.2", "N18.3", "N18.4", "N18.5", "N18.6", "N18.9"]
     },
@@ -186,10 +295,16 @@
       "synonyms": [
         "major depressive disorder",
         "mdd",
+        "major depression",
         "depressive disorder",
+        "depressive episode",
         "clinical depression",
         "unipolar depression",
-        "recurrent depression"
+        "recurrent depression",
+        "endogenous depression",
+        "depressed mood",
+        "low mood disorder",
+        "single episode depression"
       ],
       "codes": ["F32.9", "F33.9"]
     },
@@ -199,7 +314,10 @@
         "generalized anxiety disorder",
         "gad",
         "anxious",
-        "anxiety disorder unspecified"
+        "anxiety disorder unspecified",
+        "chronic anxiety",
+        "anxiety state",
+        "nervous disorder"
       ],
       "codes": ["F41.1", "F41.9"]
     },
@@ -210,7 +328,13 @@
         "obese",
         "overweight",
         "high bmi",
-        "bariatric"
+        "elevated bmi",
+        "bariatric",
+        "class i obesity",
+        "class ii obesity",
+        "class iii obesity",
+        "excess weight",
+        "excessive weight gain"
       ],
       "codes": ["E66.9", "E66.01"]
     },
@@ -218,7 +342,15 @@
       "synonyms": [
         "underactive thyroid",
         "low thyroid",
-        "thyroid deficiency"
+        "thyroid deficiency",
+        "hypothyroid",
+        "myxedema",
+        "hashimoto",
+        "hashimotos",
+        "hashimoto's",
+        "hashimoto thyroiditis",
+        "hashimoto's thyroiditis",
+        "subclinical hypothyroidism"
       ],
       "codes": ["E03.9"]
     },
@@ -226,9 +358,14 @@
       "synonyms": [
         "gastroesophageal reflux disease",
         "gastro-esophageal reflux",
+        "gastro esophageal reflux",
+        "esophageal reflux",
         "acid reflux",
         "heartburn",
-        "reflux"
+        "reflux",
+        "pyrosis",
+        "dyspepsia",
+        "indigestion"
       ],
       "codes": ["K21.9"]
     },
@@ -238,7 +375,12 @@
         "degenerative joint disease",
         "djd",
         "joint pain",
-        "wear and tear arthritis"
+        "wear and tear arthritis",
+        "primary osteoarthritis",
+        "arthritis",
+        "knee arthritis",
+        "hip arthritis",
+        "degenerative arthritis"
       ],
       "codes": ["M19.90"]
     },
@@ -246,8 +388,13 @@
       "synonyms": [
         "low bone density",
         "thinning bones",
+        "brittle bones",
+        "bone loss",
         "age-related osteoporosis",
-        "senile osteoporosis"
+        "age related osteoporosis",
+        "senile osteoporosis",
+        "postmenopausal osteoporosis",
+        "post menopausal osteoporosis"
       ],
       "codes": ["M81.0"]
     },
@@ -256,7 +403,12 @@
         "alzheimers",
         "alzheimer's",
         "alzheimer's disease",
-        "ad"
+        "alzheimers disease",
+        "ad",
+        "early-onset alzheimer",
+        "late-onset alzheimer",
+        "senile dementia of alzheimer type",
+        "sdat"
       ],
       "codes": ["G30.9"]
     },
@@ -265,29 +417,1342 @@
         "cognitive decline",
         "memory loss disorder",
         "senile dementia",
-        "unspecified dementia"
+        "unspecified dementia",
+        "vascular dementia",
+        "mixed dementia",
+        "neurocognitive disorder",
+        "major neurocognitive disorder",
+        "mnd"
       ],
       "codes": ["F03.90", "G30.9"]
     },
     "obstructive sleep apnea": {
-      "synonyms": ["osa", "sleep apnea", "obstructive apnea"],
+      "synonyms": [
+        "osa",
+        "sleep apnea",
+        "obstructive apnea",
+        "obstructive sleep apnea syndrome",
+        "osas",
+        "sleep-disordered breathing",
+        "sleep disordered breathing"
+      ],
       "codes": ["G47.33"]
     },
     "chronic low back pain": {
-      "synonyms": ["low back pain", "lbp", "back pain", "lumbago"],
+      "synonyms": [
+        "low back pain",
+        "lower back pain",
+        "lbp",
+        "back pain",
+        "backache",
+        "lumbago",
+        "lumbar pain",
+        "lumbosacral pain",
+        "chronic back pain"
+      ],
       "codes": ["M54.5"]
     },
     "headache": {
-      "synonyms": ["cephalgia", "head pain"],
+      "synonyms": [
+        "cephalgia",
+        "cephalalgia",
+        "head pain",
+        "headache disorder",
+        "tension headache",
+        "tension-type headache"
+      ],
       "codes": ["R51"]
     },
     "hepatitis b": {
-      "synonyms": ["hep b", "hbv", "viral hepatitis b", "chronic hepatitis b"],
+      "synonyms": [
+        "hep b",
+        "hbv",
+        "viral hepatitis b",
+        "hepatitis b infection",
+        "hbv infection",
+        "acute hepatitis b",
+        "acute hep b",
+        "chronic hepatitis b",
+        "chronic hep b"
+      ],
       "codes": ["B16.9", "B18.1"]
     },
     "hepatitis c": {
-      "synonyms": ["hep c", "hcv", "viral hepatitis c", "chronic hepatitis c"],
+      "synonyms": [
+        "hep c",
+        "hcv",
+        "viral hepatitis c",
+        "hepatitis c infection",
+        "hcv infection",
+        "acute hepatitis c",
+        "acute hep c",
+        "chronic hepatitis c",
+        "chronic hep c"
+      ],
       "codes": ["B17.10", "B18.2"]
+    },
+    "measles": {
+      "synonyms": [
+        "rubeola",
+        "morbilli",
+        "10-day measles",
+        "ten-day measles",
+        "red measles",
+        "hard measles"
+      ],
+      "codes": ["B05.9"]
+    },
+    "rubella": {
+      "synonyms": [
+        "german measles",
+        "3-day measles",
+        "three-day measles",
+        "third disease"
+      ],
+      "codes": ["B06.9"]
+    },
+    "mumps": {
+      "synonyms": [
+        "epidemic parotitis",
+        "infectious parotitis",
+        "parotitis"
+      ],
+      "codes": ["B26.9"]
+    },
+    "gonorrhea": {
+      "synonyms": [
+        "gc",
+        "gono",
+        "the clap",
+        "clap",
+        "drip",
+        "gonococcal infection",
+        "neisseria gonorrhoeae infection",
+        "ng infection"
+      ],
+      "codes": ["A54.9"]
+    },
+    "chlamydia": {
+      "synonyms": [
+        "ct",
+        "chlamydia trachomatis",
+        "chlamydial infection",
+        "chlamydial urethritis",
+        "chlamydial cervicitis",
+        "chlamydia infection"
+      ],
+      "codes": ["A56.2"]
+    },
+    "appendicitis": {
+      "synonyms": [
+        "acute appendicitis",
+        "inflamed appendix",
+        "appendix inflammation",
+        "appy"
+      ],
+      "codes": ["K35.80"]
+    },
+    "immunization encounter": {
+      "synonyms": [
+        "vaccination encounter",
+        "vaccination visit",
+        "vaccine encounter",
+        "immunization visit",
+        "shots",
+        "vaccinations",
+        "well-child vaccines",
+        "encounter for vaccination"
+      ],
+      "codes": ["Z23"]
+    },
+    "sti screening": {
+      "synonyms": [
+        "std screening",
+        "sti screen",
+        "std screen",
+        "sexually transmitted disease screening",
+        "sexually transmitted infection screening",
+        "screening for sti",
+        "screening for std"
+      ],
+      "codes": ["Z11.3"]
+    },
+    "viral disease screening": {
+      "synonyms": [
+        "screening for viral disease",
+        "viral screening",
+        "screening for hepatitis",
+        "screening for hiv"
+      ],
+      "codes": ["Z11.59"]
+    },
+    "high risk pregnancy": {
+      "synonyms": [
+        "high-risk pregnancy",
+        "complicated pregnancy",
+        "supervision of high risk pregnancy"
+      ],
+      "codes": ["O09.90"]
+    },
+    "normal pregnancy": {
+      "synonyms": [
+        "pregnancy",
+        "prenatal visit",
+        "antenatal visit",
+        "obstetric supervision",
+        "supervision of normal pregnancy",
+        "routine prenatal care"
+      ],
+      "codes": ["Z34.90"]
+    }
+  },
+  "loinc": {
+    "hemoglobin a1c": {
+      "synonyms": [
+        "a1c",
+        "hba1c",
+        "hb a1c",
+        "haemoglobin a1c",
+        "glycohemoglobin",
+        "glycated hemoglobin",
+        "glycosylated hemoglobin",
+        "ghb",
+        "diabetes a1c"
+      ],
+      "codes": ["4548-4"]
+    },
+    "glucose": {
+      "synonyms": [
+        "blood sugar",
+        "blood glucose",
+        "serum glucose",
+        "plasma glucose",
+        "fasting glucose",
+        "fasting blood sugar",
+        "fbs",
+        "fpg",
+        "bg",
+        "random glucose"
+      ],
+      "codes": ["2345-7"]
+    },
+    "total cholesterol": {
+      "synonyms": [
+        "cholesterol",
+        "cholesterol total",
+        "tc",
+        "serum cholesterol"
+      ],
+      "codes": ["2093-3"]
+    },
+    "hdl cholesterol": {
+      "synonyms": [
+        "hdl",
+        "hdl-c",
+        "cholesterol hdl",
+        "high density lipoprotein",
+        "high-density lipoprotein",
+        "good cholesterol"
+      ],
+      "codes": ["2085-9"]
+    },
+    "ldl cholesterol": {
+      "synonyms": [
+        "ldl",
+        "ldl-c",
+        "cholesterol ldl",
+        "low density lipoprotein",
+        "low-density lipoprotein",
+        "bad cholesterol",
+        "ldl calculated"
+      ],
+      "codes": ["13457-7"]
+    },
+    "triglycerides": {
+      "synonyms": [
+        "trig",
+        "trigs",
+        "tg",
+        "serum triglycerides",
+        "plasma triglycerides"
+      ],
+      "codes": ["2571-8"]
+    },
+    "creatinine": {
+      "synonyms": [
+        "serum creatinine",
+        "scr",
+        "creat",
+        "creatinine level",
+        "plasma creatinine"
+      ],
+      "codes": ["2160-0"]
+    },
+    "egfr": {
+      "synonyms": [
+        "estimated glomerular filtration rate",
+        "estimated gfr",
+        "gfr",
+        "kidney function",
+        "renal function",
+        "glomerular filtration rate"
+      ],
+      "codes": ["33914-3"]
+    },
+    "hemoglobin": {
+      "synonyms": [
+        "hgb",
+        "hb",
+        "hemoglobin level",
+        "haemoglobin"
+      ],
+      "codes": ["718-7"]
+    },
+    "hematocrit": {
+      "synonyms": [
+        "hct",
+        "crit",
+        "packed cell volume",
+        "pcv"
+      ],
+      "codes": ["4544-3"]
+    },
+    "platelets": {
+      "synonyms": [
+        "plt",
+        "platelet count",
+        "thrombocytes",
+        "thrombocyte count"
+      ],
+      "codes": ["777-3"]
+    },
+    "white blood cell count": {
+      "synonyms": [
+        "wbc",
+        "wbc count",
+        "white blood cells",
+        "white blood count",
+        "white count",
+        "leukocytes",
+        "leukocyte count"
+      ],
+      "codes": ["6690-2"]
+    },
+    "systolic blood pressure": {
+      "synonyms": [
+        "sbp",
+        "systolic",
+        "systolic bp",
+        "top blood pressure number",
+        "upper blood pressure"
+      ],
+      "codes": ["8480-6"]
+    },
+    "diastolic blood pressure": {
+      "synonyms": [
+        "dbp",
+        "diastolic",
+        "diastolic bp",
+        "bottom blood pressure number",
+        "lower blood pressure"
+      ],
+      "codes": ["8462-4"]
+    },
+    "height": {
+      "synonyms": [
+        "body height",
+        "ht",
+        "patient height",
+        "stature"
+      ],
+      "codes": ["8302-2"]
+    },
+    "weight": {
+      "synonyms": [
+        "body weight",
+        "wt",
+        "patient weight",
+        "body mass"
+      ],
+      "codes": ["29463-7"]
+    },
+    "body mass index": {
+      "synonyms": [
+        "bmi",
+        "quetelet index"
+      ],
+      "codes": ["39156-5"]
+    },
+    "heart rate": {
+      "synonyms": [
+        "hr",
+        "pulse",
+        "pulse rate",
+        "heart beats per minute",
+        "bpm"
+      ],
+      "codes": ["8867-4"]
+    },
+    "hepatitis b surface antigen": {
+      "synonyms": [
+        "hbsag",
+        "hbs ag",
+        "hep b surface antigen",
+        "hbv surface antigen",
+        "australia antigen"
+      ],
+      "codes": ["5195-3"]
+    },
+    "hepatitis b surface antibody": {
+      "synonyms": [
+        "hbsab",
+        "anti-hbs",
+        "anti hbs",
+        "hep b surface antibody",
+        "hbs ab",
+        "hepatitis b immunity"
+      ],
+      "codes": ["5196-1"]
+    },
+    "hepatitis b core antibody": {
+      "synonyms": [
+        "hbcab",
+        "anti-hbc",
+        "anti hbc",
+        "hep b core antibody",
+        "hbc ab"
+      ],
+      "codes": ["5197-9"]
+    },
+    "hepatitis b core igm": {
+      "synonyms": [
+        "anti-hbc igm",
+        "hbc igm",
+        "hep b core igm"
+      ],
+      "codes": ["5198-7"]
+    },
+    "hepatitis c antibody": {
+      "synonyms": [
+        "hcv ab",
+        "anti-hcv",
+        "anti hcv",
+        "hep c antibody",
+        "hcv antibody"
+      ],
+      "codes": ["13955-0"]
+    },
+    "measles igg": {
+      "synonyms": [
+        "measles immunity",
+        "rubeola igg",
+        "measles antibody",
+        "measles igg antibody"
+      ],
+      "codes": ["22501-7"]
+    },
+    "measles igm": {
+      "synonyms": [
+        "acute measles antibody",
+        "measles igm antibody",
+        "rubeola igm"
+      ],
+      "codes": ["22502-5"]
+    },
+    "rubella igg": {
+      "synonyms": [
+        "rubella immunity",
+        "rubella antibody",
+        "rubella igg antibody",
+        "german measles antibody"
+      ],
+      "codes": ["8092-6"]
+    },
+    "mumps igg": {
+      "synonyms": [
+        "mumps immunity",
+        "mumps antibody",
+        "mumps igg antibody"
+      ],
+      "codes": ["16691-7"]
+    },
+    "chlamydia naat": {
+      "synonyms": [
+        "chlamydia pcr",
+        "chlamydia dna",
+        "ct naat",
+        "ct pcr",
+        "chlamydia trachomatis dna",
+        "chlamydia trachomatis naat"
+      ],
+      "codes": ["29893-2"]
+    },
+    "gonorrhea naat": {
+      "synonyms": [
+        "gonorrhea pcr",
+        "gonorrhea dna",
+        "gc naat",
+        "gc pcr",
+        "neisseria gonorrhoeae dna",
+        "neisseria gonorrhoeae naat"
+      ],
+      "codes": ["21613-1"]
+    },
+    "streptococcus pneumoniae antibody": {
+      "synonyms": [
+        "pneumococcal antibody",
+        "strep pneumo antibody",
+        "spn antibody"
+      ],
+      "codes": ["16835-0"]
+    }
+  },
+  "cvx": {
+    "mmr": {
+      "synonyms": [
+        "mmr vaccine",
+        "measles mumps rubella",
+        "measles mumps rubella vaccine",
+        "m-m-r"
+      ],
+      "codes": ["03"]
+    },
+    "mmrv": {
+      "synonyms": [
+        "mmrv vaccine",
+        "measles mumps rubella varicella",
+        "proquad"
+      ],
+      "codes": ["94"]
+    },
+    "varicella vaccine": {
+      "synonyms": [
+        "chickenpox vaccine",
+        "varivax",
+        "var",
+        "vzv vaccine"
+      ],
+      "codes": ["21"]
+    },
+    "hepatitis a vaccine": {
+      "synonyms": [
+        "hep a vaccine",
+        "hav vaccine",
+        "havrix",
+        "vaqta",
+        "hep a adult",
+        "hep a pediatric"
+      ],
+      "codes": ["52", "85"]
+    },
+    "hepatitis b vaccine": {
+      "synonyms": [
+        "hep b vaccine",
+        "hbv vaccine",
+        "engerix",
+        "engerix-b",
+        "recombivax",
+        "recombivax hb",
+        "heplisav",
+        "heplisav-b"
+      ],
+      "codes": ["43", "08"]
+    },
+    "tdap": {
+      "synonyms": [
+        "tdap vaccine",
+        "tetanus diphtheria pertussis",
+        "boostrix",
+        "adacel"
+      ],
+      "codes": ["115"]
+    },
+    "td": {
+      "synonyms": [
+        "td vaccine",
+        "td adult",
+        "tetanus diphtheria",
+        "tetanus diphtheria booster",
+        "tetanus booster"
+      ],
+      "codes": ["139"]
+    },
+    "dtap": {
+      "synonyms": [
+        "dtap vaccine",
+        "diphtheria tetanus pertussis",
+        "infant tetanus",
+        "infant pertussis",
+        "daptacel",
+        "infanrix"
+      ],
+      "codes": ["20"]
+    },
+    "polio vaccine": {
+      "synonyms": [
+        "ipv",
+        "inactivated polio",
+        "inactivated polio vaccine",
+        "ipol"
+      ],
+      "codes": ["10"]
+    },
+    "pneumococcal vaccine": {
+      "synonyms": [
+        "pneumonia vaccine",
+        "pcv",
+        "pneumococcal",
+        "prevnar",
+        "prevnar 13",
+        "prevnar 20",
+        "vaxneuvance",
+        "pneumovax",
+        "pneumovax 23",
+        "pcv13",
+        "pcv15",
+        "pcv20",
+        "ppsv23"
+      ],
+      "codes": ["133", "127", "215", "33"]
+    },
+    "pcv13": {
+      "synonyms": ["prevnar 13", "pneumococcal conjugate 13"],
+      "codes": ["133"]
+    },
+    "pcv15": {
+      "synonyms": ["vaxneuvance", "pneumococcal conjugate 15"],
+      "codes": ["127"]
+    },
+    "pcv20": {
+      "synonyms": ["prevnar 20", "pneumococcal conjugate 20"],
+      "codes": ["215"]
+    },
+    "ppsv23": {
+      "synonyms": ["pneumovax", "pneumovax 23", "pneumococcal polysaccharide"],
+      "codes": ["33"]
+    },
+    "rabies vaccine": {
+      "synonyms": [
+        "rabies",
+        "rabies im",
+        "rabies id",
+        "anti-rabies",
+        "rabavert",
+        "imovax rabies"
+      ],
+      "codes": ["18", "176"]
+    },
+    "hpv vaccine": {
+      "synonyms": [
+        "hpv",
+        "human papillomavirus vaccine",
+        "gardasil",
+        "gardasil 9",
+        "gardasil-9",
+        "cervarix"
+      ],
+      "codes": ["62", "165"]
+    },
+    "covid vaccine": {
+      "synonyms": [
+        "covid",
+        "covid-19 vaccine",
+        "covid 19 vaccine",
+        "coronavirus vaccine",
+        "sars-cov-2 vaccine",
+        "mrna covid vaccine",
+        "covid mrna vaccine"
+      ],
+      "codes": ["207", "208"]
+    },
+    "spikevax": {
+      "synonyms": ["covid moderna", "moderna covid", "moderna covid vaccine"],
+      "codes": ["207"]
+    },
+    "comirnaty": {
+      "synonyms": ["covid pfizer", "pfizer covid", "pfizer covid vaccine", "pfizer-biontech covid"],
+      "codes": ["208"]
+    },
+    "influenza vaccine": {
+      "synonyms": [
+        "flu vaccine",
+        "flu shot",
+        "flu jab",
+        "influenza",
+        "iiv",
+        "iiv4",
+        "riv",
+        "riv4",
+        "quadrivalent flu",
+        "fluzone",
+        "fluarix",
+        "flublok"
+      ],
+      "codes": ["150", "158"]
+    },
+    "zoster vaccine": {
+      "synonyms": [
+        "shingles vaccine",
+        "recombinant zoster",
+        "rzv",
+        "zoster"
+      ],
+      "codes": ["187", "121"]
+    },
+    "shingrix": {
+      "synonyms": ["recombinant shingles vaccine", "shingrix vaccine"],
+      "codes": ["187"]
+    },
+    "zostavax": {
+      "synonyms": ["live zoster vaccine", "live shingles vaccine"],
+      "codes": ["121"]
+    },
+    "meningococcal vaccine": {
+      "synonyms": [
+        "meningitis vaccine",
+        "menacwy",
+        "menveo",
+        "menactra",
+        "menquadfi",
+        "menb",
+        "trumenba",
+        "bexsero",
+        "meningococcal conjugate"
+      ],
+      "codes": ["114", "163"]
+    },
+    "rotavirus vaccine": {
+      "synonyms": [
+        "rota",
+        "rotateq",
+        "rotarix",
+        "rotavirus oral vaccine"
+      ],
+      "codes": ["116", "119"]
+    }
+  },
+  "rxnorm": {
+    "metformin": {
+      "synonyms": [
+        "glucophage",
+        "fortamet",
+        "glumetza",
+        "riomet",
+        "metformin hcl"
+      ],
+      "codes": ["6809"]
+    },
+    "azithromycin": {
+      "synonyms": [
+        "zithromax",
+        "z-pak",
+        "z pack",
+        "zpak",
+        "azithromycin dihydrate"
+      ],
+      "codes": ["18631"]
+    },
+    "ceftriaxone": {
+      "synonyms": [
+        "rocephin",
+        "ceftriaxone sodium"
+      ],
+      "codes": ["2670"]
+    },
+    "cefixime": {
+      "synonyms": ["suprax"],
+      "codes": ["2551"]
+    },
+    "doxycycline": {
+      "synonyms": [
+        "vibramycin",
+        "doryx",
+        "monodox",
+        "oracea",
+        "doxy"
+      ],
+      "codes": ["2099"]
+    },
+    "amoxicillin": {
+      "synonyms": [
+        "amox",
+        "amoxil",
+        "trimox",
+        "moxatag"
+      ],
+      "codes": ["723"]
+    },
+    "penicillin g benzathine": {
+      "synonyms": [
+        "bicillin",
+        "bicillin la",
+        "bicillin l-a",
+        "long-acting penicillin",
+        "benzathine penicillin"
+      ],
+      "codes": ["8021"]
+    },
+    "tetracycline": {
+      "synonyms": [
+        "sumycin",
+        "achromycin",
+        "tetracycline hcl"
+      ],
+      "codes": ["10395"]
+    },
+    "levofloxacin": {
+      "synonyms": ["levaquin"],
+      "codes": ["8629"]
+    },
+    "ciprofloxacin": {
+      "synonyms": ["cipro", "ciprofloxacin hcl"],
+      "codes": ["2599"]
+    },
+    "vancomycin": {
+      "synonyms": ["vanco", "vancocin", "firvanq"],
+      "codes": ["11124"]
+    },
+    "trimethoprim-sulfamethoxazole": {
+      "synonyms": [
+        "bactrim",
+        "septra",
+        "sulfa",
+        "tmp-smx",
+        "tmp smx",
+        "tmp/smx",
+        "co-trimoxazole",
+        "cotrimoxazole",
+        "sulfamethoxazole-trimethoprim"
+      ],
+      "codes": ["10831"]
+    },
+    "acetaminophen": {
+      "synonyms": [
+        "tylenol",
+        "paracetamol",
+        "apap",
+        "panadol"
+      ],
+      "codes": ["315"]
+    },
+    "ibuprofen": {
+      "synonyms": [
+        "motrin",
+        "advil",
+        "nurofen"
+      ],
+      "codes": ["5640"]
+    },
+    "aspirin": {
+      "synonyms": [
+        "asa",
+        "bayer",
+        "acetylsalicylic acid",
+        "ecotrin",
+        "bufferin",
+        "baby aspirin"
+      ],
+      "codes": ["1191"]
+    },
+    "lisinopril": {
+      "synonyms": [
+        "prinivil",
+        "zestril",
+        "qbrelis"
+      ],
+      "codes": ["29046"]
+    },
+    "atorvastatin": {
+      "synonyms": [
+        "lipitor",
+        "atorvastatin calcium"
+      ],
+      "codes": ["83367"]
+    },
+    "simvastatin": {
+      "synonyms": [
+        "zocor",
+        "flolipid"
+      ],
+      "codes": ["36567"]
+    },
+    "hydrochlorothiazide": {
+      "synonyms": [
+        "hctz",
+        "microzide",
+        "hydrodiuril"
+      ],
+      "codes": ["5487"]
+    },
+    "metoprolol": {
+      "synonyms": [
+        "lopressor",
+        "toprol",
+        "toprol-xl",
+        "toprol xl",
+        "metoprolol tartrate",
+        "metoprolol succinate"
+      ],
+      "codes": ["6918"]
+    },
+    "glipizide": {
+      "synonyms": [
+        "glucotrol",
+        "glucotrol xl"
+      ],
+      "codes": ["1546356"]
+    },
+    "insulin glargine": {
+      "synonyms": [
+        "lantus",
+        "basaglar",
+        "toujeo",
+        "semglee",
+        "long-acting insulin",
+        "long acting insulin"
+      ],
+      "codes": ["1551291"]
+    },
+    "pantoprazole": {
+      "synonyms": [
+        "protonix",
+        "pantoprazole sodium"
+      ],
+      "codes": ["139825"]
+    },
+    "omeprazole": {
+      "synonyms": [
+        "prilosec",
+        "losec",
+        "zegerid"
+      ],
+      "codes": ["7646"]
+    },
+    "prednisone": {
+      "synonyms": [
+        "deltasone",
+        "rayos",
+        "sterapred"
+      ],
+      "codes": ["8163"]
+    },
+    "albuterol": {
+      "synonyms": [
+        "ventolin",
+        "proair",
+        "proventil",
+        "salbutamol",
+        "rescue inhaler",
+        "albuterol sulfate"
+      ],
+      "codes": ["596"]
+    },
+    "sertraline": {
+      "synonyms": [
+        "zoloft",
+        "sertraline hcl"
+      ],
+      "codes": ["8896"]
+    },
+    "fluoxetine": {
+      "synonyms": [
+        "prozac",
+        "sarafem",
+        "fluoxetine hcl"
+      ],
+      "codes": ["32968"]
+    },
+    "escitalopram": {
+      "synonyms": [
+        "lexapro",
+        "escitalopram oxalate"
+      ],
+      "codes": ["32937"]
+    },
+    "levothyroxine": {
+      "synonyms": [
+        "synthroid",
+        "levoxyl",
+        "unithroid",
+        "tirosint",
+        "thyroid hormone",
+        "t4",
+        "l-thyroxine"
+      ],
+      "codes": ["10582"]
+    },
+    "warfarin": {
+      "synonyms": [
+        "coumadin",
+        "jantoven",
+        "warfarin sodium"
+      ],
+      "codes": ["11289"]
+    },
+    "statins": {
+      "synonyms": [
+        "statin",
+        "hmg-coa reductase inhibitor",
+        "hmg coa reductase inhibitor",
+        "cholesterol-lowering medication",
+        "cholesterol lowering medication"
+      ],
+      "codes": ["83367", "36567"]
+    },
+    "ssri": {
+      "synonyms": [
+        "ssris",
+        "selective serotonin reuptake inhibitor",
+        "selective serotonin reuptake inhibitors"
+      ],
+      "codes": ["8896", "32968", "32937"]
+    },
+    "ppi": {
+      "synonyms": [
+        "ppis",
+        "proton pump inhibitor",
+        "proton pump inhibitors",
+        "acid blocker",
+        "acid reducer"
+      ],
+      "codes": ["139825", "7646"]
+    },
+    "ace inhibitor": {
+      "synonyms": [
+        "ace inhibitors",
+        "acei",
+        "angiotensin converting enzyme inhibitor",
+        "angiotensin-converting enzyme inhibitor"
+      ],
+      "codes": ["29046"]
+    },
+    "beta blocker": {
+      "synonyms": [
+        "beta blockers",
+        "beta-blocker",
+        "beta-adrenergic blocker",
+        "beta adrenergic blocker"
+      ],
+      "codes": ["6918"]
+    },
+    "thiazide diuretic": {
+      "synonyms": [
+        "thiazide",
+        "thiazide diuretics",
+        "thiazides",
+        "water pill"
+      ],
+      "codes": ["5487"]
+    },
+    "fluoroquinolone": {
+      "synonyms": [
+        "fluoroquinolones",
+        "quinolone",
+        "quinolones"
+      ],
+      "codes": ["8629", "2599"]
+    },
+    "macrolide": {
+      "synonyms": ["macrolides", "macrolide antibiotic"],
+      "codes": ["18631"]
+    },
+    "cephalosporin": {
+      "synonyms": ["cephalosporins", "cephalosporin antibiotic"],
+      "codes": ["2670", "2551"]
+    },
+    "sulfonamide": {
+      "synonyms": ["sulfonamides", "sulfa antibiotic"],
+      "codes": ["10831"]
+    },
+    "sulfonylurea": {
+      "synonyms": ["sulfonylureas"],
+      "codes": ["1546356"]
+    },
+    "biguanide": {
+      "synonyms": ["biguanides"],
+      "codes": ["6809"]
+    },
+    "nsaid": {
+      "synonyms": [
+        "nsaids",
+        "non-steroidal anti-inflammatory",
+        "non steroidal anti-inflammatory",
+        "nonsteroidal anti-inflammatory drug"
+      ],
+      "codes": ["5640"]
+    },
+    "corticosteroid": {
+      "synonyms": [
+        "corticosteroids",
+        "steroid",
+        "steroids",
+        "glucocorticoid",
+        "glucocorticoids"
+      ],
+      "codes": ["8163"]
+    },
+    "anticoagulant": {
+      "synonyms": [
+        "anticoagulants",
+        "blood thinner",
+        "blood thinners",
+        "warfarin therapy"
+      ],
+      "codes": ["11289"]
+    }
+  },
+  "cpt": {
+    "chest x-ray": {
+      "synonyms": [
+        "chest xray",
+        "cxr",
+        "chest film",
+        "chest radiograph",
+        "chest x ray",
+        "cpa",
+        "1 view chest x-ray",
+        "2 view chest x-ray"
+      ],
+      "codes": ["71046", "71045"]
+    },
+    "ct abdomen pelvis": {
+      "synonyms": [
+        "ct abd pelvis",
+        "cat scan abdomen pelvis",
+        "abdominal pelvic ct",
+        "abdomen and pelvis ct",
+        "ap ct"
+      ],
+      "codes": ["74176"]
+    },
+    "ct head": {
+      "synonyms": [
+        "head ct",
+        "brain ct",
+        "ct brain",
+        "cat scan head",
+        "cat scan brain"
+      ],
+      "codes": ["70450"]
+    },
+    "mri brain": {
+      "synonyms": [
+        "brain mri",
+        "head mri",
+        "mri head",
+        "mr brain"
+      ],
+      "codes": ["70551"]
+    },
+    "mri knee": {
+      "synonyms": [
+        "knee mri",
+        "lower extremity mri",
+        "joint mri lower extremity"
+      ],
+      "codes": ["73721"]
+    },
+    "abdominal ultrasound": {
+      "synonyms": [
+        "abd us",
+        "abd ultrasound",
+        "abdomen ultrasound",
+        "ultrasound abdomen",
+        "abdominal sonogram"
+      ],
+      "codes": ["76700"]
+    },
+    "transvaginal ultrasound": {
+      "synonyms": [
+        "tvus",
+        "tv us",
+        "tv ultrasound",
+        "pelvic ultrasound transvaginal",
+        "endovaginal ultrasound"
+      ],
+      "codes": ["76830"]
+    },
+    "pet scan": {
+      "synonyms": [
+        "pet ct",
+        "pet-ct",
+        "positron emission tomography",
+        "whole body pet"
+      ],
+      "codes": ["78815"]
+    },
+    "colonoscopy": {
+      "synonyms": [
+        "colon scope",
+        "colon screening",
+        "screening colonoscopy",
+        "colonoscopy with biopsy",
+        "diagnostic colonoscopy"
+      ],
+      "codes": ["45378", "45380"]
+    },
+    "upper endoscopy": {
+      "synonyms": [
+        "egd",
+        "esophagogastroduodenoscopy",
+        "upper gi scope",
+        "upper scope",
+        "endoscopy with biopsy",
+        "gastroscopy"
+      ],
+      "codes": ["43239"]
+    },
+    "appendectomy": {
+      "synonyms": [
+        "appendix removal",
+        "laparoscopic appendectomy",
+        "lap appy",
+        "appy"
+      ],
+      "codes": ["44970"]
+    },
+    "cholecystectomy": {
+      "synonyms": [
+        "gallbladder removal",
+        "lap chole",
+        "laparoscopic gallbladder removal",
+        "gallbladder surgery"
+      ],
+      "codes": ["47562"]
+    },
+    "knee arthroscopy": {
+      "synonyms": [
+        "knee scope",
+        "arthroscopic knee surgery",
+        "knee arthroscopy with meniscectomy",
+        "meniscectomy"
+      ],
+      "codes": ["29881"]
+    },
+    "total knee replacement": {
+      "synonyms": [
+        "tka",
+        "total knee arthroplasty",
+        "knee replacement",
+        "knee arthroplasty"
+      ],
+      "codes": ["27447"]
+    },
+    "total hip replacement": {
+      "synonyms": [
+        "tha",
+        "total hip arthroplasty",
+        "hip replacement",
+        "hip arthroplasty"
+      ],
+      "codes": ["27130"]
+    },
+    "cabg": {
+      "synonyms": [
+        "coronary artery bypass",
+        "coronary artery bypass graft",
+        "bypass surgery",
+        "open heart bypass",
+        "heart bypass"
+      ],
+      "codes": ["33533"]
+    },
+    "percutaneous coronary intervention": {
+      "synonyms": [
+        "pci",
+        "stent placement",
+        "coronary stent",
+        "angioplasty",
+        "ptca",
+        "cardiac stent",
+        "heart stent"
+      ],
+      "codes": ["92928"]
+    },
+    "office visit established": {
+      "synonyms": [
+        "established patient visit",
+        "follow up visit",
+        "follow-up visit",
+        "established visit",
+        "return visit",
+        "established level 3",
+        "established level 4",
+        "99213",
+        "99214"
+      ],
+      "codes": ["99213", "99214"]
+    },
+    "office visit new": {
+      "synonyms": [
+        "new patient visit",
+        "new visit",
+        "new patient level 3",
+        "new patient level 4",
+        "99203",
+        "99204"
+      ],
+      "codes": ["99203", "99204"]
+    },
+    "vaccine administration": {
+      "synonyms": [
+        "vaccine admin",
+        "shot administration",
+        "immunization administration",
+        "vaccination administration"
+      ],
+      "codes": ["90471"]
+    },
+    "mmr administration": {
+      "synonyms": [
+        "mmr admin",
+        "mmr injection",
+        "mmr shot administration"
+      ],
+      "codes": ["90707"]
+    },
+    "tdap administration": {
+      "synonyms": [
+        "tdap admin",
+        "tdap injection",
+        "tdap shot administration"
+      ],
+      "codes": ["90715"]
+    },
+    "chlamydia test": {
+      "synonyms": [
+        "chlamydia naat cpt",
+        "chlamydia trachomatis nucleic acid",
+        "ct test"
+      ],
+      "codes": ["87491"]
+    },
+    "gonorrhea test": {
+      "synonyms": [
+        "gonorrhea naat cpt",
+        "neisseria gonorrhoeae nucleic acid",
+        "gc test"
+      ],
+      "codes": ["87591"]
+    },
+    "hba1c test": {
+      "synonyms": [
+        "a1c test",
+        "hba1c lab",
+        "a1c lab",
+        "glycohemoglobin test"
+      ],
+      "codes": ["83036"]
+    },
+    "lipid panel": {
+      "synonyms": [
+        "lipid profile",
+        "cholesterol panel",
+        "fasting lipids",
+        "fasting lipid panel",
+        "cholesterol profile"
+      ],
+      "codes": ["80061"]
     }
   }
 }
