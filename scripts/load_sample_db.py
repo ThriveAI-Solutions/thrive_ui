@@ -67,8 +67,11 @@ def copy_blocks_to_inserts(sql: str, *, strip_schema: bool) -> str:
 
 def load_into_sqlite(dump_path: Path, db_path: Path) -> None:
     sql = _read_dump(dump_path)
-    # Strip CREATE SCHEMA (SQLite has none), strip dw. prefixes.
+    # Strip Postgres-only preamble (SET ..., CREATE SCHEMA), drop `CASCADE`
+    # from DROP statements (not supported by SQLite), strip dw. prefixes.
+    sql = re.sub(r"^SET [^;]+;\n", "", sql, flags=re.MULTILINE)
     sql = re.sub(r"CREATE SCHEMA[^;]+;\n", "", sql)
+    sql = re.sub(r"\s+CASCADE(?=\s*;)", "", sql)
     sql = sql.replace("dw.", "")
     sql = copy_blocks_to_inserts(sql, strip_schema=True)
     if db_path.exists():

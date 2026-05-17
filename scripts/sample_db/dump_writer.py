@@ -32,7 +32,7 @@ def write_copy_block(
     """Write one COPY block for `table`. `rows` is iterable of column dicts."""
     out.write(f"COPY {table} ({', '.join(columns)}) FROM stdin;\n")
     for row in rows:
-        out.write("\t".join(_serialize(row[c]) for c in columns))
+        out.write("\t".join(_serialize(row.get(c)) for c in columns))
         out.write("\n")
     out.write("\\.\n\n")
 

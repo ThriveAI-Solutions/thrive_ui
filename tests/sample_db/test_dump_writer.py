@@ -36,6 +36,14 @@ def test_write_dump_concatenates_ddl_and_data():
     assert "1" in out and "2" in out
 
 
+def test_copy_block_missing_keys_emit_null():
+    """Transformers populate only columns they care about; the rest become NULL."""
+    buf = io.StringIO()
+    rows = [{"id": 1, "name": "Alice"}]  # `age` key absent
+    write_copy_block(buf, "dw.users", ["id", "name", "age"], rows)
+    assert "1\tAlice\t\\N" in buf.getvalue()
+
+
 def test_write_dump_is_deterministic_given_same_input():
     ddl = "CREATE TABLE dw.t (id INTEGER);"
     table_data = {"dw.t": (["id"], [{"id": i} for i in range(50)])}
