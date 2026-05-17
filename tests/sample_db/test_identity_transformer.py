@@ -36,7 +36,6 @@ def test_patient_profile_row_per_patient(patients_csv, encounters_csv, ctx):
 def test_full_name_concatenated(patients_csv, encounters_csv, ctx):
     transform_identity(patients_csv, encounters_csv, ctx)
     profiles = ctx.output["dw.internal_patient_profile_v"]
-    by_id = {p["patient_id"]: p for p in profiles}
     # patient IDs are sequential integers, not Synthea UUIDs.
     sample = next(iter(profiles))
     assert sample["full_name"] == f"{sample['first_name']} {sample['last_name']}"
