@@ -92,13 +92,13 @@ def transform_claims(
         # Claim summary.
         summary.append(
             {
-                "claim_identifier": claim_id,
-                "patient_id": str(patient),
-                "service_date": svc_date,
-                "status": c.get("STATUS1", "BILLED"),
-                "outstanding_amount": float(c.get("OUTSTANDING1", 0) or 0),
+                "claim_line_identifier": line_id,
+                "service_begin_date": svc_date,
+                "service_end_date": svc_date,
                 "source_file_moyr": moyr,
+                "source_file_name": f"claims_{moyr:%Y_%m}.csv",
                 "source_name": "Synthetic",
+                "source_format": "ICD",
             }
         )
 

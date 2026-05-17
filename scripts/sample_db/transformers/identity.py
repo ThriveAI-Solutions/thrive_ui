@@ -20,6 +20,15 @@ _INACTIVE_RANK_RATE = 0.10  # ~10% of patients get an extra empi_rank=99 source
 _STALE_VISIT_RATE = 0.15  # ~15% have last_date_of_visit >12 months ago
 _OUT_OF_WNY_RATE = 0.08  # ~8% live outside Buffalo area
 
+_NON_WNY_LOCATIONS = [
+    ("15213", "Pittsburgh", "PA"),
+    ("15201", "Pittsburgh", "PA"),
+    ("10001", "New York", "NY"),
+    ("10128", "New York", "NY"),
+    ("44113", "Cleveland", "OH"),
+    ("19103", "Philadelphia", "PA"),
+]
+
 
 def _age(birthdate: str, ref_date: dt.date) -> int:
     bd = dt.date.fromisoformat(birthdate)
@@ -71,7 +80,7 @@ def transform_identity(
 
         # Geography -- keep most patients in Buffalo, scatter a small fraction.
         if rng.random() < _OUT_OF_WNY_RATE:
-            zip_code, city, state = p["ZIP"], p["CITY"], p["STATE"]  # whatever Synthea gave
+            zip_code, city, state = rng.choice(_NON_WNY_LOCATIONS)
         else:
             zip_code, city, state = "14223", "Buffalo", "NY"
 

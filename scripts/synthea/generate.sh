@@ -11,7 +11,7 @@ SYNTHEA_VERSION="${SYNTHEA_VERSION:-3.3.0}"
 JAR_PATH="${SCRIPT_DIR}/synthea-with-dependencies.jar"
 JAR_URL="https://github.com/synthetichealth/synthea/releases/download/v${SYNTHEA_VERSION}/synthea-with-dependencies.jar"
 
-SAMPLE_POPULATION="${SAMPLE_POPULATION:-1000}"
+SAMPLE_POPULATION="${SAMPLE_POPULATION:-200}"
 SAMPLE_SEED="${SAMPLE_SEED:-42}"
 SAMPLE_STATE="${SAMPLE_STATE:-New York}"
 SAMPLE_CITY="${SAMPLE_CITY:-Buffalo}"
@@ -33,11 +33,11 @@ mkdir -p "${OUT_DIR}"
 
 echo "Running Synthea — population=${SAMPLE_POPULATION} seed=${SAMPLE_SEED}..."
 java -jar "${JAR_PATH}" \
-    --configFile "${SCRIPT_DIR}/synthea.properties" \
-    --seed "${SAMPLE_SEED}" \
-    --clinicianSeed "${SAMPLE_SEED}" \
-    --population "${SAMPLE_POPULATION}" \
-    --exporter.baseDirectory "${OUT_DIR}" \
+    -c "${SCRIPT_DIR}/synthea.properties" \
+    -s "${SAMPLE_SEED}" \
+    -cs "${SAMPLE_SEED}" \
+    -p "${SAMPLE_POPULATION}" \
+    "--exporter.baseDirectory=${OUT_DIR}" \
     "${SAMPLE_STATE}" "${SAMPLE_CITY}"
 
 echo "Done. CSVs at ${OUT_DIR}/csv/"

@@ -8,6 +8,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sqlite3
 import subprocess
@@ -110,12 +111,18 @@ def load_into_postgres(dump_path: Path) -> None:
         "-f",
         sql_file,
     ]
-    env = {"PGPASSWORD": pg["password"]}
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
-    if result.returncode != 0:
-        print("psql failed:", result.stderr, file=sys.stderr)
-        sys.exit(result.returncode)
-    print(result.stdout)
+    env = {**os.environ, "PGPASSWORD": pg["password"]}
+    try:
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        if result.returncode != 0:
+            print("psql failed:", result.stderr, file=sys.stderr)
+            sys.exit(result.returncode)
+        print(result.stdout)
+    finally:
+        try:
+            os.unlink(sql_file)
+        except OSError:
+            pass
 
 
 def main(argv: list[str] | None = None) -> int:
