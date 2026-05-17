@@ -54,12 +54,5 @@ extend-exclude = ["alembic/versions"]
 [tool.ruff.format]
 line-ending = "lf"
 
-[tool.pytest.ini_options]
-markers = [
-    "unit: fast, isolated unit tests",
-    "milvus: tests that require a running Milvus instance",
-    "sample_db: requires the sample database loaded in a running Postgres",
-]
-
 [tool.uv.sources]
 ethical-guardrails-lib = { git = "https://github.com/ThriveAI-Solutions/ethical_guardrails_lib.git" }
