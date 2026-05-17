@@ -24,7 +24,7 @@ fi
 
 if [[ ! -f "${JAR_PATH}" ]]; then
     echo "Fetching Synthea ${SYNTHEA_VERSION}..."
-    curl -L -o "${JAR_PATH}" "${JAR_URL}"
+    curl -fL -o "${JAR_PATH}" "${JAR_URL}"
 fi
 
 OUT_DIR="${REPO_ROOT}/data/sample/synthea"
@@ -33,7 +33,7 @@ mkdir -p "${OUT_DIR}"
 
 echo "Running Synthea — population=${SAMPLE_POPULATION} seed=${SAMPLE_SEED}..."
 java -jar "${JAR_PATH}" \
-    --config "${SCRIPT_DIR}/synthea.properties" \
+    --configFile "${SCRIPT_DIR}/synthea.properties" \
     --seed "${SAMPLE_SEED}" \
     --clinicianSeed "${SAMPLE_SEED}" \
     --population "${SAMPLE_POPULATION}" \
