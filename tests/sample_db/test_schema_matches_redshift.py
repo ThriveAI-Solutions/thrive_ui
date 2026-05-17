@@ -61,6 +61,9 @@ def test_table_columns_match_redshift_catalog(table: str):
     ddl_cols = _parse_ddl_columns(SCHEMA.read_text())
     cat_cols = _catalog_columns()
     assert table in ddl_cols, f"{table} missing from schema.sql"
+    assert table in cat_cols, (
+        f"{table} missing from catalog JSON — refresh docs/superpowers/research/2026-05-06-redshift-tables.json"
+    )
     assert ddl_cols[table] == cat_cols[table], (
         f"Column drift in {table}.\n  DDL:     {ddl_cols[table]}\n  Catalog: {cat_cols[table]}"
     )
