@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.base import TransformContext, naive_dt
 
 # (name, mnemonic, weight) from 2026-05-06-redshift-warehouse-findings.md §4.
 _DOC_TYPES = [
@@ -47,7 +47,7 @@ def transform_documents(
         source_id = source_map.get(e["PATIENT"])
         if source_id is None:
             continue
-        when = pd.to_datetime(e["START"], utc=True).to_pydatetime().replace(tzinfo=None)
+        when = naive_dt(e["START"])
         name, mnem = _weighted_choice(rng)
         out.append(
             {

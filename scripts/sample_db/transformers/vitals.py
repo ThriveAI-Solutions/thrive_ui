@@ -8,7 +8,7 @@ from __future__ import annotations
 import pandas as pd
 
 from scripts.sample_db.noise import pick_code_type
-from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.base import TransformContext, naive_dt, str_or_none
 
 _EMPTY_RATE = 0.07
 
@@ -25,8 +25,8 @@ def transform_vitals(
         source_id = source_map.get(o["PATIENT"])
         if source_id is None:
             continue
-        when = pd.to_datetime(o["DATE"], utc=True).to_pydatetime().replace(tzinfo=None)
-        value = str(o["VALUE"]) if pd.notna(o["VALUE"]) else None
+        when = naive_dt(o["DATE"])
+        value = str_or_none(o["VALUE"])
         out.append(
             {
                 "source_id": source_id,

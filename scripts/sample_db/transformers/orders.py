@@ -12,7 +12,7 @@ import datetime as dt
 import pandas as pd
 
 from scripts.sample_db.noise import pick_code_type
-from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.base import TransformContext, naive_dt
 
 _EMPTY_RATE = 0.46
 
@@ -28,7 +28,7 @@ def transform_orders(
         source_id = source_map.get(p["PATIENT"])
         if source_id is None:
             continue
-        start = pd.to_datetime(p["START"], utc=True).to_pydatetime().replace(tzinfo=None)
+        start = naive_dt(p["START"])
         created = start - dt.timedelta(hours=int(rng.choice([0, 24, 72, 168])))
         out.append(
             {

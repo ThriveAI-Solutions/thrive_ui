@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.base import TransformContext, naive_dt
 
 _CLASS_MAP = {
     "ambulatory": "office_visit",
@@ -42,7 +42,7 @@ def transform_encounters(
             continue
         enc_class = str(e.get("ENCOUNTERCLASS", "")).lower()
         wh_type = _CLASS_MAP.get(enc_class, "office_visit")
-        when = pd.to_datetime(e["START"], utc=True).to_pydatetime().replace(tzinfo=None)
+        when = naive_dt(e["START"])
         out.append(
             {
                 "source_id": source_id,

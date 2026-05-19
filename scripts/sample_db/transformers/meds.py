@@ -11,7 +11,7 @@ from __future__ import annotations
 import pandas as pd
 
 from scripts.sample_db.crosswalks.loader import rxnorm_to_ndc
-from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.base import TransformContext, naive_dt, str_or_none
 
 _PLACEHOLDER_NDC = "99999-9999-99"
 
@@ -30,8 +30,8 @@ def transform_meds(
             continue
         rxnorm = str(m["CODE"])
         ndc = cw.get(rxnorm, _PLACEHOLDER_NDC)
-        when = pd.to_datetime(m["START"], utc=True).to_pydatetime().replace(tzinfo=None)
-        desc = str(m["DESCRIPTION"]) if pd.notna(m["DESCRIPTION"]) else None
+        when = naive_dt(m["START"])
+        desc = str_or_none(m["DESCRIPTION"])
         strength, unit = _parse_strength(desc) if desc else (None, None)
         out.append(
             {

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.base import TransformContext, naive_dt
 
 _MANUFACTURERS = ["Merck", "Sanofi", "Pfizer", "GSK", "Moderna"]
 
@@ -21,7 +21,7 @@ def transform_immunizations(
         source_id = source_map.get(row["PATIENT"])
         if source_id is None:
             continue
-        when = pd.to_datetime(row["DATE"], utc=True).to_pydatetime().replace(tzinfo=None)
+        when = naive_dt(row["DATE"])
         out.append(
             {
                 "source_id": source_id,
