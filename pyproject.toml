@@ -30,6 +30,7 @@ dependencies = [
     "pydantic-ai>=1.90.0",
     "authlib>=1.6.11",
     "sqlalchemy-redshift>=1.0.0",
+    "zstandard>=0.25.0",
 ]
 
 [dependency-groups]

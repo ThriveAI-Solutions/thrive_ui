@@ -1,0 +1,51 @@
+snomed,icd10,description
+44054006,E11.9,Type 2 diabetes mellitus without complications
+73211009,E11.9,Diabetes mellitus
+38341003,I10,Essential hypertension
+59621000,I10,Hypertension
+55822004,E78.5,Hyperlipidemia
+13644009,E78.5,Hypercholesterolemia
+195967001,J45.909,Asthma
+185086009,J44.9,Chronic obstructive pulmonary disease
+267036007,R06.02,Dyspnea
+422034002,Z71.3,Dietary counseling
+233604007,J18.9,Pneumonia
+40055000,J32.9,Chronic sinusitis
+444814009,J06.9,Viral upper respiratory infection
+386661006,R50.9,Fever
+25064002,R51,Headache
+21522001,R10.9,Abdominal pain
+49727002,R05,Cough
+271737000,D64.9,Anemia
+414916001,E66.9,Obesity
+35489007,F32.9,Depressive disorder
+197480006,F41.9,Anxiety disorder
+40930008,M79.1,Myalgia
+161891005,M54.5,Low back pain
+68962001,M25.50,Joint pain
+312157006,N39.0,Urinary tract infection
+22298006,I21.9,Myocardial infarction
+230690007,I63.9,Stroke
+84757009,G40.909,Epilepsy
+709044004,N18.9,Chronic kidney disease
+431857002,N18.9,CKD stage 3
+33848003,L20.9,Atopic dermatitis
+418290006,B34.9,Viral infection
+50711007,B19.20,Viral hepatitis C
+66857006,B19.10,Viral hepatitis B
+1734006,Z11.59,Screening for infectious disease
+266569009,F17.210,Tobacco dependence
+160903007,Z72.0,Tobacco use
+72892002,O80,Normal pregnancy
+77386006,Z34.90,Antepartum care
+236077008,O68.9,Pregnancy complication
+44465007,S93.40,Sprain of ankle
+402234004,L30.9,Dermatitis
+83157008,H66.90,Otitis media
+35999006,L02.91,Cutaneous abscess
+86406008,B20,HIV
+399211009,Z51.11,Chemotherapy session
+67782005,J96.91,Respiratory failure
+417981005,Z00.00,General medical exam
+410620009,Z00.121,Well child exam
+185345009,Z71.9,Counseling
