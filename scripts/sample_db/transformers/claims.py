@@ -45,10 +45,12 @@ def transform_claims(
                 diag.append(
                     {
                         "claim_line_identifier": line_id,
-                        "icd_diagnosis_code": icd10,
-                        "icd_type": "ICD-10",
+                        # icd_diagnosis_code is VARCHAR(7); ICD-10-CM codes fit
+                        # but we truncate defensively in case a SNOMED fell through.
+                        "icd_diagnosis_code": icd10[:7],
+                        # icd_type is VARCHAR(1) — real warehouse stores just the digit.
+                        "icd_type": "0",
                         "primary_flag": 1 if col == "DIAGNOSIS1" else 0,
-                        "diagnosis_date": svc_date,
                         "diagnosis_sequence_number": int(col.replace("DIAGNOSIS", "")),
                         "source_file_moyr": moyr,
                         "source_file_name": f"claims_{moyr:%Y_%m}.csv",
@@ -64,8 +66,11 @@ def transform_claims(
                 proc.append(
                     {
                         "claim_line_identifier": line_id,
-                        "icd_procedure_code": str(p["CODE"]),
-                        "icd_type": "ICD-10-PCS",
+                        # icd_procedure_code is VARCHAR(8) — Synthea emits SNOMED
+                        # codes (often 9+ chars), so we truncate to fit.
+                        "icd_procedure_code": str(p["CODE"])[:8],
+                        # icd_type is VARCHAR(1) — same single-digit convention as diagnosis.
+                        "icd_type": "0",
                         "primary_flag": 1 if i == 1 else 0,
                         "procedure_date": pd.to_datetime(p["START"], utc=True).date(),
                         "procedure_sequence_number": i,

@@ -8,12 +8,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sqlite3
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import zstandard as zstd
@@ -84,8 +81,18 @@ def load_into_sqlite(dump_path: Path, db_path: Path) -> None:
 
 
 def load_into_postgres(dump_path: Path) -> None:
-    """Load via psql. Reads connection params from secrets.toml."""
+    """Load via psycopg2. Reads connection params from secrets.toml.
+
+    The dump is a pg_dump-style text file: DDL statements followed by
+    `COPY table (cols) FROM stdin;` blocks terminated by `\\.`. We split
+    the text on the COPY boundaries, run DDL via plain cursor.execute,
+    and feed each COPY body through cursor.copy_expert (which natively
+    speaks the COPY text protocol).
+    """
+    import io
     import tomllib
+
+    import psycopg2
 
     secrets_path = Path(".streamlit/secrets.toml")
     if not secrets_path.exists():
@@ -93,36 +100,40 @@ def load_into_postgres(dump_path: Path) -> None:
         sys.exit(1)
     pg = tomllib.loads(secrets_path.read_text())["postgres"]
     sql = _read_dump(dump_path)
-    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as fh:
-        fh.write(sql)
-        sql_file = fh.name
-    cmd = [
-        "psql",
-        "-h",
-        str(pg["host"]),
-        "-p",
-        str(pg["port"]),
-        "-U",
-        pg["user"],
-        "-d",
-        pg["database"],
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-f",
-        sql_file,
-    ]
-    env = {**os.environ, "PGPASSWORD": pg["password"]}
+
+    conn = psycopg2.connect(
+        host=pg["host"],
+        port=pg["port"],
+        user=pg["user"],
+        password=pg["password"],
+        dbname=pg["database"],
+    )
+    conn.autocommit = False
+    pattern = re.compile(
+        r"COPY ([\w.]+) \(([^)]+)\) FROM stdin;\n(.*?)\n\\\.\n",
+        re.DOTALL,
+    )
     try:
-        result = subprocess.run(cmd, env=env, capture_output=True, text=True)
-        if result.returncode != 0:
-            print("psql failed:", result.stderr, file=sys.stderr)
-            sys.exit(result.returncode)
-        print(result.stdout)
+        cur = conn.cursor()
+        last_end = 0
+        for m in pattern.finditer(sql):
+            ddl_chunk = sql[last_end : m.start()].strip()
+            if ddl_chunk:
+                cur.execute(ddl_chunk)
+            table, cols, body = m.group(1), m.group(2), m.group(3)
+            copy_sql = f"COPY {table} ({cols}) FROM stdin"
+            cur.copy_expert(copy_sql, io.StringIO(body + "\n"))
+            last_end = m.end()
+        tail = sql[last_end:].strip()
+        if tail:
+            cur.execute(tail)
+        conn.commit()
+        print(f"Loaded {dump_path} → postgres://{pg['host']}:{pg['port']}/{pg['database']}")
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        try:
-            os.unlink(sql_file)
-        except OSError:
-            pass
+        conn.close()
 
 
 def main(argv: list[str] | None = None) -> int:
