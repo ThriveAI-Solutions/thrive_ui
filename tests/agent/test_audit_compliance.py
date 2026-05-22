@@ -112,3 +112,47 @@ def test_audit_logger_releases_write_lock_immediately(tmp_path):
     with other.begin() as conn:
         conn.execute(text("CREATE TABLE other (id INTEGER)"))
         conn.execute(text("INSERT INTO other VALUES (1)"))
+
+
+def test_summarize_cohort_result_contains_counts_not_names():
+    """A CohortResult.sample contains patient display_names. summarize_result
+    must persist counts ONLY — never names or source_ids — per spec §8.7.
+    """
+
+    result_obj = {
+        "total_count": 147,
+        "sample": [
+            {
+                "source_id": "src-mary-1956",
+                "display_name": "Mary Jones",
+                "age": 70,
+                "gender": "F",
+                "last_date_of_visit": "2026-04-15",
+                "practice_name": "Kaleida",
+            },
+            {
+                "source_id": "src-susan-1955",
+                "display_name": "Susan Park",
+                "age": 71,
+                "gender": "F",
+                "last_date_of_visit": "2026-03-20",
+                "practice_name": "Kaleida",
+            },
+        ],
+        "data_availability": "data_present",
+        "reliability_note": "ICD-10 coverage in problems ~57%; SNOMED ~25%. ...",
+    }
+
+    summary = summarize_result("search_patients_by_criteria", result_obj)
+
+    # Counts present
+    assert "total_count=147" in summary
+    assert "sample_size=2" in summary
+
+    # PHI MUST NOT appear
+    assert "Mary" not in summary
+    assert "Jones" not in summary
+    assert "Susan" not in summary
+    assert "Park" not in summary
+    assert "src-mary-1956" not in summary
+    assert "src-susan-1955" not in summary

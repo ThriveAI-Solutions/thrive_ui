@@ -33,3 +33,10 @@ def test_find_patient_filters_by_dob(synthetic_db):
     rows = adapter.fetch_all(sql, params)
     assert len(rows) == 1
     assert rows[0]["source_id"] == "src-john-1962"
+
+
+def test_find_patient_sql_rejects_empty_criteria():
+    """Defense in depth — direct callers must not be able to issue an
+    unfiltered scan of the patient table."""
+    with pytest.raises(ValueError):
+        find_patient_sql(limit=25)

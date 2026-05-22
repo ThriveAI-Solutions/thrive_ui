@@ -23,7 +23,8 @@ SCHEMA_DOCS: List[_Doc] = [
             "internal_patient_profile_v: consent-aware patient master. Use this as the "
             "primary source for find_patient. Key columns: patient_id (integer, "
             "warehouse-internal), first_name, last_name, full_name, date_of_birth, "
-            "age, gender, last_date_of_visit, practice_name, provider_name, conditions. "
+            "age, gender, last_date_of_visit, practice_name, provider_name, conditions, "
+            "address_1, address_2, city, state, zip_code (5-digit, ~100% coverage). "
             "Patients in this view have given consent to be shown to other users; "
             "do NOT use federated_demographic_v for UI-visible patient lookup."
         ),
@@ -46,7 +47,8 @@ SCHEMA_DOCS: List[_Doc] = [
             "federated_demographic_v: source-level demographic feed. NOT consent-filtered. "
             "Columns: source_id (varchar 50, canonical join key), patient_id (varchar, "
             "per-source — do not aggregate on this), date_of_birth, first_name, last_name, "
-            "gender, address, phone, race, ethnicity. Use internal_patient_profile_v for "
+            "gender, address_1, address_2, city, state, zip (no underscore on this view), "
+            "phone, race, ethnicity. Use internal_patient_profile_v for "
             "patient lookup; use this view only when joined to a known source_id."
         ),
     },
@@ -266,13 +268,108 @@ EXAMPLES_DOCS: List[_Doc] = [
         "text": (
             "Q: 'Has this patient had any invasive procedures in date range?'\n"
             "Tool sequence: get_patient_clinical_data({domain:'procedures', "
-            "date_range:{...}}). Result UNIONs orders, problems (ICD-10-PCS), and the "
-            "claims feed; the claims feed lags by up to 30 days — include the freshness "
-            "caveat from reliability_note."
+            "date_range:{...}}). Result UNIONs orders (CPT) and problems "
+            "(ICD-10-PCS only). The claims-feed branch is currently suppressed "
+            "because the claims procedure view has no patient identifier — "
+            "results may under-report procedures historically captured only "
+            "via claims. Always surface the reliability_note from the result."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'How many patients over 65 with diabetes at Kaleida last year?' "
+            "A: Call search_patients_by_criteria with diagnosis_codes=['E11.9'], "
+            "age_min=65, facility='Kaleida', diagnosis_date_range covering the last year, "
+            "sample_size=20. Surface the reliability_note (ICD-10 ~57% coverage)."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'Find me 10 patients on metformin.' "
+            "A: Call search_patients_by_criteria with medication_rxnorm_codes=['6809'], "
+            "sample_size=10. Do NOT call find_patient first."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'Active diabetic patients seen since 2025.' "
+            "A: Call search_patients_by_criteria with diagnosis_codes=['E11.9'], "
+            "last_visit_after=2025-01-01."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'List people in zip 14223 with high blood pressure.' "
+            "A: search_codes(vocabulary='icd10', query='hypertension') → "
+            "search_patients_by_criteria(diagnosis_codes=['I10'], zip_code='14223'). "
+            "Do NOT also pass condition_text — it AND-stacks against the code filter "
+            "and returns zero. Surface the geo reliability note from the result."
+        ),
+    },
+]
+
+
+# Few-shot SQL templates for run_sql's tool description. The "{p}" token
+# is replaced with the analytics_db.schema_prefix at render time
+# (production "dw." / SQLite tests "") so the same source-of-truth
+# example works across environments.
+RUN_SQL_EXAMPLES: List[_Doc] = [
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: List patients in a given zip with a given ICD-10 diagnosis.\n"
+            "SQL:\n"
+            "  SELECT isr.source_id, p.full_name, p.age, p.gender, p.last_date_of_visit\n"
+            "  FROM {p}internal_patient_profile_v p\n"
+            "  JOIN {p}internal_source_reference_v isr\n"
+            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+            "  JOIN (SELECT DISTINCT patient_id FROM {p}metric_federated_data_v\n"
+            "        WHERE code = :icd10 AND code_type IN ('ICD-10','ICD10','SNOMED')) dx\n"
+            "    ON dx.patient_id = p.patient_id\n"
+            "  WHERE p.zip_code = :zip\n"
+            "  LIMIT 100;"
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: Count distinct patients seen since a date, grouped by practice.\n"
+            "SQL:\n"
+            "  SELECT p.practice_name, COUNT(DISTINCT isr.source_id) AS patient_count\n"
+            "  FROM {p}internal_patient_profile_v p\n"
+            "  JOIN {p}internal_source_reference_v isr\n"
+            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+            "  WHERE p.last_date_of_visit >= :since\n"
+            "  GROUP BY p.practice_name\n"
+            "  ORDER BY patient_count DESC;"
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: For one source_id, the most recent A1C result (LOINC 4548-4).\n"
+            "SQL:\n"
+            "  SELECT result, clean_result, unit, datetime\n"
+            "  FROM {p}federated_results_v\n"
+            "  WHERE source_id = :source_id\n"
+            "    AND code = '4548-4' AND code_type = 'LOINC'\n"
+            "  ORDER BY datetime DESC\n"
+            "  LIMIT 1;"
         ),
     },
 ]
 
 
 def all_seed_docs() -> List[_Doc]:
-    return [*SCHEMA_DOCS, *IDENTITY_DOCS, *FRESHNESS_DOCS, *EXAMPLES_DOCS]
+    return [*SCHEMA_DOCS, *IDENTITY_DOCS, *FRESHNESS_DOCS, *EXAMPLES_DOCS, *RUN_SQL_EXAMPLES]

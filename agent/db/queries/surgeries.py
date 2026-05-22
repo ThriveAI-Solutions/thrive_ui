@@ -73,11 +73,11 @@ def surgeries_sql(
     # --- Text filters ---
     text_filter_orders = ""
     text_filter_problems = ""
-    text_filter_claims = ""
+    # federated_claims_icd_procedure_detail_v has no procedure_description column
+    # per redshift_tables.json; text filtering is not possible on the claims branch.
     if procedure_text:
         text_filter_orders = "AND LOWER(o.name) LIKE :pt"
         text_filter_problems = "AND LOWER(p.diagnosis) LIKE :pt"
-        text_filter_claims = "AND LOWER(c.procedure_description) LIKE :pt"
         params["pt"] = f"%{procedure_text.lower()}%"
 
     # --- Date filters ---
@@ -94,6 +94,10 @@ def surgeries_sql(
         date_filter_problems += " AND p.diagnosis_datetime <= :end_date"
         date_filter_claims += " AND c.procedure_date <= :end_date"
         params["end_date"] = end_date
+
+    # Claims branch is suppressed — same HIPAA gap as procedures_sql.
+    # federated_claims_icd_procedure_detail_v has no patient identifier.
+    claims_filter = "AND 1 = 0"
 
     # --- ICD-10-PCS code_type variants ---
     icd10pcs_variants = ("ICD-10-PCS", "ICD10-PCS")
@@ -168,29 +172,19 @@ def surgeries_sql(
 
         SELECT
             'claims' AS source,
-            c.source_id,
+            NULL AS source_id,
             c.icd_procedure_code AS code,
-            c.code_type,
-            c.procedure_description AS description,
+            c.icd_type AS code_type,
+            NULL AS description,
             c.procedure_date AS event_date,
-            c.place_of_service,
-            c.rendering_provider_npi AS provider_npi,
-            c.facility_name,
-            {provider_agg} AS performing_provider
+            NULL AS place_of_service,
+            NULL AS provider_npi,
+            NULL AS facility_name,
+            NULL AS performing_provider
         FROM {schema_prefix}federated_claims_icd_procedure_detail_v c
-        LEFT JOIN {schema_prefix}federated_encounters_v e
-          ON c.source_id = e.source_id
-         AND DATE(c.procedure_date) = DATE(e.datetime)
-        WHERE c.source_id = :source_id
-          AND c.code_type IN ({pcs_placeholders})
-          AND SUBSTR(c.icd_procedure_code, 3, 1) != 'J'
-          {icdpcs_filter}
-          {text_filter_claims}
+        WHERE 1=1
+          {claims_filter}
           {date_filter_claims}
-        GROUP BY c.source_id, c.icd_procedure_code, c.code_type,
-                 c.procedure_description, c.procedure_date,
-                 c.place_of_service, c.rendering_provider_npi,
-                 c.facility_name
 
         ORDER BY event_date DESC
     """

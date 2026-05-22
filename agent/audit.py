@@ -58,6 +58,10 @@ def summarize_result(tool_name: str, result_obj: Any) -> str:
         parts.append(f"match_count={len(result_obj['matches'])}")
     if "total_unique" in result_obj:
         parts.append(f"total_unique={result_obj['total_unique']}")
+    if "total_count" in result_obj:
+        parts.append(f"total_count={result_obj['total_count']}")
+    if "sample" in result_obj and isinstance(result_obj["sample"], list):
+        parts.append(f"sample_size={len(result_obj['sample'])}")
     if "truncated" in result_obj:
         parts.append(f"truncated={result_obj['truncated']}")
     return "; ".join(parts) or "empty_result"

@@ -108,3 +108,39 @@ async def test_runner_injects_selection_into_instructions():
     await runner.run("anything", deps=deps)
     assert "src-john-1962" in captured["prompt_text"]
     assert "find_patient" in captured["prompt_text"].lower()
+
+
+def test_runner_registers_run_sql():
+    from agent.runner import AgenticRunner
+    from pydantic_ai.models.test import TestModel
+
+    runner = AgenticRunner(model=TestModel())
+    tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
+    assert "run_sql" in tool_names
+
+
+def test_runner_registers_make_chart():
+    from agent.runner import AgenticRunner
+    from pydantic_ai.models.test import TestModel
+
+    runner = AgenticRunner(model=TestModel())
+    tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
+    assert "make_chart" in tool_names
+
+
+def test_runner_registers_summarize_results():
+    from agent.runner import AgenticRunner
+    from pydantic_ai.models.test import TestModel
+
+    runner = AgenticRunner(model=TestModel())
+    tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
+    assert "summarize_results" in tool_names
+
+
+def test_runner_registers_search_patients_by_criteria():
+    from agent.runner import AgenticRunner
+    from pydantic_ai.models.test import TestModel
+
+    runner = AgenticRunner(model=TestModel())
+    tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
+    assert "search_patients_by_criteria" in tool_names

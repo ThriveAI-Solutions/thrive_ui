@@ -58,7 +58,6 @@ def _final_event(text="ok", clear_selection=False, all_messages=None):
         response=AgentResponse(
             text=text,
             followups=[],
-            artifacts=[],
             clear_selection=clear_selection,
         ),
         all_messages=all_messages or ["msg-a", "msg-b"],

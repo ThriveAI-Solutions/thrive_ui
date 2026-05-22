@@ -192,22 +192,31 @@ def test_immunizations_filtered_by_cvx(synthetic_db):
 from agent.tools.get_patient_clinical_data import ProceduresQuery, ProcedureItem
 
 
-def test_procedures_returns_three_sources(synthetic_db):
+def test_procedures_returns_orders_and_problems(synthetic_db):
+    """The claims branch is hard-suppressed in Phase 3 (no patient ID on
+    federated_claims_icd_procedure_detail_v); only orders + problems
+    surface."""
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, ProceduresQuery())
     assert result.domain == "procedures"
     assert result.data_availability == "data_present"
     sources = {i.source for i in result.items}
-    assert sources == {"orders", "problems", "claims"}
+    assert sources == {"orders", "problems"}
+    assert "claims" not in sources
 
 
-def test_procedures_carries_claims_freshness_note(synthetic_db):
+def test_procedures_reliability_note_flags_claims_suppression(synthetic_db):
+    """The reliability_note must inform the model (and the user) that
+    claims data is intentionally absent, so downstream answers can be
+    properly hedged."""
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, ProceduresQuery())
     assert result.reliability_note is not None
-    assert "claims" in result.reliability_note.lower()
+    note = result.reliability_note.lower()
+    assert "claims" in note
+    assert "suppress" in note or "no patient identifier" in note
 
 
 def test_procedures_filtered_by_cpt(synthetic_db):
@@ -284,3 +293,41 @@ def test_surgeries_date_range_filters(synthetic_db):
     result = get_patient_clinical_data(ctx, q)
     codes = {i.code for i in result.items}
     assert "27447" in codes
+
+
+def test_clinical_tool_sets_last_dataframe_on_deps(synthetic_db):
+    """After get_patient_clinical_data returns, ctx.deps.last_dataframe
+    should hold a pandas DataFrame of the result items."""
+    import pandas as pd
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+
+    result = get_patient_clinical_data(ctx, DemographicsQuery())
+
+    assert result.domain == "demographics"
+    assert isinstance(ctx.deps.last_dataframe, pd.DataFrame)
+    assert len(ctx.deps.last_dataframe) == len(result.items)
+
+
+def test_clinical_tool_empty_result_sets_empty_dataframe(synthetic_db):
+    """A no_records_found result should still set an (empty) DataFrame
+    on deps so downstream tools see a definite signal rather than None."""
+    import pandas as pd
+    from agent.tools.get_patient_clinical_data import LabsQuery
+
+    selected_no_data = SelectedPatient(
+        source_id="src-nonexistent",
+        display_name="Nobody",
+        dob=None,
+        selected_at=datetime.now(),
+        selection_origin="user_click",
+    )
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected_no_data)
+
+    result = get_patient_clinical_data(ctx, LabsQuery(date_range=None))
+
+    assert result.data_availability == "no_records_found"
+    assert isinstance(ctx.deps.last_dataframe, pd.DataFrame)
+    assert len(ctx.deps.last_dataframe) == 0

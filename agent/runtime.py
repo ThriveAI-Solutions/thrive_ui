@@ -17,10 +17,15 @@ from agent.observability import configure_observability
 from agent.runner import AgenticRunner
 from agent.state import (
     AgentResponse,
+    AssistantTextCompletedEvent,
+    AssistantTextDeltaEvent,
     CapReachedEvent,
+    CohortSampleEvent,
     FinalResponseEvent,
     PatientChooserEvent,
     StreamEvent,
+    ThinkingCompletedEvent,
+    ThinkingDeltaEvent,
     ToolCallCompleted,
     ToolCallStarted,
 )
@@ -94,8 +99,10 @@ def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
 def run_agentic_message_flow(my_question: str) -> None:
     """Drop-in replacement for the Vanna branch in normal_message_flow.
 
-    Renders user message, runs the agent with streaming, persists
-    each tool call and the final response as orm.Message rows.
+    Runs the agent with streaming and persists each tool call and the
+    final response as orm.Message rows. The USER row for `my_question`
+    is already in session_state.messages — set_question() at
+    chat_bot_helper.py:535 wrote it before the rerun landed us here.
 
     Multi-turn continuity: prior `agent_message_history` (list of
     pydantic-ai ModelMessage) is threaded into the run; the post-run
@@ -103,25 +110,14 @@ def run_agentic_message_flow(my_question: str) -> None:
     as `pending_user_question` so the patient-chooser click handler
     can re-trigger this flow with the same prompt.
     """
-    from utils.chat_bot_helper import add_message
-
     # Stash the question for chooser-click resume before any errors can
     # short-circuit us out.
     st.session_state["pending_user_question"] = my_question
 
-    # Outer try ensures my_question is always cleared, even if
-    # add_message or SessionLocal raises before we reach the agent
-    # call — otherwise the chat_bot.py loop would re-fire the same
-    # question on the next rerun and the user would see no response.
+    # Outer try ensures my_question is always cleared even if the agent
+    # call raises — otherwise the chat_bot.py loop would re-fire the
+    # same question on the next rerun and the user would see no response.
     try:
-        add_message(
-            Message(
-                RoleType.USER,
-                my_question,
-                MessageType.TEXT,
-            )
-        )
-
         sqlite_session = SessionLocal()
         try:
             deps = build_agent_deps(sqlite_session)
@@ -129,8 +125,18 @@ def run_agentic_message_flow(my_question: str) -> None:
             prior_history = st.session_state.get("agent_message_history") or None
 
             async def consume() -> None:
-                async for event in runner.stream(my_question, deps=deps, message_history=prior_history):
-                    _render_event(event)
+                # Per-flow state for live placeholders. Two buckets keyed by
+                # turn_index so thinking and plain assistant text get distinct
+                # chat_message containers (different headers, different
+                # lifecycles). The finally block drains anything still open
+                # if the generator dies mid-stream — otherwise a partial
+                # "🤔 Thinking..." panel would stay frozen on screen.
+                renderer_state: dict[str, Any] = {"thinking": {}, "text": {}}
+                try:
+                    async for event in runner.stream(my_question, deps=deps, message_history=prior_history):
+                        _render_event(event, renderer_state)
+                finally:
+                    _drain_placeholders(renderer_state)
 
             _run_async(consume())
             sqlite_session.commit()
@@ -141,8 +147,105 @@ def run_agentic_message_flow(my_question: str) -> None:
         st.session_state["my_question"] = None
 
 
-def _render_event(event: StreamEvent) -> None:
+def _drain_placeholders(state: dict[str, Any]) -> None:
+    """Clear any open transient placeholders. Called from a finally block in
+    consume() so a mid-stream death (CapReachedEvent, exception, network
+    drop) doesn't leave a partial "🤔 Thinking..." panel frozen on screen.
+    Idempotent — safe to call multiple times."""
+    for bucket in ("thinking", "text"):
+        slots = state.get(bucket) or {}
+        for slot in slots.values():
+            try:
+                slot["outer"].empty()
+            except Exception:
+                pass
+        slots.clear()
+
+
+def _open_slot(state: dict[str, Any], bucket: str, turn_index: int) -> dict[str, Any]:
+    """Return the existing live-update slot for (bucket, turn_index), or
+    create one anchored to a fresh outer st.empty().
+
+    The chat_message bubble is rendered INSIDE the outer placeholder on
+    each delta via `outer.container()`, so calling `outer.empty()` later
+    removes both the bubble's avatar and its content. The prior pattern
+    of placing st.empty() inside a chat_message left orphaned empty
+    avatar bubbles after the placeholder was cleared.
+    """
+    slot = state[bucket].get(turn_index)
+    if slot is None:
+        outer = st.empty()
+        slot = {"outer": outer, "buf": ""}
+        state[bucket][turn_index] = slot
+    return slot
+
+
+def _write_slot(slot: dict[str, Any], header: str | None = None) -> None:
+    """Re-render the slot's buffer into the outer placeholder as a fresh
+    chat_message + markdown. Called on every delta. `header` (e.g.
+    "🤔 **Thinking...**") is prepended when present."""
+    body = (f"{header}\n\n{slot['buf']}") if header else slot["buf"]
+    with slot["outer"].container():
+        with st.chat_message(RoleType.ASSISTANT.value):
+            st.markdown(body)
+
+
+def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> None:
     from utils.chat_bot_helper import add_message
+
+    state = state if state is not None else {"thinking": {}, "text": {}}
+    state.setdefault("thinking", {})
+    state.setdefault("text", {})
+
+    if isinstance(event, ThinkingDeltaEvent):
+        slot = _open_slot(state, "thinking", event.turn_index)
+        slot["buf"] += event.delta
+        _write_slot(slot, header="🤔 **Thinking...**")
+        return
+
+    if isinstance(event, AssistantTextDeltaEvent):
+        # Plain assistant narration between tool calls. Lives in its own
+        # bucket with no "Thinking..." header so the user can tell the two
+        # apart at a glance. Persisted on the matching AssistantTextCompletedEvent.
+        slot = _open_slot(state, "text", event.turn_index)
+        slot["buf"] += event.delta
+        _write_slot(slot)
+        return
+
+    if isinstance(event, AssistantTextCompletedEvent):
+        slot = state["text"].pop(event.turn_index, None)
+        if slot is not None:
+            slot["outer"].empty()
+        if event.text.strip():
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    event.text,
+                    MessageType.TEXT,
+                )
+            )
+            # Remember the last persisted narration so FinalResponseEvent
+            # can skip its own response.text row if the model echoed the
+            # same content via TextPart on the final turn.
+            state["last_persisted_text"] = event.text
+        return
+
+    if isinstance(event, ThinkingCompletedEvent):
+        slot = state["thinking"].pop(event.turn_index, None)
+        if slot is not None:
+            # Drop the transient bubble; the persisted MessageType.THINKING
+            # row that follows replaces it visually.
+            slot["outer"].empty()
+        if event.text.strip():
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    event.text,
+                    MessageType.THINKING,
+                    elapsed_time=event.elapsed_ms / 1000.0,
+                )
+            )
+        return
 
     if isinstance(event, ToolCallStarted):
         # In-flight tool call card.
@@ -197,15 +300,45 @@ def _render_event(event: StreamEvent) -> None:
         )
         return
 
-    if isinstance(event, FinalResponseEvent):
-        response = event.response
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                response.text,
-                MessageType.TEXT,
+    if isinstance(event, CohortSampleEvent):
+        # Auto-surfaced by runner.stream() right after
+        # search_patients_by_criteria succeeds with a non-empty sample.
+        # Renders as a DataFrame message regardless of whether the LLM
+        # attaches a DataFrameArtifact to the final response.
+        import pandas as pd
+
+        sample = event.payload.get("sample", [])
+        if sample:
+            df = pd.DataFrame(sample)
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    df.to_json(orient="records", date_format="iso"),
+                    MessageType.DATAFRAME,
+                )
             )
-        )
+        return
+
+    if isinstance(event, FinalResponseEvent):
+        # Drain any open transient placeholders before the final TEXT row
+        # lands, otherwise a plain-text live preview would briefly double up
+        # with the persisted answer.
+        _drain_placeholders(state)
+        response = event.response
+        # Dedupe: if the model already streamed the same final text as a
+        # TextPart on the last turn, AssistantTextCompletedEvent already
+        # persisted it. Skip the redundant row so the user doesn't see the
+        # answer twice. Strip-equality is enough — both come from the same
+        # model output and won't drift in whitespace meaningfully.
+        last_streamed = state.get("last_persisted_text", "")
+        if response.text.strip() and response.text.strip() != last_streamed.strip():
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    response.text,
+                    MessageType.TEXT,
+                )
+            )
         # Honor clear_selection: drop both the slot AND the conversation
         # history, since "start fresh" means no carry-over context.
         if response.clear_selection:
@@ -228,6 +361,8 @@ def _render_event(event: StreamEvent) -> None:
         return
 
     if isinstance(event, CapReachedEvent):
+        # Cap fires mid-stream; clear any frozen "Thinking..." panels first.
+        _drain_placeholders(state)
         add_message(
             Message(
                 RoleType.ASSISTANT,

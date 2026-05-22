@@ -1,12 +1,7 @@
-import pytest
-from pydantic import ValidationError
 from agent.state import (
-    StreamEvent,
-    ToolCallStarted,
-    ToolCallCompleted,
-    FinalResponseEvent,
     AgentResponse,
-    Artifact,
+    ToolCallCompleted,
+    ToolCallStarted,
 )
 
 

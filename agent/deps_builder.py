@@ -4,7 +4,10 @@ Called at the top of every agent run. Reads:
 - st.session_state.cookies["user_id"] (JSON-encoded int) — see orm/functions.py
 - st.session_state.user_role (int value of RoleTypeEnum)
 - st.session_state.selected_patient_*
-- st.session_state.last_dataframe / last_sql
+- st.session_state["df"] (Vanna and the agent share this key; written by
+  the runner's _sync_last_dataframe_to_session_state at turn boundaries
+  and consumed by slash-command magic functions too)
+- st.session_state.last_sql
 - @st.cache_resource singletons for analytics_db, rag, sqlite_session
 
 Returns a fresh AgentDeps. Per spec §8.1: AgentDeps is per-run, not
@@ -116,7 +119,7 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
         user_role=user_role,
         session_id=session_id,
         selected_patient=_selected_patient_from_session(),
-        last_dataframe=st.session_state.get("last_dataframe"),
+        last_dataframe=st.session_state.get("df"),
         last_sql=st.session_state.get("last_sql"),
         last_query_meta=None,
         analytics_db=_analytics_db(),

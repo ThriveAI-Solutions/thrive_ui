@@ -30,10 +30,10 @@ class ToolCallCompleted(BaseModel):
     reliability_note: Optional[str] = None
     # Observability for the chat UI: SQL the tool ran (popped from
     # adapter.pop_sql_log()) and a serialized snapshot of the tool's
-    # return value. Both surfaced behind a role-gated expander so
-    # admins (and optionally clinicians) can inspect what produced
-    # the answer. Empty list / None when the tool ran no SQL or the
-    # result wasn't dict-serializable.
+    # return value. Both surfaced in a collapsed expander on every
+    # tool-call card (the role gate was removed in Phase 3 §3.7 — see
+    # memory/feedback_default_permissive_roles.md). Empty list / None
+    # when the tool ran no SQL or the result wasn't dict-serializable.
     sql_executed: List[dict] = Field(default_factory=list)
     result_payload: Optional[dict] = None
 
@@ -68,6 +68,69 @@ class PatientChooserEvent(BaseModel):
     payload: dict  # PatientSearchResults shape: {matches, total_unique, truncated}
 
 
+class CohortSampleEvent(BaseModel):
+    """Auto-surfaced after a successful search_patients_by_criteria
+    call so the UI renders the cohort sample as a DataFrame regardless
+    of whether the LLM attaches an artifact to the final response.
+
+    Phase 4 design §3.7.
+    """
+
+    kind: Literal["cohort_sample"] = "cohort_sample"
+    payload: dict  # CohortResult shape (total_count, sample, data_availability, reliability_note)
+
+
+class ThinkingDeltaEvent(BaseModel):
+    """One chunk of reasoning text from the model's current turn.
+
+    Emitted while a ModelRequest node is streaming a ThinkingPart.
+    Renderer accumulates these into a transient placeholder so the
+    user can watch the model reason instead of staring at a frozen UI.
+    """
+
+    kind: Literal["thinking_delta"] = "thinking_delta"
+    delta: str
+    turn_index: int  # which model_request_node this delta belongs to
+
+
+class ThinkingCompletedEvent(BaseModel):
+    """End of the current turn's thinking. Carries the full accumulated
+    text so the renderer can persist it as a MessageType.THINKING row
+    that survives Streamlit reruns.
+    """
+
+    kind: Literal["thinking_completed"] = "thinking_completed"
+    text: str
+    elapsed_ms: int
+    turn_index: int
+
+
+class AssistantTextDeltaEvent(BaseModel):
+    """One chunk of plain assistant text from the current turn.
+
+    Rare with output_type=AgentResponse since the model is routed through
+    the synthetic final_result tool, but the model can still emit narration
+    between tool calls. Rendered live in a transient placeholder; the
+    AssistantTextCompletedEvent at end of turn carries the full accumulated
+    text so the renderer can persist a row that survives reruns.
+    """
+
+    kind: Literal["assistant_text_delta"] = "assistant_text_delta"
+    delta: str
+    turn_index: int
+
+
+class AssistantTextCompletedEvent(BaseModel):
+    """End of the current turn's plain assistant text. Carries the full
+    accumulated text so the renderer can persist it as a MessageType.TEXT
+    row that survives Streamlit reruns. Symmetric with ThinkingCompletedEvent.
+    """
+
+    kind: Literal["assistant_text_completed"] = "assistant_text_completed"
+    text: str
+    turn_index: int
+
+
 StreamEvent = Annotated[
     Union[
         ToolCallStarted,
@@ -75,6 +138,11 @@ StreamEvent = Annotated[
         FinalResponseEvent,
         CapReachedEvent,
         PatientChooserEvent,
+        CohortSampleEvent,
+        ThinkingDeltaEvent,
+        ThinkingCompletedEvent,
+        AssistantTextDeltaEvent,
+        AssistantTextCompletedEvent,
     ],
     Field(discriminator="kind"),
 ]
@@ -83,20 +151,21 @@ StreamEvent = Annotated[
 # --- Final response --------------------------------------------------
 
 
-class Artifact(BaseModel):
-    """Variant definitions deferred to Phase 3 (chart, summary, dataframe).
+class AgentResponse(BaseModel):
+    """LLM-facing structured output.
 
-    For Phase 1 we only need the wrapper shape so AgentResponse validates.
+    Deliberately flat — no nested unions or $defs — because local models
+    (qwen3.6 on Ollama in particular) silently fail to call the synthetic
+    `final_result` tool when its JSON schema gets complex. The artifact
+    types still live in agent/artifacts.py for use by individual tools
+    (make_chart returns a ChartArtifact, summarize_results returns a
+    SummaryArtifact), but those flow through the tool-call card path,
+    not via this response object. The patient chooser and cohort sample
+    DataFrame are auto-surfaced by AgenticRunner.stream() events.
     """
 
-    artifact_type: str
-    payload: dict
-
-
-class AgentResponse(BaseModel):
     text: str
     followups: List[str] = []
-    artifacts: List[Artifact] = []
     clear_selection: bool = False
     cap_reached: bool = False
 

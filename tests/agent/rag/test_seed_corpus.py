@@ -53,3 +53,11 @@ def test_examples_docs_cover_each_representative_domain():
     ):
         assert needle in text_blob, f"missing example coverage: {needle}"
     assert any(d in all_seed_docs() for d in EXAMPLES_DOCS)
+
+
+def test_examples_docs_include_cohort_questions():
+    """At least 3 cohort RAG examples per Phase 4 design §3.3."""
+    from agent.rag.seed import EXAMPLES_DOCS
+
+    cohort_docs = [d for d in EXAMPLES_DOCS if "search_patients_by_criteria" in d["text"]]
+    assert len(cohort_docs) >= 3, f"expected ≥3 cohort examples, got {len(cohort_docs)}"

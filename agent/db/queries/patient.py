@@ -21,6 +21,11 @@ def find_patient_sql(
     limit: int = 25,
     schema_prefix: str = "",
 ) -> Tuple[str, dict]:
+    if not any((first_name, last_name, dob, mrn)):
+        raise ValueError(
+            "find_patient_sql requires at least one search criterion; refusing to issue an unfiltered scan."
+        )
+
     where_clauses: list[str] = []
     params: dict = {"limit": limit}
 
@@ -37,7 +42,7 @@ def find_patient_sql(
         where_clauses.append("ipp.umrn = :mrn")
         params["mrn"] = mrn
 
-    where = " AND ".join(where_clauses) if where_clauses else "1=1"
+    where = " AND ".join(where_clauses)
 
     # isr.empi_rank = 1 picks the canonical source_id per patient (one
     # row per patient). 99 is automatically excluded since 99 != 1.
