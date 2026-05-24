@@ -3945,11 +3945,8 @@ Does this result correctly answer the question? Respond PASS or FAIL."""
 
             # Step 5: Train the valid pair
             new_entry = {"question": question, "query": sql}
-            try:
-                write_to_file_and_training(new_entry)
-            except Exception as train_err:
-                _reject_pair(pair_detail, results, f"Training persistence failed: {train_err}")
-                continue
+            # write_to_file_and_training handles its own errors internally via st.error
+            write_to_file_and_training(new_entry)
 
             pair_detail["status"] = "passed"
             results["passed"] += 1

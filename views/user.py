@@ -412,20 +412,28 @@ if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
             if st.button("Generate", type="primary", key="auto_gen_btn"):
                 with st.status("Generating SQL training pairs...", expanded=True) as gen_status:
                     gen_results = auto_generate_sql_pairs(count=int(pair_count))
-                    passed = gen_results.get("passed", 0)
-                    failed = gen_results.get("failed", 0)
-                    if passed > 0:
+                    error_msg = gen_results.get("error")
+                    if error_msg:
                         gen_status.update(
-                            label=f"Generated {passed} pair(s) ({failed} failed)",
-                            state="complete",
-                        )
-                        st.success(f"Successfully trained {passed} SQL pair(s).")
-                    else:
-                        gen_status.update(
-                            label=f"Generation complete: 0 passed, {failed} failed",
+                            label=f"Generation failed: {error_msg}",
                             state="error",
                         )
-                        st.warning("No valid pairs were generated. Check LLM connectivity and training data.")
+                        st.error(error_msg)
+                    else:
+                        passed = gen_results.get("passed", 0)
+                        failed = gen_results.get("failed", 0)
+                        if passed > 0:
+                            gen_status.update(
+                                label=f"Generated {passed} pair(s) ({failed} failed)",
+                                state="complete",
+                            )
+                            st.success(f"Successfully trained {passed} SQL pair(s).")
+                        else:
+                            gen_status.update(
+                                label=f"Generation complete: 0 passed, {failed} failed",
+                                state="error",
+                            )
+                            st.warning("No valid pairs were generated. Check LLM connectivity and training data.")
                     # Show details for failed pairs
                     failed_details = [d for d in gen_results.get("details", []) if d["status"] == "failed"]
                     if failed_details:
