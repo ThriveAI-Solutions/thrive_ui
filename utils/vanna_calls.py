@@ -3954,9 +3954,11 @@ Does this result correctly answer the question? Respond PASS or FAIL."""
                 new_entry = {"question": question, "query": sql}
                 write_to_file_and_training(new_entry)
 
-                # Add to existing questions list to prevent duplicates within this batch
+                # Add to existing questions list to prevent duplicates within this batch.
+                # Use the last 50 entries so newly generated questions are always included
+                # in the next iteration's prompt, even when the list exceeds 50 items.
                 existing_questions.append(question)
-                existing_q_text = "\n".join(f"- {q}" for q in existing_questions[:50])
+                existing_q_text = "\n".join(f"- {q}" for q in existing_questions[-50:])
 
                 pair_detail["status"] = "passed"
                 results["passed"] += 1
