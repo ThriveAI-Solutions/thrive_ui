@@ -123,14 +123,6 @@ def mock_vanna_service():
     return mock_service
 
 
-@pytest.fixture
-def mock_security_validator():
-    """Mock security validator that passes everything."""
-    mock_sv = MagicMock()
-    mock_sv.validate_sql_content.return_value = (True, [])
-    return mock_sv
-
-
 class TestAutoGenerateSqlPairs:
     """Integration tests for auto_generate_sql_pairs with mocked dependencies."""
 

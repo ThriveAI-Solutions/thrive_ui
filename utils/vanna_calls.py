@@ -3857,22 +3857,22 @@ def auto_generate_sql_pairs(count: int = 5) -> dict:
     except Exception:
         existing_questions = []
 
-    existing_q_text = "\n".join(f"- {q}" for q in existing_questions[:50]) if existing_questions else "None yet."
+    existing_q_text = "\n".join(f"- {q}" for q in existing_questions[-50:]) if existing_questions else "None yet."
 
-    results = {"attempted": count, "passed": 0, "failed": 0, "details": []}
+    results = {"attempted": 0, "passed": 0, "failed": 0, "details": []}
 
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    def _reject_pair(pair_detail: dict, results: dict, reason: str) -> None:
+        pair_detail["reason"] = reason
+        results["failed"] += 1
+        results["details"].append(pair_detail)
 
-    try:
-        for i in range(count):
-            pair_detail = {"index": i + 1, "status": "failed", "question": None, "sql": None, "reason": None}
-            status_text.text(f"Generating pair {i + 1}/{count}...")
-            progress_bar.progress((i + 1) / count)
+    for i in range(count):
+        pair_detail = {"index": i + 1, "status": "failed", "question": None, "sql": None, "reason": None}
+        results["attempted"] += 1
 
-            try:
-                # Step 1: Generate question + SQL via LLM
-                user_prompt = f"""Database Schema (DDL):
+        try:
+            # Step 1: Generate question + SQL via LLM
+            user_prompt = f"""Database Schema (DDL):
 {ddl_context}
 
 Existing training questions (generate something DIFFERENT):
@@ -3880,102 +3880,86 @@ Existing training questions (generate something DIFFERENT):
 
 Generate a new question and SQL pair following the format specified."""
 
-                response = vanna_service.submit_prompt(_SQL_PAIR_GENERATION_SYSTEM_PROMPT, user_prompt)
+            response = vanna_service.submit_prompt(_SQL_PAIR_GENERATION_SYSTEM_PROMPT, user_prompt)
 
-                if not response or isinstance(response, Exception):
-                    pair_detail["reason"] = f"LLM generation failed: {response}"
-                    results["failed"] += 1
-                    results["details"].append(pair_detail)
-                    continue
+            if not response or isinstance(response, Exception):
+                _reject_pair(pair_detail, results, f"LLM generation failed: {response}")
+                continue
 
-                response_text = str(response).strip()
+            response_text = str(response).strip()
 
-                # Parse QUESTION and SQL from response
-                question, sql = _parse_question_sql_response(response_text)
-                if not question or not sql:
-                    pair_detail["reason"] = "Could not parse question/SQL from LLM response"
-                    results["failed"] += 1
-                    results["details"].append(pair_detail)
-                    continue
+            # Parse QUESTION and SQL from response
+            question, sql = _parse_question_sql_response(response_text)
+            if not question or not sql:
+                _reject_pair(pair_detail, results, "Could not parse question/SQL from LLM response")
+                continue
 
-                pair_detail["question"] = question
-                pair_detail["sql"] = sql
+            pair_detail["question"] = question
+            pair_detail["sql"] = sql
 
-                # Step 2: Security validation
-                is_valid, violations = security_validator.validate_sql_content(sql)
-                if not is_valid:
-                    pair_detail["reason"] = f"Security validation failed: {violations}"
-                    results["failed"] += 1
-                    results["details"].append(pair_detail)
-                    continue
+            # Add to dedup window regardless of whether the pair passes or fails
+            existing_questions.append(question)
+            existing_q_text = "\n".join(f"- {q}" for q in existing_questions[-50:])
 
-                # Also check via VannaService.check_references
-                checked_sql = vanna_service.check_references(sql)
-                if checked_sql is None:
-                    pair_detail["reason"] = "Forbidden reference detected by check_references"
-                    results["failed"] += 1
-                    results["details"].append(pair_detail)
-                    continue
+            # Step 2: Security validation
+            is_valid, violations = security_validator.validate_sql_content(sql)
+            if not is_valid:
+                _reject_pair(pair_detail, results, f"Security validation failed: {violations}")
+                continue
 
-                # Step 3: Execute SQL against database
-                try:
-                    df = vanna_service.vn.run_sql(sql)
-                except Exception as exec_err:
-                    pair_detail["reason"] = f"SQL execution error: {exec_err}"
-                    results["failed"] += 1
-                    results["details"].append(pair_detail)
-                    continue
+            # Also check via VannaService.check_references
+            checked_sql = vanna_service.check_references(sql)
+            if checked_sql is None:
+                _reject_pair(pair_detail, results, "Forbidden reference or configuration error detected by check_references")
+                continue
 
-                if df is None or (isinstance(df, DataFrame) and df.empty):
-                    pair_detail["reason"] = "SQL returned empty results"
-                    results["failed"] += 1
-                    results["details"].append(pair_detail)
-                    continue
+            # Step 3: Execute SQL against database
+            try:
+                df = vanna_service.vn.run_sql(sql)
+            except Exception as exec_err:
+                _reject_pair(pair_detail, results, f"SQL execution error: {exec_err}")
+                continue
 
-                # Step 4: LLM semantic review
-                result_preview = df.head(5).to_string(index=False) if isinstance(df, DataFrame) else str(df)
-                review_prompt = f"""Question: {question}
+            if df is None or (isinstance(df, DataFrame) and df.empty):
+                _reject_pair(pair_detail, results, "SQL returned empty results")
+                continue
+
+            # Step 4: LLM semantic review
+            result_preview = df.head(5).to_string(index=False) if isinstance(df, DataFrame) else str(df)
+            review_prompt = f"""Question: {question}
 SQL: {sql}
 Results (first 5 rows):
 {result_preview}
 
 Does this result correctly answer the question? Respond PASS or FAIL."""
 
-                review_response = vanna_service.submit_prompt(_SQL_PAIR_REVIEW_SYSTEM_PROMPT, review_prompt)
-                review_text = str(review_response).strip().upper() if review_response else "FAIL"
+            review_response = vanna_service.submit_prompt(_SQL_PAIR_REVIEW_SYSTEM_PROMPT, review_prompt)
+            if isinstance(review_response, Exception):
+                _reject_pair(pair_detail, results, f"LLM review failed: {review_response}")
+                continue
+            review_text = str(review_response).strip().upper() if review_response else "FAIL"
 
-                if "PASS" not in review_text:
-                    pair_detail["reason"] = f"Semantic review failed: {review_text}"
-                    results["failed"] += 1
-                    results["details"].append(pair_detail)
-                    continue
+            if "PASS" not in review_text:
+                _reject_pair(pair_detail, results, f"Semantic review failed: {review_text}")
+                continue
 
-                # Step 5: Train the valid pair
-                new_entry = {"question": question, "query": sql}
+            # Step 5: Train the valid pair
+            new_entry = {"question": question, "query": sql}
+            try:
                 write_to_file_and_training(new_entry)
+            except Exception as train_err:
+                _reject_pair(pair_detail, results, f"Training persistence failed: {train_err}")
+                continue
 
-                # Add to existing questions list to prevent duplicates within this batch.
-                # Use the last 50 entries so newly generated questions are always included
-                # in the next iteration's prompt, even when the list exceeds 50 items.
-                existing_questions.append(question)
-                existing_q_text = "\n".join(f"- {q}" for q in existing_questions[-50:])
+            pair_detail["status"] = "passed"
+            results["passed"] += 1
+            results["details"].append(pair_detail)
 
-                pair_detail["status"] = "passed"
-                results["passed"] += 1
-                results["details"].append(pair_detail)
-
-            except Exception as pair_err:
-                pair_detail["reason"] = f"Unexpected error: {pair_err}"
-                logger.exception("Error generating SQL pair %d: %s", i + 1, pair_err)
-                results["failed"] += 1
-                results["details"].append(pair_detail)
-
-    finally:
-        try:
-            progress_bar.empty()
-            status_text.empty()
-        except Exception:
-            pass
+        except Exception as pair_err:
+            pair_detail["reason"] = f"Unexpected error: {pair_err}"
+            logger.exception("Error generating SQL pair %d: %s", i + 1, pair_err)
+            results["failed"] += 1
+            results["details"].append(pair_detail)
 
     logger.info(
         "Auto-generate SQL pairs complete: %d attempted, %d passed, %d failed",
@@ -3997,7 +3981,7 @@ def _parse_question_sql_response(response_text: str) -> tuple[str | None, str | 
 
     # Try structured QUESTION:/SQL: format
     q_match = re.search(r"QUESTION:\s*(.+?)(?=\nSQL:)", response_text, re.DOTALL | re.IGNORECASE)
-    s_match = re.search(r"SQL:\s*(.+)", response_text, re.DOTALL | re.IGNORECASE)
+    s_match = re.search(r"(?:^|\n)SQL:\s*(.+)", response_text, re.DOTALL | re.IGNORECASE)
 
     if q_match and s_match:
         question = q_match.group(1).strip()
