@@ -39,7 +39,6 @@ from agent.state import (
     ToolCallStarted,
     ToolCallCompleted,
 )
-from unittest.mock import MagicMock
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -104,7 +103,7 @@ def _build_live_deps() -> AgentDeps:
         analytics_db=_build_synthetic_analytics_db(),
         rag=rag,
         sqlite_session=SessionLocal(),
-        audit_logger=MagicMock(),  # regression runs don't write to audit
+        run_logger=None,
     )
 
 
