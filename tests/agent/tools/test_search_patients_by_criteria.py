@@ -35,7 +35,7 @@ def _deps(synthetic_db, selected: SelectedPatient | None = None) -> AgentDeps:
         analytics_db=AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite"),
         rag=None,
         sqlite_session=None,
-        audit_logger=MagicMock(),
+        run_logger=MagicMock(),
     )
 
 

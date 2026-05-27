@@ -103,7 +103,7 @@ async def test_runner_injects_selection_into_instructions():
         selected_at=datetime(2026, 5, 6),
         selection_origin="user_click",
     )
-    deps.audit_logger = None
+    deps.run_logger = None
 
     await runner.run("anything", deps=deps)
     assert "src-john-1962" in captured["prompt_text"]

@@ -17,10 +17,7 @@ class TestParseQuestionSqlResponse:
     def test_valid_format(self):
         from utils.vanna_calls import _parse_question_sql_response
 
-        text = (
-            "QUESTION: How many patients are in the database?\n"
-            "SQL: SELECT COUNT(*) FROM patients;"
-        )
+        text = "QUESTION: How many patients are in the database?\nSQL: SELECT COUNT(*) FROM patients;"
         question, sql = _parse_question_sql_response(text)
         assert question == "How many patients are in the database?"
         assert sql == "SELECT COUNT(*) FROM patients;"
@@ -44,10 +41,7 @@ class TestParseQuestionSqlResponse:
     def test_sql_with_markdown_fencing(self):
         from utils.vanna_calls import _parse_question_sql_response
 
-        text = (
-            "QUESTION: Count rows\n"
-            "SQL: ```sql\nSELECT COUNT(*) FROM t;\n```"
-        )
+        text = "QUESTION: Count rows\nSQL: ```sql\nSELECT COUNT(*) FROM t;\n```"
         question, sql = _parse_question_sql_response(text)
         assert question == "Count rows"
         assert sql == "SELECT COUNT(*) FROM t;"
@@ -97,10 +91,7 @@ class TestParseQuestionSqlResponse:
     def test_markdown_bold_colon_outside(self):
         from utils.vanna_calls import _parse_question_sql_response
 
-        text = (
-            "**Question**: How many allergies?\n"
-            "**SQL**:\n```sql\nSELECT COUNT(*) FROM allergies;\n```"
-        )
+        text = "**Question**: How many allergies?\n**SQL**:\n```sql\nSELECT COUNT(*) FROM allergies;\n```"
         question, sql = _parse_question_sql_response(text)
         assert question == "How many allergies?"
         assert sql == "SELECT COUNT(*) FROM allergies;"
@@ -196,9 +187,7 @@ class TestAutoGenerateSqlPairs:
         mock_st.progress.return_value = MagicMock()
         mock_st.empty.return_value = MagicMock()
 
-        mock_vanna_service.submit_prompt.return_value = (
-            "QUESTION: Get secret data\nSQL: SELECT * FROM secret_table;"
-        )
+        mock_vanna_service.submit_prompt.return_value = "QUESTION: Get secret data\nSQL: SELECT * FROM secret_table;"
 
         with patch("utils.security_validator.security_validator") as mock_sv:
             mock_sv.validate_sql_content.return_value = (False, ["Forbidden table reference: secret_table"])
@@ -220,9 +209,7 @@ class TestAutoGenerateSqlPairs:
         mock_st.progress.return_value = MagicMock()
         mock_st.empty.return_value = MagicMock()
 
-        mock_vanna_service.submit_prompt.return_value = (
-            "QUESTION: Bad query\nSQL: SELECT * FROM nonexistent;"
-        )
+        mock_vanna_service.submit_prompt.return_value = "QUESTION: Bad query\nSQL: SELECT * FROM nonexistent;"
         mock_vanna_service.check_references.return_value = "SELECT * FROM nonexistent;"
         mock_vanna_service.vn.run_sql.side_effect = Exception("relation does not exist")
 
@@ -246,9 +233,7 @@ class TestAutoGenerateSqlPairs:
         mock_st.progress.return_value = MagicMock()
         mock_st.empty.return_value = MagicMock()
 
-        mock_vanna_service.submit_prompt.return_value = (
-            "QUESTION: Empty?\nSQL: SELECT * FROM patients WHERE 1=0;"
-        )
+        mock_vanna_service.submit_prompt.return_value = "QUESTION: Empty?\nSQL: SELECT * FROM patients WHERE 1=0;"
         mock_vanna_service.check_references.return_value = "SELECT * FROM patients WHERE 1=0;"
         mock_vanna_service.vn.run_sql.return_value = pd.DataFrame()
 
@@ -320,9 +305,7 @@ class TestAutoGenerateSqlPairs:
         mock_st.empty.return_value = MagicMock()
 
         # LLM generates a question that already exists in training data
-        mock_vanna_service.submit_prompt.return_value = (
-            "QUESTION: Existing question\nSQL: SELECT 1;"
-        )
+        mock_vanna_service.submit_prompt.return_value = "QUESTION: Existing question\nSQL: SELECT 1;"
 
         with patch("utils.security_validator.security_validator") as mock_sv:
             mock_sv.validate_sql_content.return_value = (True, [])
@@ -344,9 +327,7 @@ class TestAutoGenerateSqlPairs:
         mock_st.progress.return_value = MagicMock()
         mock_st.empty.return_value = MagicMock()
 
-        mock_vanna_service.submit_prompt.return_value = (
-            "QUESTION: Get data\nSQL: SELECT * FROM forbidden_table;"
-        )
+        mock_vanna_service.submit_prompt.return_value = "QUESTION: Get data\nSQL: SELECT * FROM forbidden_table;"
         mock_vanna_service.check_references.return_value = None  # blocked
 
         with patch("utils.security_validator.security_validator") as mock_sv:
