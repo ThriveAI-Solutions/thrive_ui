@@ -91,6 +91,6 @@ pg = st.navigation(pages=pages)
 
 check_authenticate()
 
-initialize_discord_logging_after_streamlit(st.session_state.username)
+initialize_discord_logging_after_streamlit(st.session_state.get("username"))
 
 pg.run()
