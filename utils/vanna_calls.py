@@ -3798,14 +3798,15 @@ def refresh_stats():
 
 
 _SQL_PAIR_GENERATION_SYSTEM_PROMPT = """You are a SQL training data generator for a PostgreSQL analytics database.
-Given a database schema (DDL) and a list of existing training questions, generate a NEW natural-language question and the correct SQL query to answer it.
+Given a database schema (DDL), working example pairs, and optional documentation, generate a NEW natural-language question and the correct SQL query to answer it.
 
 Rules:
-1. The question must be meaningfully different from any existing question provided.
-2. The SQL must be a valid SELECT query (no INSERT/UPDATE/DELETE/DROP/ALTER/CREATE).
-3. The SQL must reference only tables and columns present in the provided DDL.
-4. Prefer queries that JOIN multiple tables, use aggregations, or filter with WHERE clauses.
-5. Output EXACTLY in this format (no other text):
+1. The SQL must be a valid SELECT query (no INSERT/UPDATE/DELETE/DROP/ALTER/CREATE).
+2. The SQL must reference ONLY tables and columns present in the provided DDL. Never invent table or column names.
+3. Study the working examples carefully — they show real table names, JOIN patterns, and filter values that return data.
+4. DO NOT use hardcoded filter values (like specific states, years, or status strings) UNLESS they appear in the provided documentation or examples. Instead prefer broad queries: aggregations (COUNT, AVG, SUM), GROUP BY, ORDER BY, LIMIT, IS NOT NULL, JOINs between tables.
+5. Vary the complexity, tables, and topic — do not duplicate the example questions.
+6. Output EXACTLY in this format with no markdown formatting, no bold, no code fences (no other text):
 QUESTION: <the natural language question>
 SQL: <the SQL query>"""
 
@@ -3819,10 +3820,10 @@ def auto_generate_sql_pairs(count: int = 5) -> dict:
     """Generate, validate, and train SQL question-answer pairs using the LLM.
 
     Pipeline per pair:
-    1. Fetch DDL context and existing questions from training data
-    2. LLM generates a novel question + SQL pair
+    1. LLM generates a question + SQL pair (DDL context only, no question history)
+    2. Local duplicate detection against existing training data
     3. Security validation (forbidden references)
-    4. Execute SQL against live database
+    4. Execute SQL against live database (must return non-empty results)
     5. LLM semantic review of results
     6. Auto-train valid pairs via write_to_file_and_training()
 
@@ -3840,24 +3841,58 @@ def auto_generate_sql_pairs(count: int = 5) -> dict:
     if not vanna_service:
         return {"attempted": 0, "passed": 0, "failed": 0, "details": [], "error": "VannaService not available"}
 
-    # Gather DDL context
-    try:
-        ddl_list = vanna_service.vn.get_related_ddl("database schema overview")
-    except Exception:
-        ddl_list = []
-    ddl_context = "\n\n".join(ddl_list[:20]) if ddl_list else "No DDL available."
+    # Gather a focused slice of RAG context — keep prompt small for local LLMs.
+    # Strategy: pick 3 DDL tables, 3 working examples, and 1 doc entry per iteration,
+    # rotating the seed query each time so we cover different parts of the schema.
+    _rag_seed_queries = [
+        "patient demographics and encounters",
+        "allergies and vaccinations",
+        "lab results and vitals",
+        "orders and procedures",
+        "insurance and billing",
+    ]
 
-    # Gather existing questions to avoid duplicates
+    def _gather_focused_context(vn, seed_query: str) -> tuple[str, str, str]:
+        """Pull a small, focused slice of RAG context for one seed query."""
+        ddl_context = "No DDL available."
+        try:
+            ddl_list = vn.get_related_ddl(seed_query)
+            if ddl_list:
+                ddl_context = "\n\n".join(ddl_list[:3])
+        except Exception:
+            pass
+
+        example_pairs_text = ""
+        try:
+            rag_pairs = vn.get_similar_question_sql(seed_query)
+            if rag_pairs:
+                valid = [p for p in rag_pairs if isinstance(p, dict) and p.get("question") and p.get("sql")][:3]
+                if valid:
+                    example_pairs_text = "\n\n".join(f"QUESTION: {p['question']}\nSQL: {p['sql']}" for p in valid)
+        except Exception:
+            pass
+
+        doc_context = ""
+        try:
+            docs = vn.get_related_documentation(seed_query)
+            if docs:
+                valid = [d for d in docs if isinstance(d, str) and d.strip()][:1]
+                if valid:
+                    doc_context = valid[0]
+        except Exception:
+            pass
+
+        return ddl_context, example_pairs_text, doc_context
+
+    # Gather existing questions for local duplicate detection (not sent to LLM)
     try:
         training_df = vanna_service.get_training_data()
-        existing_questions = []
+        existing_questions: set[str] = set()
         if isinstance(training_df, DataFrame) and not training_df.empty:
             sql_rows = training_df[training_df["training_data_type"] == "sql"]
-            existing_questions = sql_rows["question"].dropna().tolist()
+            existing_questions = {q.lower().strip() for q in sql_rows["question"].dropna().tolist()}
     except Exception:
-        existing_questions = []
-
-    existing_q_text = "\n".join(f"- {q}" for q in existing_questions[-50:]) if existing_questions else "None yet."
+        existing_questions = set()
 
     results = {"attempted": 0, "passed": 0, "failed": 0, "details": []}
 
@@ -3865,6 +3900,7 @@ def auto_generate_sql_pairs(count: int = 5) -> dict:
         pair_detail["reason"] = reason
         results["failed"] += 1
         results["details"].append(pair_detail)
+        logger.warning("SQL pair %d rejected: %s", pair_detail.get("index"), reason)
 
     for i in range(count):
         pair_detail = {"index": i + 1, "status": "failed", "question": None, "sql": None, "reason": None}
@@ -3872,13 +3908,20 @@ def auto_generate_sql_pairs(count: int = 5) -> dict:
 
         try:
             # Step 1: Generate question + SQL via LLM
-            user_prompt = f"""Database Schema (DDL):
-{ddl_context}
+            # Rotate through seed queries so each iteration focuses on different tables
+            seed = _rag_seed_queries[i % len(_rag_seed_queries)]
+            ddl_context, example_pairs_text, doc_context = _gather_focused_context(vanna_service.vn, seed)
 
-Existing training questions (generate something DIFFERENT):
-{existing_q_text}
+            prompt_parts = [f"Database Schema (DDL):\n{ddl_context}"]
 
-Generate a new question and SQL pair following the format specified."""
+            if example_pairs_text:
+                prompt_parts.append(f"Working Example Question/SQL Pairs (use these as reference for table names, JOINs, and filters):\n{example_pairs_text}")
+
+            if doc_context:
+                prompt_parts.append(f"Documentation:\n{doc_context}")
+
+            prompt_parts.append("Generate a new question and SQL pair following the format specified.")
+            user_prompt = "\n\n".join(prompt_parts)
 
             response = vanna_service.submit_prompt(_SQL_PAIR_GENERATION_SYSTEM_PROMPT, user_prompt)
 
@@ -3897,9 +3940,13 @@ Generate a new question and SQL pair following the format specified."""
             pair_detail["question"] = question
             pair_detail["sql"] = sql
 
-            # Add to dedup window regardless of whether the pair passes or fails
-            existing_questions.append(question)
-            existing_q_text = "\n".join(f"- {q}" for q in existing_questions[-50:])
+            # Local duplicate detection — reject questions that match existing training data
+            question_normalized = question.lower().strip()
+            if question_normalized in existing_questions:
+                _reject_pair(pair_detail, results, "Duplicate of existing training question")
+                continue
+            # Track this question for intra-batch dedup
+            existing_questions.add(question_normalized)
 
             # Step 2: Security validation
             is_valid, violations = security_validator.validate_sql_content(sql)
@@ -3976,16 +4023,17 @@ def _parse_question_sql_response(response_text: str) -> tuple[str | None, str | 
     question = None
     sql = None
 
-    # Try structured QUESTION:/SQL: format
-    q_match = re.search(r"QUESTION:\s*(.+?)(?=\nSQL:)", response_text, re.DOTALL | re.IGNORECASE)
-    s_match = re.search(r"(?:^|\n)SQL:\s*(.+)", response_text, re.DOTALL | re.IGNORECASE)
+    # Try structured QUESTION:/SQL: format (tolerates markdown bold in various positions)
+    q_match = re.search(r"\*{0,2}QUESTION\*{0,2}:\s*(.+?)(?=\n\*{0,2}SQL\*{0,2}:)", response_text, re.DOTALL | re.IGNORECASE)
+    s_match = re.search(r"(?:^|\n)\*{0,2}SQL\*{0,2}:\s*(.+)", response_text, re.DOTALL | re.IGNORECASE)
 
     if q_match and s_match:
-        question = q_match.group(1).strip()
-        sql = s_match.group(1).strip()
-        # Clean up SQL -- remove trailing backticks or markdown fencing
+        question = q_match.group(1).strip().strip("*").strip()
+        sql = s_match.group(1).strip().strip("*").strip()
+        # Clean up SQL -- remove markdown fencing (```sql ... ```)
         sql = re.sub(r"^```(?:sql)?\s*", "", sql)
         sql = re.sub(r"\s*```\s*$", "", sql)
+        sql = sql.strip()
 
     if question and sql:
         return question, sql

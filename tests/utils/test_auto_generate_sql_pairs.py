@@ -83,6 +83,28 @@ class TestParseQuestionSqlResponse:
         assert question == "What?"
         assert sql == "SELECT 1;"
 
+    def test_markdown_bold_labels(self):
+        from utils.vanna_calls import _parse_question_sql_response
+
+        text = (
+            "**Question:** How many patients are in Texas?\n"
+            "**SQL:**\n```sql\nSELECT COUNT(*) FROM patients WHERE state = 'TX';\n```"
+        )
+        question, sql = _parse_question_sql_response(text)
+        assert question == "How many patients are in Texas?"
+        assert sql == "SELECT COUNT(*) FROM patients WHERE state = 'TX';"
+
+    def test_markdown_bold_colon_outside(self):
+        from utils.vanna_calls import _parse_question_sql_response
+
+        text = (
+            "**Question**: How many allergies?\n"
+            "**SQL**:\n```sql\nSELECT COUNT(*) FROM allergies;\n```"
+        )
+        question, sql = _parse_question_sql_response(text)
+        assert question == "How many allergies?"
+        assert sql == "SELECT COUNT(*) FROM allergies;"
+
 
 # ---------------------------------------------------------------------------
 # Prompt constants tests
@@ -98,6 +120,10 @@ class TestPromptConstants:
         assert "QUESTION:" in _SQL_PAIR_GENERATION_SYSTEM_PROMPT
         assert "SQL:" in _SQL_PAIR_GENERATION_SYSTEM_PROMPT
         assert "SELECT" in _SQL_PAIR_GENERATION_SYSTEM_PROMPT
+        # Should NOT contain references to existing questions (context-reduction fix)
+        assert "existing" not in _SQL_PAIR_GENERATION_SYSTEM_PROMPT.lower()
+        # Should instruct against hardcoded filter values
+        assert "hardcoded" in _SQL_PAIR_GENERATION_SYSTEM_PROMPT.lower()
 
     def test_review_prompt_exists(self):
         from utils.vanna_calls import _SQL_PAIR_REVIEW_SYSTEM_PROMPT
@@ -281,6 +307,31 @@ class TestAutoGenerateSqlPairs:
         assert results["passed"] == 0
         assert results["failed"] == 1
         assert "parse" in results["details"][0]["reason"].lower()
+
+    @patch("utils.vanna_calls.st")
+    @patch("utils.vanna_calls.write_to_file_and_training")
+    @patch("utils.vanna_calls.VannaService.from_streamlit_session")
+    def test_duplicate_question_rejected(self, mock_from_session, mock_write, mock_st, mock_vanna_service):
+        """Test that a question matching existing training data is rejected as duplicate."""
+        from utils.vanna_calls import auto_generate_sql_pairs
+
+        mock_from_session.return_value = mock_vanna_service
+        mock_st.progress.return_value = MagicMock()
+        mock_st.empty.return_value = MagicMock()
+
+        # LLM generates a question that already exists in training data
+        mock_vanna_service.submit_prompt.return_value = (
+            "QUESTION: Existing question\nSQL: SELECT 1;"
+        )
+
+        with patch("utils.security_validator.security_validator") as mock_sv:
+            mock_sv.validate_sql_content.return_value = (True, [])
+            results = auto_generate_sql_pairs(count=1)
+
+        assert results["passed"] == 0
+        assert results["failed"] == 1
+        assert "Duplicate" in results["details"][0]["reason"]
+        mock_write.assert_not_called()
 
     @patch("utils.vanna_calls.st")
     @patch("utils.vanna_calls.write_to_file_and_training")
