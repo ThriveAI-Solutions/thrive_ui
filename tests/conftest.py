@@ -41,10 +41,21 @@ def test_temp_dir():
 # In-memory ChromaDB client for tests
 @pytest.fixture
 def in_memory_chromadb_client():
-    """Provides an in-memory ChromaDB client that doesn't persist to disk."""
+    """Provides an in-memory ChromaDB client that doesn't persist to disk.
+
+    chromadb.Client() returns a process-wide shared in-memory instance (chromadb
+    caches the ephemeral system by a constant identifier, so separate Client()
+    calls share collections). Wipe any collections left by earlier tests so each
+    test starts clean — otherwise a collection created with one embedding
+    dimension leaks into a test using another and inserts fail silently
+    ("Collection expecting embedding with dimension of 8, got 3").
+    """
     import chromadb
 
-    return chromadb.Client()
+    client = chromadb.Client()
+    for col in client.list_collections():
+        client.delete_collection(col.name if hasattr(col, "name") else col)
+    return client
 
 
 # Test-specific temporary ChromaDB path

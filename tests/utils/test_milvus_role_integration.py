@@ -8,6 +8,14 @@ from utils.milvus_vector import ThriveAI_Milvus
 from utils.vanna_calls import UserContext, VannaService
 
 
+@pytest.fixture(autouse=True)
+def _enable_role_restriction(monkeypatch):
+    """Force role-restricted RAG retrieval ON. The dev .streamlit/secrets.toml
+    sets security.restrict_rag_by_role = false, which collapses every effective
+    role to 0 and defeats the RBAC assertions below."""
+    monkeypatch.setattr(ThriveAI_Milvus, "_is_role_restriction_enabled", lambda self: True)
+
+
 @pytest.mark.milvus
 @pytest.mark.skipif(pytest.importorskip("pymilvus", reason="pymilvus not installed") is None, reason="pymilvus missing")
 def test_vannaservice_with_milvus_rbac(tmp_path):

@@ -167,12 +167,13 @@ class TestTrainDDL:
 
         # Verify the calls contain the expected DDL statements
         first_call_args = mock_service.train.call_args_list[0][1]
-        assert "CREATE TABLE users" in first_call_args["ddl"]
+        # DDL is schema-qualified now (CREATE TABLE <schema>.<table>); schema is "public".
+        assert "CREATE TABLE public.users" in first_call_args["ddl"]
         assert "id integer NOT NULL" in first_call_args["ddl"]
         assert "name varchar NULL" in first_call_args["ddl"]
 
         second_call_args = mock_service.train.call_args_list[1][1]
-        assert "CREATE TABLE posts" in second_call_args["ddl"]
+        assert "CREATE TABLE public.posts" in second_call_args["ddl"]
         assert "id integer NOT NULL" in second_call_args["ddl"]
         assert "title varchar NOT NULL" in second_call_args["ddl"]
 

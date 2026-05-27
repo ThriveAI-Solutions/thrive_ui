@@ -84,6 +84,11 @@ def test_vanna_calls_injects_temperature_from_secrets(monkeypatch):
             "ai_keys": {
                 "ollama_model": "llama3",
                 "ollama_temperature": 0.7,
+                # MyVannaOllama wraps VannaDB_VectorStore, whose init args read
+                # these two keys directly from secrets (evaluated before the
+                # patched no-op __init__ runs), so they must be present.
+                "vanna_model": "mock_vanna_model",
+                "vanna_api": "mock_vanna_api",
             },
             "postgres": {"schema_name": "public", "dialect": "postgresql"},
         },
