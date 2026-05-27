@@ -56,14 +56,13 @@ def test_surgeries_excludes_inspection_pcs(synthetic_db):
     assert "0WJG4ZZ" not in problem_codes
 
 
-def test_surgeries_claims_broadly_inclusive(synthetic_db):
-    """Claims branch includes 0DTJ4ZZ (Resection) but excludes 0WJG4ZZ (Inspection)."""
+def test_surgeries_claims_branch_suppressed(synthetic_db):
+    """Claims branch is suppressed (AND 1=0) because the table has no patient identifier."""
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = surgeries_sql(source_id="src-john-1962")
     rows = adapter.fetch_all(sql, params)
-    claims_codes = {r["code"] for r in rows if r["source"] == "claims"}
-    assert "0DTJ4ZZ" in claims_codes
-    assert "0WJG4ZZ" not in claims_codes
+    claims_rows = [r for r in rows if r["source"] == "claims"]
+    assert len(claims_rows) == 0
 
 
 def test_surgeries_performing_provider_lists_all_when_ambiguous(synthetic_db):
