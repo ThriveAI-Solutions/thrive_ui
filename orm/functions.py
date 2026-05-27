@@ -108,6 +108,14 @@ def set_user_preferences_in_session_state():
         user_id = json.loads(user_id_str)
         user = get_user(user_id)
 
+        # Cookie points to a user_id that no longer exists (e.g. the SQLite DB
+        # was recreated/migrated and IDs shifted). Treat as not-loaded so the
+        # caller can clear the stale cookie and re-prompt for login, instead of
+        # cascading into a series of 'NoneType' attribute errors.
+        if user is None:
+            logger.warning("Cookie user_id %s does not resolve to a user; treating as logged out.", user_id)
+            return None
+
         # if "loaded" not in st.session_state:
         st.session_state.show_sql = user.show_sql
         st.session_state.show_table = user.show_table
