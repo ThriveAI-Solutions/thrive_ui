@@ -203,6 +203,14 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
         bool: True if user was created successfully, False otherwise
     """
     try:
+        # Trim surrounding whitespace so a stray space (e.g. typed into the
+        # admin create-user form) can't silently break login — credential
+        # checks match on the exact stored username. Password is intentionally
+        # left untouched.
+        username = (username or "").strip()
+        first_name = (first_name or "").strip()
+        last_name = (last_name or "").strip()
+
         with SessionLocal() as session:
             # Check if username already exists
             existing_user = session.query(User).filter(func.lower(User.username) == username.lower()).first()
