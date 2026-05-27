@@ -114,8 +114,12 @@ def _usage_dict(run: Any) -> Optional[dict]:
         return None
     if usage is None:
         return None
-    inp = getattr(usage, "input_tokens", None) or getattr(usage, "request_tokens", None)
-    out = getattr(usage, "output_tokens", None) or getattr(usage, "response_tokens", None)
+    inp = getattr(usage, "input_tokens", None)
+    if inp is None:
+        inp = getattr(usage, "request_tokens", None)
+    out = getattr(usage, "output_tokens", None)
+    if out is None:
+        out = getattr(usage, "response_tokens", None)
     tot = getattr(usage, "total_tokens", None)
     if tot is None and (inp is not None or out is not None):
         tot = (inp or 0) + (out or 0)
@@ -246,15 +250,18 @@ class AgenticRunner:
         logger = getattr(deps, "run_logger", None)
 
         if logger is not None:
-            sel = getattr(deps, "selected_patient", None)
             selected_patient = None
-            if sel is not None:
-                selected_patient = {
-                    "source_id": getattr(sel, "source_id", None),
-                    "display_name": getattr(sel, "display_name", None),
-                    "dob": sel.dob.isoformat() if getattr(sel, "dob", None) else None,
-                    "selection_origin": getattr(sel, "selection_origin", None),
-                }
+            try:
+                sel = getattr(deps, "selected_patient", None)
+                if sel is not None:
+                    selected_patient = {
+                        "source_id": getattr(sel, "source_id", None),
+                        "display_name": getattr(sel, "display_name", None),
+                        "dob": sel.dob.isoformat() if getattr(sel, "dob", None) else None,
+                        "selection_origin": getattr(sel, "selection_origin", None),
+                    }
+            except Exception:
+                selected_patient = None
             logger.start_run(
                 question=question,
                 llm_provider=self._provider_name,
@@ -498,12 +505,7 @@ class AgenticRunner:
 
                                     # Reuse the same dict we built for summarize_result
                                     # so we don't dump the model twice.
-                                    result_payload: dict | None = None
-                                    try:
-                                        if isinstance(summary_input, dict):
-                                            result_payload = summary_input
-                                    except Exception:
-                                        result_payload = None
+                                    result_payload = summary_input if isinstance(summary_input, dict) else None
 
                                     yield ToolCallCompleted(
                                         tool_name=info["tool_name"],
