@@ -222,3 +222,7 @@ scratchpads/
 # Synthea JAR cache (downloaded on demand by scripts/synthea/generate.sh)
 scripts/synthea/synthea-with-dependencies.jar
 scripts/synthea/output/
+
+
+.idea/
+.vscode/
