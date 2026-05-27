@@ -350,9 +350,9 @@ with st.sidebar.expander("Settings"):
             st.toast("Settings saved!")
 
 agentic_mode_initial = bool(
-    getattr(st.session_state.get("user"), "agentic_mode", False)
+    getattr(st.session_state.get("user"), "agentic_mode", True)
     if st.session_state.get("user")
-    else st.session_state.get("agentic_mode", False)
+    else st.session_state.get("agentic_mode", True)
 )
 agentic_mode = st.sidebar.checkbox(
     "Agentic mode (beta)",
