@@ -9,6 +9,12 @@ notes_to_agent in the tool layer.
 Modality matching is keyword-based against the order/document text. A
 real implementation would prefer a dim_imaging_modality crosswalk; that
 is tracked as future work in spec §14.
+
+Body-region matching follows the same keyword pattern as modality: a
+canonical region name (e.g. "chest") is expanded to a tuple of synonyms
+in _BODY_REGION_KEYWORDS, each applied as LOWER()+LIKE against the order
+name and document name/mnemonic columns. Unknown region names fall back to
+a raw LIKE on the supplied string.
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ _MODALITY_KEYWORDS = {
 _BODY_REGION_KEYWORDS: dict[str, tuple[str, ...]] = {
     "head": ("head", "brain", "cranial", "cranium", "skull", "intracranial"),
     "neck": ("neck", "cervical spine", "c-spine", "c spine", "thyroid"),
-    "chest": ("chest", "thorax", "thoracic", "lung", "pulmonary", "cardiac", "rib"),
+    "chest": ("chest", "thorax", "lung", "pulmonary", "cardiac", "rib"),
     "abdomen": ("abdomen", "abdominal", "liver", "kidney", "renal", "gallbladder", "pancrea"),
     "pelvis": ("pelvis", "pelvic", "bladder", "prostate", "uterus", "ovary", "ovarian"),
     "spine": ("spine", "spinal", "lumbar", "thoracic spine", "sacral", "vertebr"),

@@ -1,7 +1,7 @@
 """get_patient_clinical_data — the workhorse clinical retrieval tool.
 
-Phase 1 implements demographics + encounters. Phase 2 adds:
-labs, diagnoses, procedures, immunizations, imaging, medications.
+All domains are implemented: demographics, encounters, labs, diagnoses,
+medications, immunizations, procedures, surgeries, imaging, admissions.
 
 Per spec §7.2: discriminated union by domain. Reads source_id from
 ctx.deps.selected_patient. ModelRetry if no selection.
@@ -125,7 +125,7 @@ class AdmissionsQuery(BaseModel):
 
     domain: Literal["admissions"] = "admissions"
     date_range: Optional[DateRange] = None
-    facility_type: Optional[Literal["inpatient", "ltc", "snf", "emergency", "outpatient", "any"]] = "any"
+    facility_type: Optional[Literal["inpatient", "ltc", "snf", "ed", "outpatient", "any"]] = "any"
     include_discharge_details: bool = True
 
 
@@ -748,6 +748,7 @@ def _build_admissions_result(
             items=[],
             data_availability="no_records_found",
         )
+    include_discharge = query.include_discharge_details
     items = [
         AdmissionItem(
             source_id=r["source_id"],
@@ -757,8 +758,8 @@ def _build_admissions_result(
             setting=r.get("setting"),
             status=r.get("status"),
             admit_from=r.get("admit_from"),
-            discharge_disposition=r.get("discharge_disposition"),
-            discharge_location=r.get("discharge_location"),
+            discharge_disposition=r.get("discharge_disposition") if include_discharge else None,
+            discharge_location=r.get("discharge_location") if include_discharge else None,
         )
         for r in rows
     ]

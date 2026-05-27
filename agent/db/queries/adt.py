@@ -13,7 +13,7 @@ _FACILITY_TYPE_SETTINGS = {
     "inpatient": ("INPATIENT",),
     "ltc": ("LONG TERM CARE", "SNF", "SKILLED NURSING"),
     "snf": ("LONG TERM CARE", "SNF", "SKILLED NURSING"),
-    "emergency": ("EMERGENCY",),
+    "ed": ("EMERGENCY",),
     "outpatient": ("OUTPATIENT",),
 }
 

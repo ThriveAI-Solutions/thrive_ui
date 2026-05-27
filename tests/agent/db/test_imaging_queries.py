@@ -30,14 +30,12 @@ def test_imaging_body_region_chest_uses_keywords(synthetic_db):
     assert any("chest" in d for d in descriptions)
 
 
-def test_imaging_body_region_knee_uses_keywords(synthetic_db):
-    """body_region='knee' should match Total knee arthroplasty order."""
+def test_imaging_body_region_knee_sql_is_valid(synthetic_db):
+    """body_region='knee' generates valid SQL; no knee imaging row in test data so result may be empty."""
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = imaging_sql(source_id="src-john-1962", body_region="knee")
     rows = adapter.fetch_all(sql, params)
-    # The Total knee arthroplasty is in orders but may not be imaging-filtered
-    # body region only filters within the imaging base set
-    # Verify the SQL is valid and runs without error
+    # knee keyword expansion produces valid SQL; result depends on fixture data
     assert isinstance(rows, list)
 
 
