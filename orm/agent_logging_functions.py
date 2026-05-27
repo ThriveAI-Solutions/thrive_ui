@@ -290,3 +290,33 @@ def log_agent_run_viewed(admin_id: int | None, run_id: str) -> bool:
     except Exception as e:
         logger.warning("log_agent_run_viewed failed: %s", e)
         return False
+
+
+def prune_agent_logs(retention_days: int) -> dict:
+    """Delete agent logs older than retention_days. Children before parents.
+    retention_days <= 0 is a no-op (keep indefinitely). Returns counts deleted."""
+    if retention_days <= 0:
+        return {"runs": 0, "events": 0, "tool_calls": 0, "patient_access": 0}
+    cutoff = datetime.now() - timedelta(days=retention_days)
+    counts = {"runs": 0, "events": 0, "tool_calls": 0, "patient_access": 0}
+    try:
+        with SessionLocal() as s:
+            old_ids = [r.run_id for r in s.query(AgentRun.run_id).filter(AgentRun.created_at < cutoff).all()]
+            if not old_ids:
+                return counts
+            counts["events"] = (
+                s.query(AgentRunEvent).filter(AgentRunEvent.run_id.in_(old_ids)).delete(synchronize_session=False)
+            )
+            counts["tool_calls"] = (
+                s.query(ToolCall).filter(ToolCall.run_id.in_(old_ids)).delete(synchronize_session=False)
+            )
+            counts["patient_access"] = (
+                s.query(AgentPatientAccess)
+                .filter(AgentPatientAccess.run_id.in_(old_ids))
+                .delete(synchronize_session=False)
+            )
+            counts["runs"] = s.query(AgentRun).filter(AgentRun.run_id.in_(old_ids)).delete(synchronize_session=False)
+            s.commit()
+    except Exception as e:
+        logger.warning("prune_agent_logs failed: %s", e)
+    return counts

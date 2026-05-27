@@ -137,3 +137,76 @@ def test_log_agent_run_viewed_writes_admin_action(monkeypatch):
     assert row.action_type == "agent_run_view"
     assert row.target_entity_type == "agent_run"
     assert row.target_entity_id == "r1"
+
+
+def test_prune_agent_logs_removes_old_children_first(monkeypatch):
+    from datetime import datetime, timedelta
+    from orm import agent_logging_functions as alf
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from orm.models import Base, AgentRun, AgentRunEvent, ToolCall, AgentPatientAccess
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    monkeypatch.setattr(alf, "SessionLocal", Session)
+    s = Session()
+    old = datetime.now() - timedelta(days=100)
+    s.add(
+        AgentRun(
+            run_id="old",
+            session_id="s",
+            user_id=1,
+            user_role=1,
+            status="success",
+            success=True,
+            logging_mode="full",
+            schema_version=1,
+            created_at=old,
+        )
+    )
+    s.add(AgentRunEvent(run_id="old", seq=1, event_type="run_started", created_at=old))
+    s.add(
+        ToolCall(
+            session_id="s",
+            user_id=1,
+            user_role=1,
+            tool_name="t",
+            arguments_json="{}",
+            result_summary="x",
+            elapsed_ms=1,
+            success=True,
+            run_id="old",
+            created_at=old,
+        )
+    )
+    s.add(
+        AgentPatientAccess(
+            run_id="old",
+            session_id="s",
+            user_id=1,
+            source_id="src",
+            access_type="tool_result",
+            access_origin="tool",
+            created_at=old,
+        )
+    )
+    s.add(
+        AgentRun(
+            run_id="new",
+            session_id="s",
+            user_id=1,
+            user_role=1,
+            status="success",
+            success=True,
+            logging_mode="full",
+            schema_version=1,
+        )
+    )
+    s.commit()
+
+    removed = alf.prune_agent_logs(retention_days=30)
+    assert removed["runs"] == 1
+    assert s.query(AgentRun).count() == 1
+    assert s.query(AgentRunEvent).count() == 0
+    assert s.query(ToolCall).filter_by(run_id="old").count() == 0
