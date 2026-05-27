@@ -150,6 +150,23 @@ _NON_ADDITIVE_NOTE = (
 )
 
 
+def _reliability_parts(criteria) -> list[str]:
+    """Coverage caveats that apply to a cohort query, given its filters.
+    Shared by the sample path and the breakdown path so the DX/RX/GEO logic
+    lives in one place.
+    """
+    parts: list[str] = []
+    _dr = criteria.diagnosis_date_range
+    _dr_active = _dr is not None and (_dr.start or _dr.end)
+    if criteria.diagnosis_codes or _dr_active:
+        parts.append(_RELIABILITY_DX)
+    elif criteria.medication_rxnorm_codes:
+        parts.append(_RELIABILITY_RX)
+    if criteria.zip_code or criteria.city or criteria.state:
+        parts.append(_RELIABILITY_GEO)
+    return parts
+
+
 def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCriteria) -> CohortResult:
     """Find patients matching demographic and clinical criteria.
 
@@ -222,15 +239,7 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
 
     # Compute reliability_note up front so the no_records path also surfaces it
     # — geo-filter misses are most informative when no rows came back.
-    reliability_parts: list[str] = []
-    _dr = criteria.diagnosis_date_range
-    _dr_active = _dr is not None and (_dr.start or _dr.end)
-    if criteria.diagnosis_codes or _dr_active:
-        reliability_parts.append(_RELIABILITY_DX)
-    elif criteria.medication_rxnorm_codes:
-        reliability_parts.append(_RELIABILITY_RX)
-    if criteria.zip_code or criteria.city or criteria.state:
-        reliability_parts.append(_RELIABILITY_GEO)
+    reliability_parts = _reliability_parts(criteria)
     reliability = " ".join(reliability_parts) if reliability_parts else None
 
     # Count-only fast path: cohort_sql emits a single COUNT(DISTINCT) row
@@ -291,19 +300,11 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     return result
 
 
-def _run_breakdown(ctx, criteria, adapter, schema_prefix):
+def _run_breakdown(ctx: RunContext[AgentDeps], criteria: CohortCriteria, adapter, schema_prefix: str) -> CohortResult:
     dialect = getattr(adapter, "dialect", "postgres")
 
     # Reuse the existing reliability note logic for coverage caveats.
-    reliability_parts: list[str] = []
-    _dr = criteria.diagnosis_date_range
-    _dr_active = _dr is not None and (_dr.start or _dr.end)
-    if criteria.diagnosis_codes or _dr_active:
-        reliability_parts.append(_RELIABILITY_DX)
-    elif criteria.medication_rxnorm_codes:
-        reliability_parts.append(_RELIABILITY_RX)
-    if criteria.zip_code or criteria.city or criteria.state:
-        reliability_parts.append(_RELIABILITY_GEO)
+    reliability_parts = _reliability_parts(criteria)
 
     primary = criteria.breakdown[0]
 
@@ -313,23 +314,29 @@ def _run_breakdown(ctx, criteria, adapter, schema_prefix):
             criteria, primary, schema_prefix=schema_prefix, dialect=dialect
         )
     except MissingDiagnosisAnchorError as exc:
-        return CohortResult(
+        result = CohortResult(
             total_count=0,
             sample=[],
+            # Nothing was queried on this path; the real signal is in
+            # breakdown_status + notes_to_agent, not a record count.
             data_availability="no_records_found",
             buckets=[],
             breakdown_status="missing_diagnosis_anchor",
             notes_to_agent=str(exc),
             reliability_note=" ".join(reliability_parts) or None,
         )
+        ctx.deps.last_dataframe = cohort_result_to_df(result)
+        return result
 
     handoff_sql = inline_sql_literals(bucket_sql, params)
 
     # 2+ dimensions: do not execute; hand back the primary-dimension template.
     if len(criteria.breakdown) > 1:
-        return CohortResult(
+        result = CohortResult(
             total_count=0,
             sample=[],
+            # Nothing was queried on this path; the real signal is in
+            # breakdown_status + notes_to_agent, not a record count.
             data_availability="no_records_found",
             buckets=[],
             breakdown_status="unsupported_multi_dimension",
@@ -341,6 +348,8 @@ def _run_breakdown(ctx, criteria, adapter, schema_prefix):
             ),
             reliability_note=" ".join(reliability_parts) or None,
         )
+        ctx.deps.last_dataframe = cohort_result_to_df(result)
+        return result
 
     spec = breakdown_bucket(primary, dialect)
     try:
