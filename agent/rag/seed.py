@@ -314,6 +314,30 @@ EXAMPLES_DOCS: List[_Doc] = [
             "and returns zero. Surface the geo reliability note from the result."
         ),
     },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'How many people had any diagnosis in 2024? Break it out by month.' "
+            "A: Call search_patients_by_criteria with "
+            "diagnosis_date_range={start:'2024-01-01', end:'2024-12-31'} and "
+            "breakdown=['diagnosis_month']. Do NOT write a run_sql GROUP BY. The "
+            "result returns one bucket per month; surface the note that buckets "
+            "count distinct active patients and OVERLAP (a patient diagnosed in "
+            "two months is counted in both, so months do not sum to the total)."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'Diabetic patients by gender.' "
+            "A: search_patients_by_criteria(diagnosis_codes=['E11.9'], "
+            "breakdown=['gender']). Gender is single-valued so buckets sum to the "
+            "total. For TWO dimensions (e.g. month AND gender) the tool returns a "
+            "generated_sql template to extend in run_sql."
+        ),
+    },
 ]
 
 
@@ -366,6 +390,25 @@ RUN_SQL_EXAMPLES: List[_Doc] = [
             "    AND code = '4548-4' AND code_type = 'LOINC'\n"
             "  ORDER BY datetime DESC\n"
             "  LIMIT 1;"
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: Count distinct patients with any diagnosis, broken out by month.\n"
+            "SQL:\n"
+            "  SELECT TO_CHAR(DATE_TRUNC('month', dx.start_date), 'YYYY-MM') AS bucket_label,\n"
+            "         COUNT(DISTINCT isr.source_id) AS patient_count\n"
+            "  FROM {p}internal_patient_profile_v p\n"
+            "  JOIN {p}internal_source_reference_v isr\n"
+            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+            "  JOIN (SELECT patient_id, start_date FROM {p}metric_federated_data_v\n"
+            "        WHERE code_type IN ('ICD-10','ICD10','SNOMED')\n"
+            "          AND start_date >= :start AND start_date <= :end) dx\n"
+            "    ON dx.patient_id = p.patient_id\n"
+            "  GROUP BY 1 ORDER BY 1;\n"
+            "Note: a patient diagnosed in multiple months appears in each — buckets overlap."
         ),
     },
 ]
