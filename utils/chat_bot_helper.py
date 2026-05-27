@@ -16,6 +16,8 @@ from orm.models import Message
 from utils.communicate import speak
 from utils.enums import MessageType, RoleType
 from utils.quick_logger import get_logger
+from utils.renderers.patient_chooser import render_patient_chooser
+from utils.renderers.tool_call import render_tool_call_message
 from utils.vanna_calls import VannaService, remove_from_file_training, write_to_file_and_training
 
 logger = get_logger(__name__)
@@ -1110,6 +1112,8 @@ MESSAGE_RENDERERS = {
     MessageType.FOLLOWUP.value: _render_followup,
     MessageType.TEXT.value: _render_default,  # Explicitly map TEXT to default
     MessageType.THINKING.value: _render_thinking,
+    MessageType.TOOL_CALL.value: render_tool_call_message,
+    MessageType.PATIENT_CHOOSER.value: render_patient_chooser,
 }
 
 
@@ -1166,6 +1170,15 @@ def add_acknowledgement():
 
 
 def normal_message_flow(my_question: str):
+    # Live source of truth for the toggle is st.session_state.agentic_mode —
+    # see views/chat_bot.py where the sidebar checkbox writes to it. The
+    # User ORM object is the persistence layer; reading user.agentic_mode
+    # here would see the stale value loaded at login.
+    if st.session_state.get("agentic_mode", False):
+        from agent.runtime import run_agentic_message_flow
+
+        return run_agentic_message_flow(my_question)
+    # ----- existing Vanna flow follows unchanged -----
     # Ethical guardrails temporarily disabled for training/testing
     # guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
     # logger.debug(

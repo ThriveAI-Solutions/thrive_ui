@@ -3,7 +3,13 @@ import time
 import pandas as pd
 import streamlit as st
 
-from orm.functions import get_recent_messages, save_user_settings, set_user_preferences_in_session_state
+from agent.session_reset import reset_agent_session
+from orm.functions import (
+    get_recent_messages,
+    save_user_settings,
+    set_user_preferences_in_session_state,
+    update_user_preferences,
+)
 from utils.chat_bot_helper import (
     get_message_group_css,
     get_unique_messages,
@@ -53,13 +59,92 @@ from utils.quick_logger import get_logger
 
 logger = get_logger(__name__)
 
+
+def _clear_selected_patient() -> None:
+    for k in (
+        "selected_patient_source_id",
+        "selected_patient_display_name",
+        "selected_patient_dob",
+        "selection_origin",
+        "selected_at",
+    ):
+        st.session_state.pop(k, None)
+
+
+def _render_selected_patient_sidebar() -> None:
+    src = st.session_state.get("selected_patient_source_id")
+    if not src:
+        return
+    name = st.session_state.get("selected_patient_display_name", "Unknown")
+    dob = st.session_state.get("selected_patient_dob", "")
+
+    with st.sidebar.container(border=True):
+        st.markdown(f"📋 **{name}**" + (f"  \n_b. {dob}_" if dob else ""))
+        if st.button("Clear patient", key="clear_patient_sidebar_btn", width="stretch"):
+            _clear_selected_patient()
+            st.rerun()
+
+
+_RESET_CONFIRM_WINDOW_SECONDS = 5.0
+
+
+def _render_reset_agent_sidebar() -> None:
+    """Sidebar container that clears all agent-side conversation state.
+
+    Two-state UX:
+      - Idle: a single "Reset agent" button. Clicking it arms the
+        confirmation by stamping st.session_state['_pending_agent_reset_at'].
+      - Armed (within 5s of arming): "Confirm reset" and "Cancel" buttons.
+        Confirm calls reset_agent_session(); Cancel pops the arming flag.
+
+    The arming flag is checked lazily on each render and on click — no
+    background timers. Expired arming silently returns to Idle.
+    """
+    armed_at = st.session_state.get("_pending_agent_reset_at")
+    now = time.time()
+    is_armed = isinstance(armed_at, (int, float)) and (now - armed_at) <= _RESET_CONFIRM_WINDOW_SECONDS
+
+    with st.sidebar.container(border=True):
+        if is_armed:
+            st.caption("Click again to confirm — this clears your current chat.")
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button(
+                    "🧹 Confirm reset",
+                    key="confirm_agent_reset_btn",
+                    type="primary",
+                    width="stretch",
+                ):
+                    reset_agent_session(st.session_state)
+                    st.toast("Agent session reset.")
+                    st.rerun()
+            with cancel_col:
+                if st.button(
+                    "Cancel",
+                    key="cancel_agent_reset_btn",
+                    width="stretch",
+                ):
+                    st.session_state.pop("_pending_agent_reset_at", None)
+                    st.rerun()
+        else:
+            if st.button(
+                "🧹 Reset agent",
+                key="reset_agent_btn",
+                help=(
+                    "Clear the current chat and agent memory. Does not log you out or delete history from the database."
+                ),
+                width="stretch",
+            ):
+                st.session_state["_pending_agent_reset_at"] = now
+                st.rerun()
+
+
 set_user_preferences_in_session_state()
 
 # Initialize session state variables
-if "messages" not in st.session_state or st.session_state.messages == []:
-    st.session_state.messages = get_recent_messages()
-if st.session_state.messages is None:
-    st.session_state.messages = []
+if "_messages_loaded" not in st.session_state:
+    st.session_state.messages = get_recent_messages() or []
+    st.session_state._messages_loaded = True
 
 # Manage session state memory by limiting messages for performance
 from utils.config_helper import get_max_session_messages
@@ -77,6 +162,9 @@ if len(st.session_state.messages) > max_messages:
 
 
 st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
+
+_render_selected_patient_sidebar()
+_render_reset_agent_sidebar()
 
 # LLM Selection UI
 with st.sidebar.expander("🤖 LLM Selection", expanded=False):
@@ -158,6 +246,7 @@ with st.sidebar.expander("🤖 LLM Selection", expanded=False):
 
                 # Invalidate VannaService cache
                 from utils.vanna_calls import VannaService
+
                 user_id = st.session_state.cookies.get("user_id")
                 user_role = st.session_state.get("user_role")
                 if user_id and user_role is not None:
@@ -259,6 +348,31 @@ with st.sidebar.expander("Settings"):
             # Save to database
             save_user_settings()
             st.toast("Settings saved!")
+
+agentic_mode_initial = bool(
+    getattr(st.session_state.get("user"), "agentic_mode", False)
+    if st.session_state.get("user")
+    else st.session_state.get("agentic_mode", False)
+)
+agentic_mode = st.sidebar.checkbox(
+    "Agentic mode (beta)",
+    value=agentic_mode_initial,
+    help="Use the new tool-driven agent for clinical questions. Vanna remains for users with this off.",
+    key="agentic_mode_checkbox",
+)
+# Always mirror the checkbox into session_state so consumers (chat_bot_helper,
+# magic_functions) see the live value even if persistence below fails.
+st.session_state.agentic_mode = agentic_mode
+if agentic_mode != agentic_mode_initial:
+    try:
+        import json as _json
+
+        _uid_str = st.session_state.cookies.get("user_id")
+        if _uid_str:
+            _uid = _json.loads(_uid_str)
+            update_user_preferences(user_id=_uid, agentic_mode=agentic_mode)
+    except Exception:
+        pass
 
 st.sidebar.button("Clear", on_click=lambda: set_question(None), width="stretch", type="primary")
 
@@ -431,7 +545,11 @@ if not my_question and st.session_state.get("pending_sql_error", False) and st.s
     st.stop()
 
 if my_question:
-    magic_response = is_magic_do_magic(my_question)
+    if st.session_state.get("agentic_mode", False):
+        previous_df = st.session_state.get("df")
+    else:
+        previous_df = None
+    magic_response = is_magic_do_magic(my_question, previous_df=previous_df)
     if magic_response == True:
         st.stop()
 

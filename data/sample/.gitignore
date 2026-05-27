@@ -1,0 +1,7 @@
+# Synthea raw outputs — large, regenerable. Not committed.
+synthea/
+
+# Loader outputs
+*.db
+*.sqlite3
+*.sqlite

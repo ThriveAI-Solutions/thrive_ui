@@ -6,7 +6,19 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-from sqlalchemy import TIMESTAMP, Boolean, Column, ForeignKey, Index, Integer, Numeric, String, create_engine, func
+from sqlalchemy import (
+    TIMESTAMP,
+    Boolean,
+    Column,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    create_engine,
+    func,
+)
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
@@ -167,6 +179,7 @@ class User(Base):
     show_elapsed_time = Column(Boolean, default=True)
     llm_fallback = Column(Boolean, default=False)
     confirm_magic_commands = Column(Boolean, default=True)  # True = show popup, False = auto-execute
+    agentic_mode = Column(Boolean, default=False)
     min_message_id = Column(Integer, default=0)
     theme = Column(String(50), default=ThemeType.WELLTELLAI.value)
     selected_llm_provider = Column(String(50), default=None)
@@ -201,6 +214,7 @@ class User(Base):
             "theme": self.theme,
             "selected_llm_provider": self.selected_llm_provider,
             "selected_llm_model": self.selected_llm_model,
+            "agentic_mode": self.agentic_mode,
         }
 
 
@@ -481,6 +495,29 @@ class ErrorLog(Base):
     # Relationships
     user = relationship("User", foreign_keys=[user_id])
     message = relationship("Message", foreign_keys=[message_id])
+
+
+class ToolCall(Base):
+    __tablename__ = "thrive_tool_call"
+    __table_args__ = (
+        Index("ix_thrive_tool_call_session_id", "session_id"),
+        Index("ix_thrive_tool_call_user_id", "user_id"),
+        Index("ix_thrive_tool_call_created_at", "created_at"),
+        Index("ix_thrive_tool_call_tool_name", "tool_name"),
+        Index("ix_thrive_tool_call_selected_patient", "selected_patient_source_id"),
+    )
+    id = Column(Integer, primary_key=True)
+    session_id = Column(String(64), nullable=False)
+    user_id = Column(Integer, ForeignKey("thrive_user.id"), nullable=False)
+    user_role = Column(Integer, nullable=False)
+    selected_patient_source_id = Column(String(50), nullable=True)
+    tool_name = Column(String(64), nullable=False)
+    arguments_json = Column(Text, nullable=False)
+    result_summary = Column(Text, nullable=False)
+    elapsed_ms = Column(Integer, nullable=False)
+    success = Column(Boolean, nullable=False)
+    error = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
 
 
 def seed_initial_data(session):

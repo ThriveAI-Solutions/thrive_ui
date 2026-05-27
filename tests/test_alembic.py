@@ -78,6 +78,31 @@ def test_upgrade_is_idempotent(alembic_cfg):
     assert head_after_first == head_after_second
 
 
+def test_agentic_foundations_tolerates_preexisting_column(alembic_cfg):
+    """Defensive migration: a dev who hand-added agentic_mode to thrive_user
+    should still be able to apply our migration without a duplicate-column
+    error. Same for the thrive_tool_call table.
+    """
+    from sqlalchemy import text
+
+    cfg, url = alembic_cfg
+    # Apply only the baseline migration.
+    command.upgrade(cfg, "2540d625d0fe")
+
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE thrive_user ADD COLUMN agentic_mode BOOLEAN DEFAULT 0"))
+    engine.dispose()
+
+    # Now apply the agentic_foundations migration. Should not raise.
+    command.upgrade(cfg, "f3e688a55df6")
+
+    inspector = inspect(create_engine(url))
+    cols = {c["name"] for c in inspector.get_columns("thrive_user")}
+    assert "agentic_mode" in cols
+    assert "thrive_tool_call" in inspector.get_table_names()
+
+
 def test_downgrade_to_base_then_upgrade_roundtrips(alembic_cfg):
     """Catches missing or wrong downgrade() bodies in future revisions."""
     cfg, url = alembic_cfg

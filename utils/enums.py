@@ -15,6 +15,8 @@ class MessageType(Enum):
     ERROR = "error"
     TEXT = "text"
     THINKING = "thinking"
+    TOOL_CALL = "tool_call"
+    PATIENT_CHOOSER = "patient_chooser"
 
 
 class RoleType(Enum):
