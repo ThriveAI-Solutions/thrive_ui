@@ -7,6 +7,7 @@ when the user has agentic_mode=True.
 from __future__ import annotations
 import asyncio
 import json
+import queue
 import threading
 from typing import Any, Coroutine
 
@@ -40,11 +41,12 @@ def _runner() -> AgenticRunner:
 
 
 _LOOP: asyncio.AbstractEventLoop | None = None
+_LOOP_THREAD: threading.Thread | None = None
 _LOOP_LOCK = threading.Lock()
 
 
 def _persistent_loop() -> asyncio.AbstractEventLoop:
-    """Process-wide event loop reused across requests.
+    """Process-wide event loop, running forever on its own daemon thread.
 
     Pydantic AI's OpenAI / Anthropic providers hold long-lived httpx
     connection pools whose TCP transports are bound to the loop on
@@ -53,47 +55,45 @@ def _persistent_loop() -> asyncio.AbstractEventLoop:
     on the second request — visible as
     "RuntimeError: unable to perform operation on <TCPTransport closed>".
     Pinning a single loop keeps those transports alive.
+
+    The loop runs via run_forever() on a dedicated thread rather than
+    being driven with run_until_complete from each caller. Callers
+    submit coroutines with run_coroutine_threadsafe (see _run_async).
+    This is what makes concurrent Streamlit script threads safe: two
+    sessions (or a rerun that fires while a prior run is still
+    unwinding) would otherwise both call run_until_complete on this one
+    loop, and the second raises "this event loop is already running".
+    A single run_forever loop multiplexes any number of submissions.
     """
-    global _LOOP
+    global _LOOP, _LOOP_THREAD
     with _LOOP_LOCK:
         if _LOOP is None or _LOOP.is_closed():
             _LOOP = asyncio.new_event_loop()
+            _LOOP_THREAD = threading.Thread(
+                target=_LOOP.run_forever,
+                name="agent-asyncio-loop",
+                daemon=True,
+            )
+            _LOOP_THREAD.start()
         return _LOOP
 
 
 def _run_async(coro: Coroutine[Any, Any, Any]) -> Any:
-    """Safely execute a coroutine to completion regardless of caller context.
+    """Run a coroutine to completion on the persistent loop, from any thread.
 
-    Three paths:
-    1. No running loop on this thread → run on the persistent loop via
-       run_until_complete (the common Streamlit script-thread case).
-    2. Already inside a running loop on this thread (e.g. tests with
-       pytest-asyncio) → spawn a worker thread with a fresh asyncio.run
-       so we do not deadlock the caller's loop.
+    Submits to the dedicated loop thread and blocks the caller on the
+    result. Works whether or not the calling thread has its own running
+    loop (e.g. pytest-asyncio), and is safe under concurrency: the loop
+    multiplexes overlapping submissions instead of colliding the way
+    run_until_complete would.
+
+    Note the coroutine BODY executes on the loop thread, which has no
+    Streamlit ScriptRunContext. Code that must touch st.session_state or
+    render widgets has to run on the calling script thread instead — see
+    run_agentic_message_flow, which keeps streaming on the loop thread
+    but renders on the caller.
     """
-    try:
-        asyncio.get_running_loop()
-        in_loop = True
-    except RuntimeError:
-        in_loop = False
-
-    if not in_loop:
-        return _persistent_loop().run_until_complete(coro)
-
-    box: dict[str, Any] = {}
-
-    def _worker() -> None:
-        try:
-            box["value"] = asyncio.run(coro)
-        except BaseException as exc:  # propagate to caller thread
-            box["error"] = exc
-
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    t.join()
-    if "error" in box:
-        raise box["error"]
-    return box.get("value")
+    return asyncio.run_coroutine_threadsafe(coro, _persistent_loop()).result()
 
 
 def run_agentic_message_flow(my_question: str) -> None:
@@ -118,40 +118,92 @@ def run_agentic_message_flow(my_question: str) -> None:
     # call raises — otherwise the chat_bot.py loop would re-fire the
     # same question on the next rerun and the user would see no response.
     try:
+        # The session is created here but used ONLY on the loop thread
+        # (audit writes, commit, close all live in produce()). SQLite's
+        # default check_same_thread forbids using one connection from two
+        # threads, and SQLAlchemy sessions aren't thread-safe — so we must
+        # not touch it from this (calling) thread once produce() owns it.
         sqlite_session = SessionLocal()
+        deps = build_agent_deps(sqlite_session)
+        runner = _runner()
+        prior_history = st.session_state.get("agent_message_history") or None
+
+        # Hand events from the loop thread back to this script thread. We
+        # render here, not inside the coroutine: _render_event calls
+        # st.* / add_message, which need this thread's ScriptRunContext.
+        # The loop thread has none.
+        events: "queue.Queue[tuple[str, Any]]" = queue.Queue()
+
+        async def produce() -> None:
+            # Runs on the dedicated loop thread. Owns the session lifecycle
+            # so all of its DB I/O stays on one thread (see note above).
+            try:
+                async for event in runner.stream(my_question, deps=deps, message_history=prior_history):
+                    events.put(("event", event))
+                sqlite_session.commit()
+            finally:
+                sqlite_session.close()
+                events.put(("done", None))
+
+        future = asyncio.run_coroutine_threadsafe(produce(), _persistent_loop())
+
+        # Per-flow state for live placeholders. Two buckets keyed by
+        # turn_index so thinking and plain assistant text get distinct
+        # chat_message containers (different headers, different lifecycles).
+        # The finally block drains anything still open if the stream dies
+        # mid-flight — otherwise a partial "🤔 Thinking..." panel would
+        # stay frozen on screen.
+        renderer_state: dict[str, Any] = {"thinking": {}, "text": {}}
         try:
-            deps = build_agent_deps(sqlite_session)
-            runner = _runner()
-            prior_history = st.session_state.get("agent_message_history") or None
-
-            async def consume() -> None:
-                # Per-flow state for live placeholders. Two buckets keyed by
-                # turn_index so thinking and plain assistant text get distinct
-                # chat_message containers (different headers, different
-                # lifecycles). The finally block drains anything still open
-                # if the generator dies mid-stream — otherwise a partial
-                # "🤔 Thinking..." panel would stay frozen on screen.
-                renderer_state: dict[str, Any] = {"thinking": {}, "text": {}}
+            while True:
                 try:
-                    async for event in runner.stream(my_question, deps=deps, message_history=prior_history):
-                        _render_event(event, renderer_state)
-                finally:
-                    _drain_placeholders(renderer_state)
-
-            _run_async(consume())
-            sqlite_session.commit()
+                    kind, event = events.get(timeout=1.0)
+                except queue.Empty:
+                    # No event this second. produce() always emits its "done"
+                    # sentinel from a finally, so the only way the queue goes
+                    # quiet for good is a dead loop thread (interpreter
+                    # shutdown, or the loop closed mid-run). Bail in that case
+                    # so the script thread can't wedge forever. A slow-but-
+                    # alive producer keeps the future pending, so this never
+                    # fires during a long LLM turn between events.
+                    if future.done():
+                        break
+                    continue
+                if kind == "done":
+                    break
+                _render_event(event, renderer_state)
+            # Surface any exception raised inside produce() (and thus the
+            # agent run) to the caller, matching the old _run_async behavior.
+            future.result()
+            # runner.stream's own df-sync ran on the loop thread with no
+            # ScriptRunContext, so it was a no-op there (it's wrapped in a
+            # bare except). Redo it here on the script thread so magic
+            # functions and the Vanna flow see the final DataFrame.
+            _sync_last_dataframe_to_session_state(deps)
         finally:
-            sqlite_session.close()
+            _drain_placeholders(renderer_state)
     finally:
         # Parity with the Vanna flow at chat_bot_helper.py:1417.
         st.session_state["my_question"] = None
 
 
+def _sync_last_dataframe_to_session_state(deps: Any) -> None:
+    """Mirror deps.last_dataframe into st.session_state['df'] on the script
+    thread. runner.stream attempts this itself, but under the loop-thread
+    design that attempt has no ScriptRunContext and silently no-ops, so we
+    repeat it here where session_state is real. Tolerant of deps shapes
+    without last_dataframe (e.g. the exception-path unit test)."""
+    df = getattr(deps, "last_dataframe", None)
+    if df is not None:
+        st.session_state["df"] = df
+
+
 def _drain_placeholders(state: dict[str, Any]) -> None:
-    """Clear any open transient placeholders. Called from a finally block in
-    consume() so a mid-stream death (CapReachedEvent, exception, network
-    drop) doesn't leave a partial "🤔 Thinking..." panel frozen on screen.
-    Idempotent — safe to call multiple times."""
+    """Clear any open transient placeholders. Called from the finally block of
+    the consumer loop in run_agentic_message_flow (and from FinalResponseEvent /
+    CapReachedEvent handling) so a mid-stream death (exception, network drop,
+    cap reached) doesn't leave a partial "🤔 Thinking..." panel frozen on
+    screen. Idempotent — safe to call multiple times."""
     for bucket in ("thinking", "text"):
         slots = state.get(bucket) or {}
         for slot in slots.values():

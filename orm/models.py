@@ -53,7 +53,18 @@ def _get_database_url() -> str:
 
 
 DATABASE_URL = _get_database_url()
-engine = create_engine(DATABASE_URL)
+# The agentic flow (agent/runtime.py) writes this DB from two threads at once:
+# the agent's audit rows on a dedicated asyncio loop thread, and Message.save on
+# the Streamlit script thread. They can hold overlapping write transactions, so
+# SQLite's busy-wait is functionally relied upon here. SQLAlchemy's pysqlite
+# dialect already allows cross-thread pooled connections and the sqlite3 busy
+# timeout already defaults to 5s, so the original engine was adequate; we set
+# these explicitly to record that cross-thread use is intended and to widen the
+# write-lock wait to 30s for headroom under contention.
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 30},
+)
 
 # Create a configured "Session" class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
