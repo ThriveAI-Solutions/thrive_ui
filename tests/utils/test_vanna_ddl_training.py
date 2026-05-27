@@ -10,6 +10,18 @@ from utils.chromadb_vector import ThriveAI_ChromaDB
 from utils.vanna_calls import VannaService, train_ddl, train_ddl_describe_to_rag
 
 
+@pytest.fixture(autouse=True)
+def _enable_role_restriction(monkeypatch):
+    """Force role-restricted RAG retrieval ON for this module.
+
+    The dev .streamlit/secrets.toml sets security.restrict_rag_by_role = false,
+    which collapses every effective role to 0 (_get_effective_role) and defeats
+    the role-filter assertions here. Pinning the toggle keeps these tests
+    hermetic w.r.t. whatever the local secrets happen to say.
+    """
+    monkeypatch.setattr(ThriveAI_ChromaDB, "_is_role_restriction_enabled", lambda self: True)
+
+
 # Mock the streamlit secrets for testing
 @pytest.fixture(scope="function")  # Changed from module to function
 def mock_streamlit_secrets_ddl(test_chromadb_path):
@@ -173,8 +185,11 @@ def test_train_ddl_adds_to_chromadb_with_user_role(
         assert len(results["ids"]) == 2  # Two DDL statements added
 
         added_ddls = results["documents"]
-        expected_ddl_users = "\nCREATE TABLE users (\n    id integer NOT NULL,\n    name varchar NULL\n);"  # Note: VannaService.train joins DDL list with " "
-        expected_ddl_orders = "\nCREATE TABLE orders (\n    order_id integer NOT NULL,\n    item varchar NOT NULL\n);"
+        # DDL is schema-qualified now (CREATE TABLE <schema>.<table>); schema is "public".
+        expected_ddl_users = "\nCREATE TABLE public.users (\n    id integer NOT NULL,\n    name varchar NULL\n);"  # Note: VannaService.train joins DDL list with " "
+        expected_ddl_orders = (
+            "\nCREATE TABLE public.orders (\n    order_id integer NOT NULL,\n    item varchar NOT NULL\n);"
+        )
 
         # Check if the formatted DDL strings are present (order might vary)
         # The actual DDL sent to train is " ".join(ddl_list_for_table)
@@ -184,14 +199,14 @@ def test_train_ddl_adds_to_chromadb_with_user_role(
 
         first_call_ddl = call_args_list[0].kwargs["ddl"]
         first_call_metadata = call_args_list[0].kwargs["metadata"]
-        assert "CREATE TABLE users (" in first_call_ddl
+        assert "CREATE TABLE public.users (" in first_call_ddl
         assert "id integer NOT NULL" in first_call_ddl
         assert "name varchar NULL" in first_call_ddl
         assert first_call_metadata["user_role"] == expected_user_role
 
         second_call_ddl = call_args_list[1].kwargs["ddl"]
         second_call_metadata = call_args_list[1].kwargs["metadata"]
-        assert "CREATE TABLE orders (" in second_call_ddl
+        assert "CREATE TABLE public.orders (" in second_call_ddl
         assert "order_id integer NOT NULL" in second_call_ddl
         assert "item varchar NOT NULL" in second_call_ddl
         assert second_call_metadata["user_role"] == expected_user_role
@@ -201,9 +216,9 @@ def test_train_ddl_adds_to_chromadb_with_user_role(
         found_orders_ddl = False
         for doc_meta in zip(results["documents"], results["metadatas"]):
             doc, meta = doc_meta
-            if "CREATE TABLE users (" in doc:
+            if "CREATE TABLE public.users (" in doc:
                 found_users_ddl = True
-            if "CREATE TABLE orders (" in doc:
+            if "CREATE TABLE public.orders (" in doc:
                 found_orders_ddl = True
             assert meta["user_role"] == expected_user_role
 
