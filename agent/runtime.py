@@ -354,14 +354,16 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
 
     if isinstance(event, CohortSampleEvent):
         # Auto-surfaced by runner.stream() right after
-        # search_patients_by_criteria succeeds with a non-empty sample.
-        # Renders as a DataFrame message regardless of whether the LLM
-        # attaches a DataFrameArtifact to the final response.
+        # search_patients_by_criteria succeeds with a non-empty sample OR
+        # breakdown buckets. Renders as a DataFrame message regardless of
+        # whether the LLM attaches a DataFrameArtifact to the final response.
         import pandas as pd
 
+        buckets = event.payload.get("buckets", [])
         sample = event.payload.get("sample", [])
-        if sample:
-            df = pd.DataFrame(sample)
+        rows = buckets or sample
+        if rows:
+            df = pd.DataFrame(rows)
             add_message(
                 Message(
                     RoleType.ASSISTANT,
