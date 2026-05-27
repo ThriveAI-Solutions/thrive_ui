@@ -52,9 +52,16 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
 
     Returns (sql, params). The caller passes both into adapter.fetch_all.
     """
+    # A diagnosis_date_range with a start or end bound is a standalone
+    # criterion ("any diagnosis in this window"); an all-None DateRange
+    # carries no filter and does not count.
+    _dr = getattr(criteria, "diagnosis_date_range", None)
+    _dr_active = _dr is not None and (getattr(_dr, "start", None) or getattr(_dr, "end", None))
+
     if not any(
         (
             getattr(criteria, "diagnosis_codes", None),
+            _dr_active,
             getattr(criteria, "medication_rxnorm_codes", None),
             getattr(criteria, "condition_text", None),
             getattr(criteria, "age_min", None) is not None,
@@ -77,24 +84,27 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
     # above guarantees this is never an unfiltered scan.
     where_clauses: list[str] = ["1=1"]
 
-    # --- diagnosis codes ----------------------------------------------
-    if getattr(criteria, "diagnosis_codes", None):
-        codes = list(criteria.diagnosis_codes)
-        placeholders = ", ".join(f":dx_{i}" for i in range(len(codes)))
-        for i, c in enumerate(codes):
-            params[f"dx_{i}"] = c
-        dx_filter = [
-            f"code IN ({placeholders})",
-            "code_type IN ('ICD-10', 'ICD10', 'SNOMED')",
-        ]
-        dr = getattr(criteria, "diagnosis_date_range", None)
-        if dr is not None:
-            if getattr(dr, "start", None):
+    # --- diagnosis: codes and/or date window --------------------------
+    # The diagnosis JOIN fires when codes are given, a date window is given,
+    # or both. With only a window we drop the code IN clause and count any
+    # ICD-10/SNOMED problem whose start_date falls in range; medication rows
+    # (RxNorm/NDC) are excluded by the code_type filter so "any diagnosis"
+    # never counts a prescription.
+    if getattr(criteria, "diagnosis_codes", None) or _dr_active:
+        dx_filter = ["code_type IN ('ICD-10', 'ICD10', 'SNOMED')"]
+        if getattr(criteria, "diagnosis_codes", None):
+            codes = list(criteria.diagnosis_codes)
+            placeholders = ", ".join(f":dx_{i}" for i in range(len(codes)))
+            for i, c in enumerate(codes):
+                params[f"dx_{i}"] = c
+            dx_filter.insert(0, f"code IN ({placeholders})")
+        if _dr_active:
+            if getattr(_dr, "start", None):
                 dx_filter.append("start_date >= :dx_start")
-                params["dx_start"] = dr.start.isoformat()
-            if getattr(dr, "end", None):
+                params["dx_start"] = _dr.start.isoformat()
+            if getattr(_dr, "end", None):
                 dx_filter.append("start_date <= :dx_end")
-                params["dx_end"] = dr.end.isoformat()
+                params["dx_end"] = _dr.end.isoformat()
         join_clauses.append(
             f"JOIN (SELECT DISTINCT patient_id FROM {schema_prefix}metric_federated_data_v "
             f"WHERE {' AND '.join(dx_filter)}) dx ON dx.patient_id = p.patient_id"

@@ -11,6 +11,7 @@ Builds the SELECT for search_patients_by_criteria. Verifies:
 
 from __future__ import annotations
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import text
@@ -91,6 +92,42 @@ def test_diagnosis_with_facility_and_age(synthetic_db):
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     assert len(rows) == 2, f"expected exactly 2 (Mary id=4, Susan id=8); got {len(rows)}"
+
+
+def test_diagnosis_date_range_alone_filters_by_window(synthetic_db):
+    """A date window WITHOUT codes counts patients with any ICD-10/SNOMED
+    diagnosis whose start_date falls in the window. Nov-Dec 2025 contains
+    Daniel (E11.9 2025-11-30) and Susan (E11.9 2025-12-01)."""
+    sql, params = cohort_sql(
+        _make(diagnosis_date_range=SimpleNamespace(start=date(2025, 11, 1), end=date(2025, 12, 31))),
+        schema_prefix="",
+    )
+    with synthetic_db.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    src_ids = sorted(r._mapping["source_id"] for r in rows)
+    assert src_ids == ["src-daniel-1977", "src-susan-1955"], f"got {src_ids}"
+
+
+def test_diagnosis_date_range_alone_excludes_medication_rows(synthetic_db):
+    """Jan-Feb 2026 contains only RxNorm rows (metformin); an 'any diagnosis'
+    window must NOT count medication events, so the cohort is empty."""
+    sql, params = cohort_sql(
+        _make(diagnosis_date_range=SimpleNamespace(start=date(2026, 1, 1), end=date(2026, 2, 28))),
+        schema_prefix="",
+    )
+    with synthetic_db.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    assert rows == [], f"expected no diagnosis patients in Jan-Feb 2026; got {[r._mapping['source_id'] for r in rows]}"
+
+
+def test_diagnosis_date_range_alone_satisfies_criteria_guard(synthetic_db):
+    """A bare date window is a real criterion now — cohort_sql must not
+    raise the empty-criteria guard."""
+    sql, params = cohort_sql(
+        _make(diagnosis_date_range=SimpleNamespace(start=date(2025, 1, 1), end=None)),
+        schema_prefix="",
+    )
+    assert "metric_federated_data_v" in sql
 
 
 def test_medication_rxnorm_codes_join(synthetic_db):

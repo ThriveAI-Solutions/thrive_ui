@@ -237,6 +237,65 @@ def test_cohort_criteria_still_rejects_truly_empty():
         CohortCriteria()
 
 
+def test_cohort_criteria_accepts_diagnosis_date_range_alone():
+    """'How many patients had a diagnosis in December 2024' — a date window
+    with no codes is now a valid standalone criterion."""
+    from agent.tools.search_patients_by_criteria import CohortCriteria, DateRange
+
+    c = CohortCriteria(diagnosis_date_range=DateRange(start=date(2024, 12, 1), end=date(2024, 12, 31)))
+    assert c.diagnosis_date_range.start == date(2024, 12, 1)
+
+
+def test_cohort_criteria_rejects_empty_diagnosis_date_range():
+    """An all-None DateRange carries no filter and must NOT satisfy the
+    at-least-one-criterion guard — otherwise it scans the whole table."""
+    from agent.tools.search_patients_by_criteria import CohortCriteria, DateRange
+
+    with pytest.raises(ValidationError):
+        CohortCriteria(diagnosis_date_range=DateRange())
+
+
+def test_diagnosis_date_range_alone_count(synthetic_db):
+    """End-to-end: a bare diagnosis window counts distinct patients with any
+    ICD-10/SNOMED diagnosis in that window (Daniel + Susan in Nov-Dec 2025)."""
+    from agent.tools.search_patients_by_criteria import (
+        CohortCriteria,
+        DateRange,
+        search_patients_by_criteria,
+    )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    out = search_patients_by_criteria(
+        ctx,
+        CohortCriteria(
+            diagnosis_date_range=DateRange(start=date(2025, 11, 1), end=date(2025, 12, 31)),
+            sample_size=0,
+        ),
+    )
+    assert out.data_availability == "data_present"
+    assert out.total_count == 2
+
+
+def test_diagnosis_date_range_alone_attaches_dx_reliability(synthetic_db):
+    """A diagnosis-window query hits the same low-coverage problems data, so
+    the ICD-10/SNOMED coverage caveat MUST be surfaced."""
+    from agent.tools.search_patients_by_criteria import (
+        CohortCriteria,
+        DateRange,
+        search_patients_by_criteria,
+        _RELIABILITY_DX,
+    )
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    out = search_patients_by_criteria(
+        ctx,
+        CohortCriteria(diagnosis_date_range=DateRange(start=date(2025, 11, 1), end=date(2025, 12, 31))),
+    )
+    assert out.reliability_note == _RELIABILITY_DX
+
+
 def test_geo_only_attaches_geo_reliability(synthetic_db):
     from agent.tools.search_patients_by_criteria import (
         CohortCriteria,
