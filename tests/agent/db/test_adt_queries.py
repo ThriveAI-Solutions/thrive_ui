@@ -37,7 +37,7 @@ def test_admissions_filtered_by_ltc_includes_snf(synthetic_db):
     assert rows[0]["setting"] == "SNF"
 
 
-def test_admissions_filtered_by_emergency(synthetic_db):
+def test_admissions_filtered_by_ed(synthetic_db):
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = admissions_sql(source_id="src-john-1962", facility_type="ed")
     rows = adapter.fetch_all(sql, params)
