@@ -198,10 +198,15 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
         # window over the full result before applying the LIMIT, which
         # for broad cohorts (e.g. all-NY + 3 diagnosis codes) can run
         # for many minutes. A pure aggregate is cheap regardless of
-        # population size and never touches per-source-id fan-out from
-        # the isr join (so the count is unique-people, not source-rows).
+        # population size.
+        #
+        # Count distinct source_id (the EMPI-resolved canonical person
+        # identifier, ~1 per person). Using patient_id here would
+        # over-count people who have multiple internal patient_ids. This
+        # matches the sample path's COUNT(*) OVER () grain and the
+        # breakdown path's COUNT(DISTINCT source_id).
         sql = f"""
-            SELECT COUNT(DISTINCT p.patient_id) AS total_count
+            SELECT COUNT(DISTINCT isr.source_id) AS total_count
             FROM {schema_prefix}internal_patient_profile_v p
             JOIN {schema_prefix}internal_source_reference_v isr
               ON isr.patient_id = p.patient_id

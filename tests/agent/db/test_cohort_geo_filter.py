@@ -151,10 +151,11 @@ def test_sample_size_zero_emits_count_only_fast_path():
     (SELECT source_id, ..., COUNT(*) OVER ()) forces Postgres to compute
     the window over the full result before LIMIT — burned a 30s timeout
     on broad cohorts. The count-only shape is a pure aggregate that's
-    cheap regardless of population size, and counts unique patients
-    instead of inflating by per-source-id fan-out."""
+    cheap regardless of population size, and counts distinct source_id
+    (the EMPI-resolved canonical person identifier) to match the sample
+    path's COUNT(*) OVER () grain and the breakdown path."""
     sql, params = cohort_sql(_make(state="NY", sample_size=0), schema_prefix="dw.")
-    assert "COUNT(DISTINCT p.patient_id) AS total_count" in sql
+    assert "COUNT(DISTINCT isr.source_id) AS total_count" in sql
     assert "COUNT(*) OVER ()" not in sql
     assert "LIMIT" not in sql.upper()
     # No sample_size_plus_one param — that's only for the per-row path.
@@ -167,10 +168,11 @@ def test_sample_size_zero_returns_count_against_synthetic(synthetic_db):
     with synthetic_db.connect() as conn:
         rows = conn.execute(text(sql), params).fetchall()
     assert len(rows) == 1
-    # Synthetic NY patients: John 1962, John 1971 (Buffalo NY, plus several
-    # extras seeded for other tests). Both Johns + the rest are distinct.
+    # Synthetic NY patients (1,2,4,5,6,7,8; Jane is PA). Counted by distinct
+    # source_id: John 1962 (patient 1) has two non-stale source_ids, the rest
+    # one each → 8 distinct source_ids.
     total = rows[0]._mapping["total_count"]
-    assert total >= 2, f"expected ≥2 distinct NY patients, got {total}"
+    assert total >= 2, f"expected ≥2 distinct NY source_ids, got {total}"
 
 
 def test_sample_size_nonzero_keeps_per_row_pivot():
