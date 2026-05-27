@@ -1,4 +1,17 @@
+import datetime
+
 from agent.system_prompt import SYSTEM_PROMPT
+
+
+def test_prompt_imports_and_renders_today():
+    """Regression: the prompt body is full of literal JSON-shaped examples
+    like {domain:'demographics'}. It was once an f-string, so those braces
+    parsed as replacement fields and raised NameError at import — which, with
+    agentic mode defaulted on, crashed every chat message. Guard that the
+    module imports and the date sentinel is fully substituted (no stray
+    __TODAY__ or unrendered template braces)."""
+    assert "__TODAY__" not in SYSTEM_PROMPT
+    assert datetime.datetime.now(datetime.timezone.utc).date().isoformat() in SYSTEM_PROMPT
 
 
 def test_prompt_mentions_phase2_tools():

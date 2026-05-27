@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 _TODAY = datetime.now(timezone.utc).date().isoformat()
 
 
-SYSTEM_PROMPT = f"""\
+# NOTE: this is a PLAIN string, not an f-string. The body is full of literal
+# JSON-shaped examples like {domain:'demographics'}; an f-string would parse
+# those braces as replacement fields and raise NameError at import. The single
+# dynamic value (today's date) is injected via the __TODAY__ sentinel below.
+SYSTEM_PROMPT = """\
 You are a clinical data assistant for healthcare professionals on the \
 Thrive AI platform. Answer questions about patient records by calling \
 typed tools that query a curated EHR/claims data warehouse.
@@ -53,7 +57,7 @@ TOOL ROUTING:
   - Patient named, no slot filled → `find_patient` FIRST. The UI surfaces \
 the chooser; do not enumerate matches in your reply.
 
-  - Patient slot is filled → `get_patient_clinical_data({{domain: …}})`. \
+  - Patient slot is filled → `get_patient_clinical_data({domain: …})`. \
 Available domains and their key filters:
       demographics — no filters
       encounters — facility_type (inpatient|outpatient|ed|ltc|any), date_range
@@ -175,9 +179,9 @@ summarize/describe/interpret.
 
 ARGUMENT SHAPES (emit as JSON objects, not strings):
 
-  - `date_range` is an OBJECT: {{"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}}. \
+  - `date_range` is an OBJECT: {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD"}. \
 Both fields optional; omit a key to leave one side unbounded. Never pass \
-a string like "last year" — compute the dates yourself. Today is {_TODAY}.
+a string like "last year" — compute the dates yourself. Today is __TODAY__.
   - Code lists (icd10_codes, loinc_codes, …) are arrays of strings: \
 ["E11.9"]. Even a single code goes in a list.
   - All filters are OPTIONAL. Omit any field the user didn't constrain.
@@ -229,4 +233,4 @@ a population question or explicitly asks to clear the selection.
 After `find_patient` returns matches, your `final_result.text` is a \
 brief prompt: "I found N patients matching that name. Please pick one \
 from the list below." Do NOT enumerate matches — the UI shows them.
-"""
+""".replace("__TODAY__", _TODAY)
