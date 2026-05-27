@@ -87,8 +87,14 @@ if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
         title="Feedback Dashboard",
         icon="💬",
     )
+    agent_analytics_page = st.Page(
+        page="views/agent_analytics.py",
+        title="Agentic Analytics",
+        icon="🧠",
+    )
     pages.append(analytics_page)
     pages.append(feedback_page)
+    pages.append(agent_analytics_page)
 
 pg = st.navigation(pages=pages)
 
