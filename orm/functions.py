@@ -130,7 +130,8 @@ def set_user_preferences_in_session_state():
         st.session_state.show_elapsed_time = user.show_elapsed_time
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.confirm_magic_commands = getattr(user, "confirm_magic_commands", True)
-        st.session_state.agentic_mode = bool(getattr(user, "agentic_mode", False))
+        agentic_pref = getattr(user, "agentic_mode", True)
+        st.session_state.agentic_mode = bool(agentic_pref) if agentic_pref is not None else True
         st.session_state.min_message_id = user.min_message_id
         st.session_state.user_role = user.role.role.value
         st.session_state.user_theme = user.theme
