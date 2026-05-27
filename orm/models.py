@@ -505,6 +505,9 @@ class ToolCall(Base):
         Index("ix_thrive_tool_call_created_at", "created_at"),
         Index("ix_thrive_tool_call_tool_name", "tool_name"),
         Index("ix_thrive_tool_call_selected_patient", "selected_patient_source_id"),
+        Index("ix_thrive_tool_call_run_id", "run_id"),
+        Index("ix_thrive_tool_call_run_call", "run_id", "call_index"),
+        Index("ix_thrive_tool_call_tool_call_id", "tool_call_id"),
     )
     id = Column(Integer, primary_key=True)
     session_id = Column(String(64), nullable=False)
@@ -517,6 +520,169 @@ class ToolCall(Base):
     elapsed_ms = Column(Integer, nullable=False)
     success = Column(Boolean, nullable=False)
     error = Column(Text, nullable=True)
+    # --- Agentic run logging enrichment (2026-05 design) ---
+    run_id = Column(String(36), nullable=True)
+    tool_call_id = Column(String(100), nullable=True)
+    call_index = Column(Integer, nullable=True)
+    turn_index = Column(Integer, nullable=True)
+    attempt_index = Column(Integer, nullable=False, default=1)
+    started_event_seq = Column(Integer, nullable=True)
+    completed_event_seq = Column(Integer, nullable=True)
+    result_json = Column(Text, nullable=True)
+    result_truncated = Column(Boolean, nullable=False, default=False)
+    result_bytes = Column(Integer, nullable=True)
+    result_hash = Column(String(64), nullable=True)
+    sql_executed_json = Column(Text, nullable=True)
+    sql_executed_truncated = Column(Boolean, nullable=False, default=False)
+    sql_executed_bytes = Column(Integer, nullable=True)
+    sql_executed_hash = Column(String(64), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+
+class AgentRun(Base):
+    """One row per agentic question/turn. Query-friendly rollup over the
+    append-only AgentRunEvent timeline."""
+
+    __tablename__ = "thrive_agent_run"
+    __table_args__ = (
+        Index("ix_thrive_agent_run_run_id", "run_id", unique=True),
+        Index("ix_thrive_agent_run_session_id", "session_id"),
+        Index("ix_thrive_agent_run_user_id", "user_id"),
+        Index("ix_thrive_agent_run_created_at", "created_at"),
+        Index("ix_thrive_agent_run_group_id", "group_id"),
+        Index("ix_thrive_agent_run_selected_patient", "selected_patient_source_id"),
+        Index("ix_thrive_agent_run_status", "status"),
+        Index("ix_thrive_agent_run_review_status", "review_status"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String(36), nullable=False)
+    session_id = Column(String(64), nullable=False)
+    group_id = Column(String(50), nullable=True)
+    parent_run_id = Column(String(36), nullable=True)
+    resume_reason = Column(String(40), nullable=True)
+    user_message_id = Column(Integer, nullable=True)
+    final_message_id = Column(Integer, nullable=True)
+    user_id = Column(Integer, ForeignKey("thrive_user.id"), nullable=False)
+    user_role = Column(Integer, nullable=False)
+    question = Column(Text, nullable=True)
+
+    selected_patient_source_id = Column(String(50), nullable=True)
+    selected_patient_display_name = Column(String(255), nullable=True)
+    selected_patient_dob = Column(String(50), nullable=True)
+    selected_patient_selection_origin = Column(String(32), nullable=True)
+
+    llm_provider = Column(String(50), nullable=True)
+    llm_model = Column(String(100), nullable=True)
+    model_settings_json = Column(Text, nullable=True)
+    system_prompt_hash = Column(String(64), nullable=True)
+    tool_schema_hash = Column(String(64), nullable=True)
+    message_history_json = Column(Text, nullable=True)
+
+    final_answer_text = Column(Text, nullable=True)
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    tool_call_count = Column(Integer, nullable=False, default=0)
+    event_count = Column(Integer, nullable=False, default=0)
+    total_elapsed_ms = Column(Integer, nullable=True)
+    cap_reached = Column(String(20), nullable=True)
+    status = Column(String(20), nullable=False, default="open")
+    success = Column(Boolean, nullable=False, default=False)
+    error_type = Column(String(100), nullable=True)
+    error = Column(Text, nullable=True)
+    stack_trace = Column(Text, nullable=True)
+
+    review_status = Column(String(20), nullable=False, default="unreviewed")
+    reviewed_by = Column(Integer, nullable=True)
+    reviewed_at = Column(TIMESTAMP, nullable=True)
+    review_notes = Column(Text, nullable=True)
+    issue_url = Column(Text, nullable=True)
+
+    logging_mode = Column(String(20), nullable=False, default="full")
+    schema_version = Column(Integer, nullable=False, default=1)
+    app_git_sha = Column(String(40), nullable=True)
+    environment = Column(String(50), nullable=True)
+
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+    completed_at = Column(TIMESTAMP, nullable=True)
+
+
+class AgentRunEvent(Base):
+    """Append-only ordered timeline; the source of truth for the inspector."""
+
+    __tablename__ = "thrive_agent_run_event"
+    __table_args__ = (
+        Index("ix_thrive_agent_run_event_run_seq", "run_id", "seq", unique=True),
+        Index("ix_thrive_agent_run_event_run_id", "run_id"),
+        Index("ix_thrive_agent_run_event_type", "event_type"),
+        Index("ix_thrive_agent_run_event_tool_name", "tool_name"),
+        Index("ix_thrive_agent_run_event_created_at", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String(36), nullable=False)
+    seq = Column(Integer, nullable=False)
+    event_type = Column(String(50), nullable=False)
+    turn_index = Column(Integer, nullable=True)
+    tool_call_id = Column(String(100), nullable=True)
+    tool_name = Column(String(64), nullable=True)
+    payload_json = Column(Text, nullable=True)
+    payload_summary = Column(Text, nullable=True)
+    payload_truncated = Column(Boolean, nullable=False, default=False)
+    payload_bytes = Column(Integer, nullable=True)
+    payload_hash = Column(String(64), nullable=True)
+    elapsed_ms = Column(Integer, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+
+class AgentPatientAccess(Base):
+    """Queryable record of every patient 'touch' for the Patient Access tab."""
+
+    __tablename__ = "thrive_agent_patient_access"
+    __table_args__ = (
+        Index("ix_thrive_agent_patient_access_source", "source_id"),
+        Index("ix_thrive_agent_patient_access_user", "user_id"),
+        Index("ix_thrive_agent_patient_access_run", "run_id"),
+        Index("ix_thrive_agent_patient_access_tool_call", "tool_call_id"),
+        Index("ix_thrive_agent_patient_access_created", "created_at"),
+        Index("ix_thrive_agent_patient_access_type", "access_type"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(String(36), nullable=True)
+    tool_call_id = Column(String(100), nullable=True)
+    event_seq = Column(Integer, nullable=True)
+    session_id = Column(String(64), nullable=False)
+    user_id = Column(Integer, ForeignKey("thrive_user.id"), nullable=False)
+    source_id = Column(String(50), nullable=False)
+    display_name = Column(String(255), nullable=True)
+    access_type = Column(String(40), nullable=False)
+    access_origin = Column(String(40), nullable=False)
+    tool_name = Column(String(64), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
+
+
+class PatientSelectionEvent(Base):
+    """One row each time a patient pin is set or cleared."""
+
+    __tablename__ = "thrive_patient_selection_event"
+    __table_args__ = (
+        Index("ix_thrive_patient_selection_session", "session_id"),
+        Index("ix_thrive_patient_selection_user", "user_id"),
+        Index("ix_thrive_patient_selection_source", "source_id"),
+        Index("ix_thrive_patient_selection_created", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(String(64), nullable=False)
+    run_id = Column(String(36), nullable=True)
+    user_id = Column(Integer, ForeignKey("thrive_user.id"), nullable=False)
+    source_id = Column(String(50), nullable=True)
+    previous_source_id = Column(String(50), nullable=True)
+    display_name = Column(String(255), nullable=True)
+    selection_origin = Column(String(32), nullable=False)
+    action = Column(String(20), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
 
 
