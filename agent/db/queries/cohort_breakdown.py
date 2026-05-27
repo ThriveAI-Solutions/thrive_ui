@@ -158,9 +158,3 @@ def cohort_breakdown_sql(
     )
     total_sql = f"SELECT COUNT(DISTINCT isr.source_id) AS total_count\n        {from_block}"
     return bucket_sql, total_sql, params
-
-
-def parse_dimension(value: str) -> BreakdownDimension:
-    """Map a raw enum string to BreakdownDimension (pydantic already validates,
-    but the tool stores list[str] from the model and needs the enum)."""
-    return BreakdownDimension(value)
