@@ -127,6 +127,12 @@ password = "<random-strong-secret>"
 [security]
 allow_llm_to_see_data = false
 restrict_rag_by_role = true
+
+[agent_logging]
+mode = "full"                    # full | scrubbed | disabled
+max_logged_result_bytes = 5000000
+max_logged_event_bytes = 5000000
+retention_days = 0               # 0 = keep indefinitely
 ```
 
 ## Development Guidelines
@@ -153,3 +159,4 @@ restrict_rag_by_role = true
 - Missing `cookie.password` prevents login - app stops until cookies ready
 - Ollama defaults to `http://localhost:11434` - ensure model is pulled and running
 - Role-restricted RAG retrieval on by default; disable with `security.restrict_rag_by_role = false`
+- Agentic run logging defaults to `full` fidelity (verbatim PHI in the app SQLite DB); set `[agent_logging].mode = "scrubbed"` to hash SQL literals and drop full result rows, or `disabled` to turn it off. Protect DB backups accordingly.
