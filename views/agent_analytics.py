@@ -84,8 +84,17 @@ def _render_runs_tab(days: int) -> None:
         hide_index=True,
     )
 
+    run_by_id = {r["run_id"]: r for r in runs}
+
+    def _format_run(run_id: str) -> str:
+        if run_id == "—":
+            return "—"
+        r = run_by_id[run_id]
+        question = (r.get("question") or "").strip()[:200]
+        return f"{run_id[:8]} · {r.get('tool_call_count')} tools · {r.get('status')} · {question}"
+
     run_ids = [r["run_id"] for r in runs]
-    selected = st.selectbox("Inspect a run", options=["—"] + run_ids)
+    selected = st.selectbox("Inspect a run", options=["—"] + run_ids, format_func=_format_run)
     if selected and selected != "—":
         _render_run_inspector(selected)
 
