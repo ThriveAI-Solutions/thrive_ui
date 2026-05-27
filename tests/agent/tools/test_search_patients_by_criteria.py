@@ -399,3 +399,35 @@ def test_dx_plus_geo_concatenates_both_notes(synthetic_db):
     )
     assert _RELIABILITY_DX in (out.reliability_note or "")
     assert _RELIABILITY_GEO in (out.reliability_note or "")
+
+
+def test_criteria_accepts_breakdown_list():
+    from agent.db.queries.cohort_breakdown import BreakdownDimension
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    c = CohortCriteria(gender="F", breakdown=[BreakdownDimension.GENDER])
+    assert c.breakdown == [BreakdownDimension.GENDER]
+
+
+def test_criteria_breakdown_defaults_empty():
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    c = CohortCriteria(gender="F")
+    assert c.breakdown == []
+
+
+def test_cohort_result_carries_breakdown_fields():
+    from agent.tools.search_patients_by_criteria import BreakdownBucket, CohortResult
+
+    r = CohortResult(
+        total_count=3,
+        sample=[],
+        data_availability="data_present",
+        buckets=[BreakdownBucket(bucket_label="F", patient_count=3)],
+        non_additive=False,
+        generated_sql="SELECT 1",
+        breakdown_status="single_dimension",
+    )
+    assert r.buckets[0].patient_count == 3
+    assert r.non_additive is False
+    assert r.breakdown_status == "single_dimension"

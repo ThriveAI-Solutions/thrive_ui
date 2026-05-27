@@ -14,6 +14,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.db.queries.cohort_breakdown import BreakdownDimension
 from agent.result_compaction import CompactingListResult
 
 
@@ -44,6 +45,7 @@ class CohortCriteria(BaseModel):
     city: Optional[str] = None  # case-insensitive substring on p.city
     state: Optional[str] = None  # 2-letter USPS code, exact match on uppercased p.state
     sample_size: int = Field(default=20, ge=0, le=100)
+    breakdown: List[BreakdownDimension] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _require_at_least_one_criterion(self) -> "CohortCriteria":
@@ -89,6 +91,11 @@ class PatientMatch(BaseModel):
     practice_name: Optional[str] = None
 
 
+class BreakdownBucket(BaseModel):
+    bucket_label: str
+    patient_count: int
+
+
 class CohortResult(CompactingListResult):
     _list_field = "sample"
 
@@ -98,6 +105,12 @@ class CohortResult(CompactingListResult):
     truncated: bool = False
     reliability_note: Optional[str] = None
     notes_to_agent: Optional[str] = None
+    buckets: List[BreakdownBucket] = Field(default_factory=list)
+    non_additive: bool = False
+    generated_sql: Optional[str] = None
+    breakdown_status: Optional[
+        Literal["single_dimension", "unsupported_multi_dimension", "missing_diagnosis_anchor"]
+    ] = None
 
 
 from pydantic_ai import RunContext
