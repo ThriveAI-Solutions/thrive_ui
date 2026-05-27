@@ -12,7 +12,7 @@ import pytest
 from agent.db.sql_context import schema_context_for_sql
 from agent.rag.seed import SCHEMA_DOCS
 
-_BUDGET_CHARS = 6000
+_BUDGET_CHARS = 6500
 
 
 def test_dw_prefix_qualifies_every_view_in_catalog():

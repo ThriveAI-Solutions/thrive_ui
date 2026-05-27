@@ -24,6 +24,7 @@ from agent.db.queries.immunizations import immunizations_sql
 from agent.db.queries.procedures import procedures_sql
 from agent.db.queries.surgeries import surgeries_sql
 from agent.db.queries.imaging import imaging_sql
+from agent.db.queries.adt import admissions_sql
 from agent.code_normalizer import normalize_token, variants_for
 from agent.dataframe_adapters import clinical_result_to_df
 
@@ -63,6 +64,7 @@ class LabsQuery(BaseModel):
     loinc_codes: Optional[List[str]] = None
     test_name_text: Optional[str] = None
     result_filter: Optional[Literal["positive", "negative", "abnormal", "any"]] = "any"
+    most_recent_only: bool = False
 
 
 class DiagnosesQuery(BaseModel):
@@ -118,6 +120,15 @@ class ImagingQuery(BaseModel):
     body_region: Optional[str] = None
 
 
+class AdmissionsQuery(BaseModel):
+    model_config = _STRICT
+
+    domain: Literal["admissions"] = "admissions"
+    date_range: Optional[DateRange] = None
+    facility_type: Optional[Literal["inpatient", "ltc", "snf", "emergency", "outpatient", "any"]] = "any"
+    include_discharge_details: bool = True
+
+
 PatientClinicalQuery = Annotated[
     Union[
         DemographicsQuery,
@@ -129,6 +140,7 @@ PatientClinicalQuery = Annotated[
         ProceduresQuery,
         SurgeriesQuery,
         ImagingQuery,
+        AdmissionsQuery,
     ],
     Field(discriminator="domain"),
 ]
@@ -265,6 +277,19 @@ class ImagingItem(BaseModel):
     location_name: Optional[str] = None
 
 
+class AdmissionItem(BaseModel):
+    item_type: Literal["admission"] = "admission"
+    source_id: str
+    event_date: Optional[str] = None
+    event_location: Optional[str] = None
+    location_type: Optional[str] = None
+    setting: Optional[str] = None
+    status: Optional[str] = None
+    admit_from: Optional[str] = None
+    discharge_disposition: Optional[str] = None
+    discharge_location: Optional[str] = None
+
+
 ClinicalItem = Annotated[
     Union[
         DemographicsItem,
@@ -276,6 +301,7 @@ ClinicalItem = Annotated[
         ProcedureItem,
         SurgeryItem,
         ImagingItem,
+        AdmissionItem,
     ],
     Field(discriminator="item_type"),
 ]
@@ -372,6 +398,7 @@ def _build_labs_result(adapter: Any, source_id: str, schema_prefix: str, query: 
         start_date=dr.start.isoformat() if dr and dr.start else None,
         end_date=dr.end.isoformat() if dr and dr.end else None,
         result_filter=query.result_filter,
+        most_recent_only=query.most_recent_only,
         schema_prefix=schema_prefix,
     )
     rows = adapter.fetch_all(sql, params)
@@ -702,6 +729,51 @@ def _build_imaging_result(adapter: Any, source_id: str, schema_prefix: str, quer
     )
 
 
+def _build_admissions_result(
+    adapter: Any, source_id: str, schema_prefix: str, query: AdmissionsQuery
+) -> ClinicalResult:
+    dr = query.date_range
+    sql, params = admissions_sql(
+        source_id=source_id,
+        facility_type=query.facility_type,
+        start_date=dr.start.isoformat() if dr and dr.start else None,
+        end_date=dr.end.isoformat() if dr and dr.end else None,
+        include_discharge_details=query.include_discharge_details,
+        schema_prefix=schema_prefix,
+    )
+    rows = adapter.fetch_all(sql, params)
+    if not rows:
+        return ClinicalResult(
+            domain="admissions",
+            items=[],
+            data_availability="no_records_found",
+        )
+    items = [
+        AdmissionItem(
+            source_id=r["source_id"],
+            event_date=str(r["event_date"]) if r.get("event_date") else None,
+            event_location=r.get("event_location"),
+            location_type=r.get("location_type"),
+            setting=r.get("setting"),
+            status=r.get("status"),
+            admit_from=r.get("admit_from"),
+            discharge_disposition=r.get("discharge_disposition"),
+            discharge_location=r.get("discharge_location"),
+        )
+        for r in rows
+    ]
+    return ClinicalResult(
+        domain="admissions",
+        items=items,
+        data_availability="data_present",
+        reliability_note=(
+            "ADT events are sourced from federated_adt_v. Setting values are "
+            "normalized via clean_setting. Discharge details may be absent for "
+            "events still in progress or from sources that do not report them."
+        ),
+    )
+
+
 # --- Tool implementation --------------------------------------------
 
 
@@ -735,6 +807,8 @@ def get_patient_clinical_data(
         result = _build_surgeries_result(adapter, source_id, schema_prefix, query)
     elif isinstance(query, ImagingQuery):
         result = _build_imaging_result(adapter, source_id, schema_prefix, query)
+    elif isinstance(query, AdmissionsQuery):
+        result = _build_admissions_result(adapter, source_id, schema_prefix, query)
     else:
         raise ModelRetry(f"Unknown clinical query variant: {type(query).__name__}")
 

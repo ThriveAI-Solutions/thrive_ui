@@ -23,6 +23,23 @@ _MODALITY_KEYWORDS = {
     "pet": ("pet ", "positron emission"),
 }
 
+_BODY_REGION_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "head": ("head", "brain", "cranial", "cranium", "skull", "intracranial"),
+    "neck": ("neck", "cervical spine", "c-spine", "c spine", "thyroid"),
+    "chest": ("chest", "thorax", "thoracic", "lung", "pulmonary", "cardiac", "rib"),
+    "abdomen": ("abdomen", "abdominal", "liver", "kidney", "renal", "gallbladder", "pancrea"),
+    "pelvis": ("pelvis", "pelvic", "bladder", "prostate", "uterus", "ovary", "ovarian"),
+    "spine": ("spine", "spinal", "lumbar", "thoracic spine", "sacral", "vertebr"),
+    "shoulder": ("shoulder", "rotator cuff", "scapula", "acromioclavicular"),
+    "knee": ("knee", "patella", "patellar", "tibial plateau"),
+    "hip": ("hip", "femoral head", "acetabul"),
+    "ankle": ("ankle", "malleol", "talar"),
+    "wrist": ("wrist", "carpal", "scaphoid", "distal radius"),
+    "hand": ("hand", "finger", "metacarp", "phalanx", "phalanges"),
+    "foot": ("foot", "toe", "metatars", "calcaneal", "plantar"),
+    "extremity": ("extremity", "extremities", "limb", "upper extremity", "lower extremity"),
+}
+
 
 def imaging_sql(
     *,
@@ -53,9 +70,23 @@ def imaging_sql(
     body_clause_orders = ""
     body_clause_docs = ""
     if body_region:
-        body_clause_orders = "AND LOWER(name) LIKE :body"
-        body_clause_docs = "AND (LOWER(name) LIKE :body OR LOWER(mnemonic) LIKE :body)"
-        params["body"] = f"%{body_region.lower()}%"
+        region_key = body_region.lower().strip()
+        keywords = _BODY_REGION_KEYWORDS.get(region_key)
+        if keywords:
+            order_terms: list[str] = []
+            doc_terms: list[str] = []
+            for j, kw in enumerate(keywords):
+                key = f"body_{j}"
+                params[key] = f"%{kw}%"
+                order_terms.append(f"LOWER(name) LIKE :{key}")
+                doc_terms.append(f"LOWER(name) LIKE :{key} OR LOWER(mnemonic) LIKE :{key}")
+            body_clause_orders = f"AND ({' OR '.join(order_terms)})"
+            body_clause_docs = f"AND ({' OR '.join(doc_terms)})"
+        else:
+            # Fallback: use the raw body_region string as a single LIKE pattern
+            body_clause_orders = "AND LOWER(name) LIKE :body"
+            body_clause_docs = "AND (LOWER(name) LIKE :body OR LOWER(mnemonic) LIKE :body)"
+            params["body"] = f"%{region_key}%"
 
     date_filter_orders = ""
     date_filter_docs = ""
