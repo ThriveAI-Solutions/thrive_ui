@@ -226,3 +226,4 @@ scripts/synthea/output/
 
 .idea/
 .vscode/
+.claude/
