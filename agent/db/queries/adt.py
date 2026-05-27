@@ -1,6 +1,6 @@
 """SQL template for federated_adt_v (admit/discharge/transfer events).
 
-Supports filtering by facility type (inpatient, ltc/snf, emergency, any),
+Supports filtering by facility type (inpatient, ltc/snf, ed, outpatient, any),
 date range, and discharge detail inclusion. The clean_setting column
 normalizes setting values to INPATIENT, OUTPATIENT, EMERGENCY, etc.
 """

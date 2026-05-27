@@ -139,7 +139,7 @@ SCHEMA_DOCS: List[_Doc] = [
             "setting: INPATIENT, OUTPATIENT, EMERGENCY, LONG TERM CARE, SNF), "
             "status, admit_from, discharge_disposition, discharge_location. "
             "Use get_patient_clinical_data with domain='admissions' to query this "
-            "view. Supports facility_type filtering (inpatient, ltc, snf, emergency, "
+            "view. Supports facility_type filtering (inpatient, ltc, snf, ed, "
             "outpatient, any) and date_range."
         ),
     },
@@ -342,7 +342,7 @@ EXAMPLES_DOCS: List[_Doc] = [
             "Q: 'Did patient have imaging done on their knee last year? What type?'\n"
             "Tool sequence: get_patient_clinical_data({domain:'imaging', "
             "body_region:'knee', date_range:{start:..., end:...}}). "
-            "body_region expands to ILIKE patterns covering 'knee', 'patella', "
+            "body_region expands to case-insensitive keyword patterns covering 'knee', 'patella', "
             "'patellar', 'tibial plateau'."
         ),
     },
