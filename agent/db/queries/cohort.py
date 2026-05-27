@@ -43,6 +43,15 @@ def _state_aliases(state_input: str) -> tuple[str, ...]:
     return _STATE_ALIAS_MAP.get(key, (key,))
 
 
+def _has_diagnosis_criterion(criteria) -> bool:
+    """True when a diagnosis filter is active: codes and/or an active date window.
+    An all-None diagnosis_date_range carries no filter and does not count.
+    """
+    _dr = getattr(criteria, "diagnosis_date_range", None)
+    _dr_active = _dr is not None and (getattr(_dr, "start", None) or getattr(_dr, "end", None))
+    return bool(getattr(criteria, "diagnosis_codes", None) or _dr_active)
+
+
 def _diagnosis_event_where(criteria) -> tuple[list[str], dict] | None:
     """Build the WHERE fragment for the diagnosis-event subquery.
 
@@ -53,7 +62,7 @@ def _diagnosis_event_where(criteria) -> tuple[list[str], dict] | None:
     """
     _dr = getattr(criteria, "diagnosis_date_range", None)
     _dr_active = _dr is not None and (getattr(_dr, "start", None) or getattr(_dr, "end", None))
-    if not (getattr(criteria, "diagnosis_codes", None) or _dr_active):
+    if not _has_diagnosis_criterion(criteria):
         return None
 
     params: dict = {}
@@ -75,7 +84,7 @@ def _diagnosis_event_where(criteria) -> tuple[list[str], dict] | None:
 
 
 def _build_non_diagnosis_filters(criteria, schema_prefix: str) -> tuple[list[str], list[str], dict]:
-    """Build (medication joins, where clauses, params) for everything except
+    """Build (join_clauses, where_clauses, params) for everything except
     the diagnosis filter. Shared by cohort_sql and the breakdown builder so
     geo/demographic/medication logic lives in exactly one place.
     """
@@ -141,16 +150,9 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
 
     Returns (sql, params). The caller passes both into adapter.fetch_all.
     """
-    # A diagnosis_date_range with a start or end bound is a standalone
-    # criterion ("any diagnosis in this window"); an all-None DateRange
-    # carries no filter and does not count.
-    _dr = getattr(criteria, "diagnosis_date_range", None)
-    _dr_active = _dr is not None and (getattr(_dr, "start", None) or getattr(_dr, "end", None))
-
     if not any(
         (
-            getattr(criteria, "diagnosis_codes", None),
-            _dr_active,
+            _has_diagnosis_criterion(criteria),
             getattr(criteria, "medication_rxnorm_codes", None),
             getattr(criteria, "condition_text", None),
             getattr(criteria, "age_min", None) is not None,
