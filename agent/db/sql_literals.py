@@ -20,14 +20,19 @@ def _literal(value: Any) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def inline_sql_literals(sql: str, params: dict) -> str:
+def inline_sql_literals(sql: str, params: dict[str, Any]) -> str:
     """Replace :name placeholders in `sql` with quoted literals from `params`.
 
-    Keys are applied longest-first and matched with a trailing word boundary
-    so :dx_1 never clobbers :dx_10. Placeholders with no matching param are
-    left untouched.
+    Single-pass: the original SQL is scanned exactly once, so an inserted
+    literal can never be re-matched (a param value that happens to contain a
+    ":identifier" substring is left intact). Placeholders with no matching
+    param are left untouched.
     """
-    out = sql
-    for name in sorted(params, key=len, reverse=True):
-        out = re.sub(rf":{re.escape(name)}\b", _literal(params[name]), out)
-    return out
+
+    def _sub(match: "re.Match") -> str:
+        name = match.group(1)
+        if name in params:
+            return _literal(params[name])
+        return match.group(0)
+
+    return re.sub(r":(\w+)", _sub, sql)

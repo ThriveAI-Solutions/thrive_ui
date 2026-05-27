@@ -25,3 +25,14 @@ def test_longer_keys_not_clobbered_by_prefixes():
 def test_leaves_unknown_placeholders_untouched():
     out = inline_sql_literals("WHERE x = :known AND y = :other", {"known": 1})
     assert out == "WHERE x = 1 AND y = :other"
+
+
+def test_bool_replaced_as_true_false():
+    assert inline_sql_literals("WHERE active = :a", {"a": True}) == "WHERE active = TRUE"
+    assert inline_sql_literals("WHERE active = :a", {"a": False}) == "WHERE active = FALSE"
+
+
+def test_value_containing_placeholder_substring_is_not_re_substituted():
+    # foo's value contains ":bar"; single-pass must not re-substitute it
+    out = inline_sql_literals("WHERE a = :foo AND b = :bar", {"foo": ":bar", "bar": "safe"})
+    assert out == "WHERE a = ':bar' AND b = 'safe'"
