@@ -47,11 +47,16 @@ class CohortCriteria(BaseModel):
 
     @model_validator(mode="after")
     def _require_at_least_one_criterion(self) -> "CohortCriteria":
-        # diagnosis_date_range alone is a no-op (only used to narrow
-        # diagnosis_codes), so it does not count as a criterion.
+        # A diagnosis_date_range with a start or end bound is a standalone
+        # criterion ("any diagnosis in this window"). An all-None DateRange
+        # carries no filter and does not count.
+        dr_active = self.diagnosis_date_range is not None and (
+            self.diagnosis_date_range.start or self.diagnosis_date_range.end
+        )
         if not any(
             (
                 self.diagnosis_codes,
+                dr_active,
                 self.medication_rxnorm_codes,
                 self.condition_text,
                 self.age_min is not None,
@@ -137,7 +142,13 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
 
     Criteria fields:
       - diagnosis_codes: ICD-10 or SNOMED codes; matched in metric_federated_data_v.
-      - diagnosis_date_range: optional DateRange narrowing diagnosis events.
+      - diagnosis_date_range: DateRange (start/end, inclusive) over diagnosis
+        start_date. Works WITH diagnosis_codes (narrows those codes to the
+        window) OR ALONE — a bare range counts patients with ANY ICD-10/SNOMED
+        diagnosis in the window. Use it alone for "how many patients had a
+        diagnosis in <period>". Do NOT fake this with age_min/age_max: an
+        age band does not filter by diagnosis date and yields the whole
+        population.
       - medication_rxnorm_codes: RxNorm or NDC codes; matched in metric_federated_data_v.
       - condition_text: free-text fallback when codes are not known; LIKE matches
         the denormalized conditions string. Prefer diagnosis_codes when available.
@@ -179,7 +190,9 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     # Compute reliability_note up front so the no_records path also surfaces it
     # — geo-filter misses are most informative when no rows came back.
     reliability_parts: list[str] = []
-    if criteria.diagnosis_codes:
+    _dr = criteria.diagnosis_date_range
+    _dr_active = _dr is not None and (_dr.start or _dr.end)
+    if criteria.diagnosis_codes or _dr_active:
         reliability_parts.append(_RELIABILITY_DX)
     elif criteria.medication_rxnorm_codes:
         reliability_parts.append(_RELIABILITY_RX)
