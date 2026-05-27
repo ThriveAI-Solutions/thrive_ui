@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from agent.audit import scrub_arguments_json, summarize_result
@@ -71,15 +72,6 @@ class AgentRunLogger:
 
     _seq: int = field(default=0, init=False)
     _call_index: int = field(default=0, init=False)
-
-    # The test monkeypatches this to None to simulate a broken session.
-    @property
-    def _session(self) -> Optional[Session]:
-        return self.session
-
-    @_session.setter
-    def _session(self, value):
-        self.session = value
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -358,9 +350,7 @@ class AgentRunLogger:
                 run.error_type = error_type
                 run.error = error
                 run.stack_trace = stack_trace if self.config.mode == "full" else None
-                from sqlalchemy import func as _f
-
-                run.completed_at = _f.now()
+                run.completed_at = func.now()
                 self.session.add(run)
                 self._safe_commit()
         except Exception:

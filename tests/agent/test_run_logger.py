@@ -172,5 +172,5 @@ def test_logging_failure_never_raises(monkeypatch):
     lg = _logger(s)
     lg.start_run(question="q", llm_provider="x", llm_model="y", selected_patient=None, group_id=None)
     # Force a write error; the call must swallow it.
-    monkeypatch.setattr(lg, "_session", None)
+    monkeypatch.setattr(lg, "session", None)
     lg.log_event("thinking_completed", payload={"t": "x"}, turn_index=1, elapsed_ms=1)  # no raise
