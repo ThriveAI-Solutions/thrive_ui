@@ -58,10 +58,10 @@ def render_patient_chooser(message, index: int) -> None:
                     previous_source_id=previous_source_id,
                     run_id=parent_run_id,
                 )
-                st.session_state["agent_parent_run_id"] = parent_run_id
-                st.session_state["agent_resume_reason"] = "patient_selection_resume"
             except Exception:
                 pass
+            st.session_state["agent_parent_run_id"] = parent_run_id
+            st.session_state["agent_resume_reason"] = "patient_selection_resume"
             # Re-fire the original question so the agent continues with
             # the slot now filled. agent.runtime stashes this before each
             # run; if missing (e.g. stale chooser from a prior session),
