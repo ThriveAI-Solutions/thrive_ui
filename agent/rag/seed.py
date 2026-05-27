@@ -392,25 +392,6 @@ RUN_SQL_EXAMPLES: List[_Doc] = [
             "  LIMIT 1;"
         ),
     },
-    {
-        "view": "",
-        "kind": "examples",
-        "text": (
-            "Q: Count distinct patients with any diagnosis, broken out by month.\n"
-            "SQL:\n"
-            "  SELECT TO_CHAR(DATE_TRUNC('month', dx.start_date), 'YYYY-MM') AS bucket_label,\n"
-            "         COUNT(DISTINCT isr.source_id) AS patient_count\n"
-            "  FROM {p}internal_patient_profile_v p\n"
-            "  JOIN {p}internal_source_reference_v isr\n"
-            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
-            "  JOIN (SELECT patient_id, start_date FROM {p}metric_federated_data_v\n"
-            "        WHERE code_type IN ('ICD-10','ICD10','SNOMED')\n"
-            "          AND start_date >= :start AND start_date <= :end) dx\n"
-            "    ON dx.patient_id = p.patient_id\n"
-            "  GROUP BY 1 ORDER BY 1;\n"
-            "Note: a patient diagnosed in multiple months appears in each — buckets overlap."
-        ),
-    },
 ]
 
 
