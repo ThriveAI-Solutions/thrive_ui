@@ -31,7 +31,7 @@ class ThriveAI_Ollama(ThriveAI_Base):
         self.schema = config.get("schema", "public")
         self.dialect = config.get("dialect", getattr(self, "dialect", "postgresql"))
 
-        self.ollama_timeout = config.get("ollama_timeout", 240.0)
+        self.ollama_timeout = config.get("ollama_timeout", 480.0)
 
         self.ollama_client = ollama.Client(self.host, timeout=Timeout(self.ollama_timeout))
         self.keep_alive = config.get("keep_alive", None)

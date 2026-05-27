@@ -25,7 +25,7 @@ from orm.models import RoleTypeEnum, SessionLocal, User, UserRole
 from utils.authentication_management import get_user_list_excel
 from utils.chat_bot_helper import get_vn
 from utils.enums import ThemeType
-from utils.vanna_calls import refresh_stats, train_all
+from utils.vanna_calls import auto_generate_sql_pairs, refresh_stats, train_all
 
 # Get the current user ID from session state cookies
 user_id = st.session_state.cookies.get("user_id")
@@ -392,6 +392,56 @@ if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 help="Re-run column statistics only (use when data changed but schema is the same)",
             )
 
+        # Auto-generate SQL training pairs
+        st.divider()
+        st.subheader("Auto-Generate SQL Pairs")
+        st.caption("Use the connected LLM to generate, validate, and train SQL question-answer pairs automatically.")
+        gen_col1, gen_col2, gen_spacer = st.columns((0.20, 0.20, 0.60))
+        with gen_col1:
+            pair_count = st.number_input(
+                "Number of pairs",
+                min_value=1,
+                max_value=50,
+                value=5,
+                step=1,
+                key="auto_gen_pair_count",
+            )
+        with gen_col2:
+            st.write("")  # vertical spacing
+            st.write("")
+            if st.button("Generate", type="primary", key="auto_gen_btn"):
+                with st.status("Generating SQL training pairs...", expanded=True) as gen_status:
+                    gen_results = auto_generate_sql_pairs(count=int(pair_count))
+                    error_msg = gen_results.get("error")
+                    if error_msg:
+                        gen_status.update(
+                            label=f"Generation failed: {error_msg}",
+                            state="error",
+                        )
+                        st.error(error_msg)
+                    else:
+                        passed = gen_results.get("passed", 0)
+                        failed = gen_results.get("failed", 0)
+                        if passed > 0:
+                            gen_status.update(
+                                label=f"Generated {passed} pair(s) ({failed} failed)",
+                                state="complete",
+                            )
+                            st.success(f"Successfully trained {passed} SQL pair(s).")
+                        else:
+                            gen_status.update(
+                                label=f"Generation complete: 0 passed, {failed} failed",
+                                state="error",
+                            )
+                            st.warning("No valid pairs were generated. Check LLM connectivity and training data.")
+                    # Show details for failed pairs
+                    failed_details = [d for d in gen_results.get("details", []) if d["status"] == "failed"]
+                    if failed_details:
+                        with st.expander(f"Failed pairs ({len(failed_details)})"):
+                            for d in failed_details:
+                                st.text(f"Pair {d['index']}: {d.get('reason', 'Unknown')}")
+
+        st.divider()
         # Data management actions
         st.caption("Data Management")
         mgmt_cols = st.columns((0.15, 0.25, 0.15, 0.15, 0.30))

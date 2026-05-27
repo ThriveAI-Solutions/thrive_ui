@@ -3797,6 +3797,250 @@ def refresh_stats():
             status.update(label=f"Stats refresh failed: {e}", state="error")
 
 
+_SQL_PAIR_GENERATION_SYSTEM_PROMPT = """You are a SQL training data generator for a PostgreSQL analytics database.
+Given a database schema (DDL), working example pairs, and optional documentation, generate a NEW natural-language question and the correct SQL query to answer it.
+
+Rules:
+1. The SQL must be a valid SELECT query (no INSERT/UPDATE/DELETE/DROP/ALTER/CREATE).
+2. The SQL must reference ONLY tables and columns present in the provided DDL. Never invent table or column names.
+3. Study the working examples carefully — they show real table names, JOIN patterns, and filter values that return data.
+4. DO NOT use hardcoded filter values (like specific states, years, or status strings) UNLESS they appear in the provided documentation or examples. Instead prefer broad queries: aggregations (COUNT, AVG, SUM), GROUP BY, ORDER BY, LIMIT, IS NOT NULL, JOINs between tables.
+5. Vary the complexity, tables, and topic — do not duplicate the example questions.
+6. Output EXACTLY in this format with no markdown formatting, no bold, no code fences (no other text):
+QUESTION: <the natural language question>
+SQL: <the SQL query>"""
+
+_SQL_PAIR_REVIEW_SYSTEM_PROMPT = """You are a SQL quality reviewer. Given a question, a SQL query, and the query results, determine whether the results correctly and meaningfully answer the question.
+
+Respond with EXACTLY one word: PASS or FAIL
+If the results are empty, nonsensical, or do not answer the question, respond FAIL."""
+
+
+def auto_generate_sql_pairs(count: int = 5) -> dict:
+    """Generate, validate, and train SQL question-answer pairs using the LLM.
+
+    Pipeline per pair:
+    1. LLM generates a question + SQL pair (DDL context only, no question history)
+    2. Local duplicate detection against existing training data
+    3. Security validation (forbidden references)
+    4. Execute SQL against live database (must return non-empty results)
+    5. LLM semantic review of results
+    6. Auto-train valid pairs via write_to_file_and_training()
+
+    Args:
+        count: Number of pairs to attempt generating (default 5, max 50).
+
+    Returns:
+        Dict with keys: attempted, passed, failed, details (list of per-pair dicts).
+    """
+    from utils.security_validator import security_validator
+
+    count = max(1, min(count, 50))
+
+    vanna_service = VannaService.from_streamlit_session()
+    if not vanna_service:
+        return {"attempted": 0, "passed": 0, "failed": 0, "details": [], "error": "VannaService not available"}
+
+    # Gather a focused slice of RAG context — keep prompt small for local LLMs.
+    # Strategy: pick 3 DDL tables, 3 working examples, and 1 doc entry per iteration,
+    # rotating the seed query each time so we cover different parts of the schema.
+    _rag_seed_queries = [
+        "patient demographics and encounters",
+        "allergies and vaccinations",
+        "lab results and vitals",
+        "orders and procedures",
+        "insurance and billing",
+    ]
+
+    def _gather_focused_context(vn, seed_query: str) -> tuple[str, str, str]:
+        """Pull a small, focused slice of RAG context for one seed query."""
+        ddl_context = "No DDL available."
+        try:
+            ddl_list = vn.get_related_ddl(seed_query)
+            if ddl_list:
+                ddl_context = "\n\n".join(ddl_list[:3])
+        except Exception:
+            pass
+
+        example_pairs_text = ""
+        try:
+            rag_pairs = vn.get_similar_question_sql(seed_query)
+            if rag_pairs:
+                valid = [p for p in rag_pairs if isinstance(p, dict) and p.get("question") and p.get("sql")][:3]
+                if valid:
+                    example_pairs_text = "\n\n".join(f"QUESTION: {p['question']}\nSQL: {p['sql']}" for p in valid)
+        except Exception:
+            pass
+
+        doc_context = ""
+        try:
+            docs = vn.get_related_documentation(seed_query)
+            if docs:
+                valid = [d for d in docs if isinstance(d, str) and d.strip()][:1]
+                if valid:
+                    doc_context = valid[0]
+        except Exception:
+            pass
+
+        return ddl_context, example_pairs_text, doc_context
+
+    # Gather existing questions for local duplicate detection (not sent to LLM)
+    try:
+        training_df = vanna_service.get_training_data()
+        existing_questions: set[str] = set()
+        if isinstance(training_df, DataFrame) and not training_df.empty:
+            sql_rows = training_df[training_df["training_data_type"] == "sql"]
+            existing_questions = {q.lower().strip() for q in sql_rows["question"].dropna().tolist()}
+    except Exception:
+        existing_questions = set()
+
+    results = {"attempted": 0, "passed": 0, "failed": 0, "details": []}
+
+    def _reject_pair(pair_detail: dict, results: dict, reason: str) -> None:
+        pair_detail["reason"] = reason
+        results["failed"] += 1
+        results["details"].append(pair_detail)
+        logger.warning("SQL pair %d rejected: %s", pair_detail.get("index"), reason)
+
+    for i in range(count):
+        pair_detail = {"index": i + 1, "status": "failed", "question": None, "sql": None, "reason": None}
+        results["attempted"] += 1
+
+        try:
+            # Step 1: Generate question + SQL via LLM
+            # Rotate through seed queries so each iteration focuses on different tables
+            seed = _rag_seed_queries[i % len(_rag_seed_queries)]
+            ddl_context, example_pairs_text, doc_context = _gather_focused_context(vanna_service.vn, seed)
+
+            prompt_parts = [f"Database Schema (DDL):\n{ddl_context}"]
+
+            if example_pairs_text:
+                prompt_parts.append(f"Working Example Question/SQL Pairs (use these as reference for table names, JOINs, and filters):\n{example_pairs_text}")
+
+            if doc_context:
+                prompt_parts.append(f"Documentation:\n{doc_context}")
+
+            prompt_parts.append("Generate a new question and SQL pair following the format specified.")
+            user_prompt = "\n\n".join(prompt_parts)
+
+            response = vanna_service.submit_prompt(_SQL_PAIR_GENERATION_SYSTEM_PROMPT, user_prompt)
+
+            if not response or isinstance(response, Exception):
+                _reject_pair(pair_detail, results, f"LLM generation failed: {response}")
+                continue
+
+            response_text = str(response).strip()
+
+            # Parse QUESTION and SQL from response
+            question, sql = _parse_question_sql_response(response_text)
+            if not question or not sql:
+                _reject_pair(pair_detail, results, "Could not parse question/SQL from LLM response")
+                continue
+
+            pair_detail["question"] = question
+            pair_detail["sql"] = sql
+
+            # Local duplicate detection — reject questions that match existing training data
+            question_normalized = question.lower().strip()
+            if question_normalized in existing_questions:
+                _reject_pair(pair_detail, results, "Duplicate of existing training question")
+                continue
+            # Track this question for intra-batch dedup
+            existing_questions.add(question_normalized)
+
+            # Step 2: Security validation
+            is_valid, violations = security_validator.validate_sql_content(sql)
+            if not is_valid:
+                _reject_pair(pair_detail, results, f"Security validation failed: {violations}")
+                continue
+
+            # Also check via VannaService.check_references
+            checked_sql = vanna_service.check_references(sql)
+            if checked_sql is None:
+                _reject_pair(pair_detail, results, "Forbidden reference or configuration error detected by check_references")
+                continue
+
+            # Step 3: Execute SQL against database
+            try:
+                df = vanna_service.vn.run_sql(sql)
+            except Exception as exec_err:
+                _reject_pair(pair_detail, results, f"SQL execution error: {exec_err}")
+                continue
+
+            if df is None or (isinstance(df, DataFrame) and df.empty):
+                _reject_pair(pair_detail, results, "SQL returned empty results")
+                continue
+
+            # Step 4: LLM semantic review
+            result_preview = df.head(5).to_string(index=False) if isinstance(df, DataFrame) else str(df)
+            review_prompt = f"""Question: {question}
+SQL: {sql}
+Results (first 5 rows):
+{result_preview}
+
+Does this result correctly answer the question? Respond PASS or FAIL."""
+
+            review_response = vanna_service.submit_prompt(_SQL_PAIR_REVIEW_SYSTEM_PROMPT, review_prompt)
+            if isinstance(review_response, Exception):
+                _reject_pair(pair_detail, results, f"LLM review failed: {review_response}")
+                continue
+            review_text = str(review_response).strip().upper() if review_response else "FAIL"
+
+            if "PASS" not in review_text:
+                _reject_pair(pair_detail, results, f"Semantic review failed: {review_text}")
+                continue
+
+            # Step 5: Train the valid pair
+            new_entry = {"question": question, "query": sql}
+            # write_to_file_and_training handles its own errors internally via st.error
+            write_to_file_and_training(new_entry)
+
+            pair_detail["status"] = "passed"
+            results["passed"] += 1
+            results["details"].append(pair_detail)
+
+        except Exception as pair_err:
+            pair_detail["reason"] = f"Unexpected error: {pair_err}"
+            logger.exception("Error generating SQL pair %d: %s", i + 1, pair_err)
+            results["failed"] += 1
+            results["details"].append(pair_detail)
+
+    logger.info(
+        "Auto-generate SQL pairs complete: %d attempted, %d passed, %d failed",
+        results["attempted"],
+        results["passed"],
+        results["failed"],
+    )
+    return results
+
+
+def _parse_question_sql_response(response_text: str) -> tuple[str | None, str | None]:
+    """Parse QUESTION: and SQL: from LLM response text.
+
+    Returns:
+        Tuple of (question, sql) or (None, None) if parsing fails.
+    """
+    question = None
+    sql = None
+
+    # Try structured QUESTION:/SQL: format (tolerates markdown bold in various positions)
+    q_match = re.search(r"\*{0,2}QUESTION\*{0,2}:\s*(.+?)(?=\n\*{0,2}SQL\*{0,2}:)", response_text, re.DOTALL | re.IGNORECASE)
+    s_match = re.search(r"(?:^|\n)\*{0,2}SQL\*{0,2}:\s*(.+)", response_text, re.DOTALL | re.IGNORECASE)
+
+    if q_match and s_match:
+        question = q_match.group(1).strip().strip("*").strip()
+        sql = s_match.group(1).strip().strip("*").strip()
+        # Clean up SQL -- remove markdown fencing (```sql ... ```)
+        sql = re.sub(r"^```(?:sql)?\s*", "", sql)
+        sql = re.sub(r"\s*```\s*$", "", sql)
+        sql = sql.strip()
+
+    if question and sql:
+        return question, sql
+
+    return None, None
+
+
 def train_ddl_describe_to_rag(table: str, ddl: list):
     """
     Generate statistical profiles for table columns and train RAG model with the insights.
