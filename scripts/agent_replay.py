@@ -39,7 +39,6 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from datetime import date, datetime  # noqa: E402
 
-from agent.audit import AuditLogger  # noqa: E402
 from agent.db.analytics_adapter import AnalyticsDbAdapter  # noqa: E402
 from agent.deps import AgentDeps, SelectedPatient  # noqa: E402
 from agent.rag.chroma_adapter import ChromaRagAdapter  # noqa: E402
@@ -176,12 +175,7 @@ def _build_deps(role: str) -> AgentDeps:
         analytics_db=analytics_db,
         rag=rag,
         sqlite_session=sqlite_session,
-        audit_logger=AuditLogger(
-            session=sqlite_session,
-            session_id=session_id,
-            user_id=0,
-            user_role=int(user_role.value),
-        ),
+        run_logger=None,
     )
 
 

@@ -26,7 +26,7 @@ def deps_factory(synthetic_db):
             analytics_db=adapter,
             rag=None,
             sqlite_session=None,
-            audit_logger=MagicMock(),
+            run_logger=MagicMock(),
         )
 
     return _make

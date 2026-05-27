@@ -48,6 +48,9 @@ class FinalResponseEvent(BaseModel):
     # this module's public surface; the runtime treats it as an opaque
     # list of pydantic-ai ModelMessage instances.
     all_messages: list[Any] = Field(default_factory=list)
+    # Token usage for this run, from pydantic-ai run.usage(). None when the
+    # provider doesn't report usage. Keys: input_tokens, output_tokens, total_tokens.
+    usage: Optional[dict] = None
 
     model_config = {"arbitrary_types_allowed": True}
 

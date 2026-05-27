@@ -84,7 +84,7 @@ def _deps(engine):
         analytics_db=AnalyticsDbAdapter(engine=engine, dialect="sqlite"),
         rag=MagicMock(),
         sqlite_session=None,
-        audit_logger=MagicMock(),
+        run_logger=MagicMock(),
     )
 
 

@@ -38,11 +38,30 @@ def render_patient_chooser(message, index: int) -> None:
             _format_match(m),
             key=f"chooser-msg{msg_id}-{i}-{m.get('source_id')}",
         ):
+            previous_source_id = st.session_state.get("selected_patient_source_id")
+            parent_run_id = st.session_state.get("agent_current_run_id")
             st.session_state["selected_patient_source_id"] = m["source_id"]
             st.session_state["selected_patient_display_name"] = m.get("display_name", "")
             st.session_state["selected_patient_dob"] = m.get("dob")
             st.session_state["selection_origin"] = "user_click"
             st.session_state["selected_at"] = datetime.now().isoformat()
+            try:
+                from orm.agent_logging_functions import log_patient_selection
+
+                log_patient_selection(
+                    session_id=st.session_state.get("agent_session_id", ""),
+                    user_id=int(st.session_state.get("user_id") or 0),
+                    source_id=m["source_id"],
+                    display_name=m.get("display_name", ""),
+                    selection_origin="user_click",
+                    action="selected",
+                    previous_source_id=previous_source_id,
+                    run_id=parent_run_id,
+                )
+            except Exception:
+                pass
+            st.session_state["agent_parent_run_id"] = parent_run_id
+            st.session_state["agent_resume_reason"] = "patient_selection_resume"
             # Re-fire the original question so the agent continues with
             # the slot now filled. agent.runtime stashes this before each
             # run; if missing (e.g. stale chooser from a prior session),
