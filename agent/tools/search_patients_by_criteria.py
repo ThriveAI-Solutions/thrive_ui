@@ -119,6 +119,12 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from agent.dataframe_adapters import cohort_result_to_df
 from agent.db.queries.cohort import cohort_sql
+from agent.db.queries.cohort_breakdown import (
+    MissingDiagnosisAnchorError,
+    breakdown_bucket,
+    cohort_breakdown_sql,
+)
+from agent.db.sql_literals import inline_sql_literals
 from agent.deps import AgentDeps
 
 
@@ -136,6 +142,11 @@ _RELIABILITY_GEO = (
     "in casing and abbreviation; substring matching handles common cases but "
     "may miss heavily abbreviated forms. State filtering matches 'NY'-style "
     "codes; addresses recorded as 'NEW YORK' may be missed."
+)
+_NON_ADDITIVE_NOTE = (
+    "This breakdown counts distinct patients active in each bucket. A patient "
+    "with qualifying diagnoses in multiple periods appears in each — so buckets "
+    "OVERLAP and do not sum to the population total."
 )
 
 
@@ -173,6 +184,12 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
       - city: city name, case-insensitive substring match (city strings vary by source).
       - state: 2-letter USPS code, exact match on uppercased input. May miss long-form 'NEW YORK'.
       - sample_size: 0-100; default 20. Set to 0 for count-only.
+      - breakdown: optional list of ONE dimension to group counts by —
+        diagnosis_month / diagnosis_quarter / diagnosis_year (require a
+        diagnosis anchor: codes or a date range; buckets overlap and don't
+        sum), gender, or age_band. Returns aggregate buckets instead of a
+        patient sample. Pass 2+ dimensions only to escalate: the tool then
+        returns a generated_sql template to extend in run_sql.
 
     Returns CohortResult with total_count + sample. The sample is truncated
     to sample_size; total_count carries the full population. When a code-based
@@ -181,6 +198,9 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     """
     adapter = ctx.deps.analytics_db
     schema_prefix = getattr(adapter, "schema_prefix", "")
+
+    if criteria.breakdown:
+        return _run_breakdown(ctx, criteria, adapter, schema_prefix)
 
     sql, params = cohort_sql(criteria, schema_prefix=schema_prefix)
     try:
@@ -266,6 +286,89 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
         data_availability="data_present",
         truncated=truncated,
         reliability_note=reliability,
+    )
+    ctx.deps.last_dataframe = cohort_result_to_df(result)
+    return result
+
+
+def _run_breakdown(ctx, criteria, adapter, schema_prefix):
+    dialect = getattr(adapter, "dialect", "postgres")
+
+    # Reuse the existing reliability note logic for coverage caveats.
+    reliability_parts: list[str] = []
+    _dr = criteria.diagnosis_date_range
+    _dr_active = _dr is not None and (_dr.start or _dr.end)
+    if criteria.diagnosis_codes or _dr_active:
+        reliability_parts.append(_RELIABILITY_DX)
+    elif criteria.medication_rxnorm_codes:
+        reliability_parts.append(_RELIABILITY_RX)
+    if criteria.zip_code or criteria.city or criteria.state:
+        reliability_parts.append(_RELIABILITY_GEO)
+
+    primary = criteria.breakdown[0]
+
+    # Build SQL for the primary dimension (also the escalation template).
+    try:
+        bucket_sql, total_sql, params = cohort_breakdown_sql(
+            criteria, primary, schema_prefix=schema_prefix, dialect=dialect
+        )
+    except MissingDiagnosisAnchorError as exc:
+        return CohortResult(
+            total_count=0,
+            sample=[],
+            data_availability="no_records_found",
+            buckets=[],
+            breakdown_status="missing_diagnosis_anchor",
+            notes_to_agent=str(exc),
+            reliability_note=" ".join(reliability_parts) or None,
+        )
+
+    handoff_sql = inline_sql_literals(bucket_sql, params)
+
+    # 2+ dimensions: do not execute; hand back the primary-dimension template.
+    if len(criteria.breakdown) > 1:
+        return CohortResult(
+            total_count=0,
+            sample=[],
+            data_availability="no_records_found",
+            buckets=[],
+            breakdown_status="unsupported_multi_dimension",
+            generated_sql=handoff_sql,
+            notes_to_agent=(
+                "search_patients_by_criteria supports a single breakdown dimension. "
+                "For a multi-dimensional breakdown, extend the SQL in generated_sql "
+                "using run_sql (add the extra column to SELECT and GROUP BY)."
+            ),
+            reliability_note=" ".join(reliability_parts) or None,
+        )
+
+    spec = breakdown_bucket(primary, dialect)
+    try:
+        rows = adapter.fetch_all(bucket_sql, params)
+        total = adapter.fetch_all(total_sql, params)
+    except SQLAlchemyError as exc:
+        raise ModelRetry(
+            f"Cohort breakdown query failed: {exc}. Try narrowing the criteria or report this limitation to the user."
+        ) from exc
+
+    buckets = [
+        BreakdownBucket(bucket_label=str(r["bucket_label"]), patient_count=int(r["patient_count"])) for r in rows
+    ]
+    total_count = int(total[0]["total_count"]) if total else 0
+    availability = "data_present" if total_count > 0 else "no_records_found"
+
+    if spec.non_additive:
+        reliability_parts.append(_NON_ADDITIVE_NOTE)
+
+    result = CohortResult(
+        total_count=total_count,
+        sample=[],
+        data_availability=availability,
+        buckets=buckets,
+        non_additive=spec.non_additive,
+        generated_sql=handoff_sql,
+        breakdown_status="single_dimension",
+        reliability_note=" ".join(reliability_parts) or None,
     )
     ctx.deps.last_dataframe = cohort_result_to_df(result)
     return result
