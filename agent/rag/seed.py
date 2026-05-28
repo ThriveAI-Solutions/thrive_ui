@@ -314,6 +314,30 @@ EXAMPLES_DOCS: List[_Doc] = [
             "and returns zero. Surface the geo reliability note from the result."
         ),
     },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'How many people had any diagnosis in 2024? Break it out by month.' "
+            "A: Call search_patients_by_criteria with "
+            "diagnosis_date_range={start:'2024-01-01', end:'2024-12-31'} and "
+            "breakdown=['diagnosis_month']. Do NOT write a run_sql GROUP BY. The "
+            "result returns one bucket per month; surface the note that buckets "
+            "count distinct active patients and OVERLAP (a patient diagnosed in "
+            "two months is counted in both, so months do not sum to the total)."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'Diabetic patients by gender.' "
+            "A: search_patients_by_criteria(diagnosis_codes=['E11.9'], "
+            "breakdown=['gender']). Gender is single-valued so buckets sum to the "
+            "total. For TWO dimensions (e.g. month AND gender) the tool returns a "
+            "generated_sql template to extend in run_sql."
+        ),
+    },
 ]
 
 

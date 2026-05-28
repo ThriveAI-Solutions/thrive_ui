@@ -50,12 +50,15 @@ def run_sql_result_to_df(result: "RunSqlResult") -> pd.DataFrame:
 
 
 def cohort_result_to_df(result: "CohortResult") -> pd.DataFrame:
-    """Flatten CohortResult.sample into a DataFrame with the
-    canonical cohort columns.
+    """Flatten a CohortResult into a DataFrame.
 
-    Empty sample returns a zero-row DataFrame (consistent with the
-    other adapters in this module).
+    Breakdown results (non-empty `buckets`) take precedence and render as
+    one row per bucket — the per-patient sample is suppressed in breakdown
+    mode. Otherwise flatten `sample`. Empty either way returns a zero-row
+    DataFrame (consistent with the other adapters in this module).
     """
+    if getattr(result, "buckets", None):
+        return pd.DataFrame([b.model_dump(mode="json") for b in result.buckets])
     if not result.sample:
         return pd.DataFrame()
     return pd.DataFrame([match.model_dump(mode="json") for match in result.sample])

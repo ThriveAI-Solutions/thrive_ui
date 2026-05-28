@@ -43,74 +43,55 @@ def _state_aliases(state_input: str) -> tuple[str, ...]:
     return _STATE_ALIAS_MAP.get(key, (key,))
 
 
-def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
-    """Build the SELECT for search_patients_by_criteria.
-
-    `criteria` is a CohortCriteria (defined in agent/tools/search_patients_by_criteria.py).
-    It is duck-typed here so the SQL builder can be unit-tested against a
-    minimal namespace without importing the tool module.
-
-    Returns (sql, params). The caller passes both into adapter.fetch_all.
+def _has_diagnosis_criterion(criteria) -> bool:
+    """True when a diagnosis filter is active: codes and/or an active date window.
+    An all-None diagnosis_date_range carries no filter and does not count.
     """
-    # A diagnosis_date_range with a start or end bound is a standalone
-    # criterion ("any diagnosis in this window"); an all-None DateRange
-    # carries no filter and does not count.
     _dr = getattr(criteria, "diagnosis_date_range", None)
     _dr_active = _dr is not None and (getattr(_dr, "start", None) or getattr(_dr, "end", None))
+    return bool(getattr(criteria, "diagnosis_codes", None) or _dr_active)
 
-    if not any(
-        (
-            getattr(criteria, "diagnosis_codes", None),
-            _dr_active,
-            getattr(criteria, "medication_rxnorm_codes", None),
-            getattr(criteria, "condition_text", None),
-            getattr(criteria, "age_min", None) is not None,
-            getattr(criteria, "age_max", None) is not None,
-            getattr(criteria, "gender", None),
-            getattr(criteria, "facility", None),
-            getattr(criteria, "last_visit_after", None),
-            getattr(criteria, "last_visit_before", None),
-            getattr(criteria, "zip_code", None),
-            getattr(criteria, "city", None),
-            getattr(criteria, "state", None),
-        )
-    ):
-        raise ValueError("cohort_sql requires at least one search criterion; refusing to issue an unfiltered scan.")
+
+def _diagnosis_event_where(criteria) -> tuple[list[str], dict] | None:
+    """Build the WHERE fragment for the diagnosis-event subquery.
+
+    Returns (filter_clauses, params) when a diagnosis criterion is active
+    (codes and/or an active date window), else None. Shared by cohort_sql
+    (DISTINCT patient_id join) and the breakdown builder (event-level join
+    that preserves start_date). Param keys: dx_<i>, dx_start, dx_end.
+    """
+    _dr = getattr(criteria, "diagnosis_date_range", None)
+    _dr_active = _dr is not None and (getattr(_dr, "start", None) or getattr(_dr, "end", None))
+    if not _has_diagnosis_criterion(criteria):
+        return None
 
     params: dict = {}
+    dx_filter = ["code_type IN ('ICD-10', 'ICD10', 'SNOMED')"]
+    if getattr(criteria, "diagnosis_codes", None):
+        codes = list(criteria.diagnosis_codes)
+        placeholders = ", ".join(f":dx_{i}" for i in range(len(codes)))
+        for i, c in enumerate(codes):
+            params[f"dx_{i}"] = c
+        dx_filter.insert(0, f"code IN ({placeholders})")
+    if _dr_active:
+        if getattr(_dr, "start", None):
+            dx_filter.append("start_date >= :dx_start")
+            params["dx_start"] = _dr.start.isoformat()
+        if getattr(_dr, "end", None):
+            dx_filter.append("start_date <= :dx_end")
+            params["dx_end"] = _dr.end.isoformat()
+    return dx_filter, params
+
+
+def _build_non_diagnosis_filters(criteria, schema_prefix: str) -> tuple[list[str], list[str], dict]:
+    """Build (join_clauses, where_clauses, params) for everything except
+    the diagnosis filter. Shared by cohort_sql and the breakdown builder so
+    geo/demographic/medication logic lives in exactly one place.
+    """
+    params: dict = {}
     join_clauses: list[str] = []
-    # 1=1 is a structural placeholder so the WHERE always parses when
-    # only JOIN-based filters (codes) are active. The criterion guard
-    # above guarantees this is never an unfiltered scan.
-    where_clauses: list[str] = ["1=1"]
+    where_clauses: list[str] = []
 
-    # --- diagnosis: codes and/or date window --------------------------
-    # The diagnosis JOIN fires when codes are given, a date window is given,
-    # or both. With only a window we drop the code IN clause and count any
-    # ICD-10/SNOMED problem whose start_date falls in range; medication rows
-    # (RxNorm/NDC) are excluded by the code_type filter so "any diagnosis"
-    # never counts a prescription.
-    if getattr(criteria, "diagnosis_codes", None) or _dr_active:
-        dx_filter = ["code_type IN ('ICD-10', 'ICD10', 'SNOMED')"]
-        if getattr(criteria, "diagnosis_codes", None):
-            codes = list(criteria.diagnosis_codes)
-            placeholders = ", ".join(f":dx_{i}" for i in range(len(codes)))
-            for i, c in enumerate(codes):
-                params[f"dx_{i}"] = c
-            dx_filter.insert(0, f"code IN ({placeholders})")
-        if _dr_active:
-            if getattr(_dr, "start", None):
-                dx_filter.append("start_date >= :dx_start")
-                params["dx_start"] = _dr.start.isoformat()
-            if getattr(_dr, "end", None):
-                dx_filter.append("start_date <= :dx_end")
-                params["dx_end"] = _dr.end.isoformat()
-        join_clauses.append(
-            f"JOIN (SELECT DISTINCT patient_id FROM {schema_prefix}metric_federated_data_v "
-            f"WHERE {' AND '.join(dx_filter)}) dx ON dx.patient_id = p.patient_id"
-        )
-
-    # --- medication codes ---------------------------------------------
     if getattr(criteria, "medication_rxnorm_codes", None):
         codes = list(criteria.medication_rxnorm_codes)
         placeholders = ", ".join(f":med_{i}" for i in range(len(codes)))
@@ -122,32 +103,19 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
             f"AND code_type IN ('RxNorm', 'NDC')) med ON med.patient_id = p.patient_id"
         )
 
-    # --- geographic filters (direct on internal_patient_profile_v) -----
-    # Live probe (May 2026) confirmed zip_code/city/state are structured
-    # columns on internal_patient_profile_v with 100% zip coverage. No
-    # JOIN to federated_demographic_v is needed; that view has the same
-    # data but the cohort path already lands on internal_patient_profile_v.
     if getattr(criteria, "zip_code", None):
         where_clauses.append("p.zip_code = :geo_zip")
         params["geo_zip"] = criteria.zip_code
     if getattr(criteria, "city", None):
-        # City strings are inconsistent ("BUFFALO" vs "Buffalo" vs "TN OF TONA");
-        # case-insensitive substring is the safest match.
         where_clauses.append("LOWER(p.city) LIKE :geo_city")
         params["geo_city"] = f"%{criteria.city.lower()}%"
     if getattr(criteria, "state", None):
-        # internal_patient_profile_v.state holds both 2-letter codes
-        # ("NY") and full names ("NEW YORK") inconsistently. Match either
-        # form when we can map the input to its alias; fall back to a
-        # single-form exact match for unknown inputs. Without this,
-        # state="NY" silently misses every "NEW YORK" row and vice versa.
         forms = _state_aliases(criteria.state)
         placeholders = ", ".join(f":geo_state_{i}" for i in range(len(forms)))
         where_clauses.append(f"UPPER(p.state) IN ({placeholders})")
         for i, form in enumerate(forms):
             params[f"geo_state_{i}"] = form
 
-    # --- demographic / visit filters ----------------------------------
     if getattr(criteria, "age_min", None) is not None:
         where_clauses.append("p.age >= :age_min")
         params["age_min"] = criteria.age_min
@@ -170,6 +138,56 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
         where_clauses.append("LOWER(p.conditions) LIKE :cond_text")
         params["cond_text"] = f"%{criteria.condition_text.lower()}%"
 
+    return join_clauses, where_clauses, params
+
+
+def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
+    """Build the SELECT for search_patients_by_criteria.
+
+    `criteria` is a CohortCriteria (defined in agent/tools/search_patients_by_criteria.py).
+    It is duck-typed here so the SQL builder can be unit-tested against a
+    minimal namespace without importing the tool module.
+
+    Returns (sql, params). The caller passes both into adapter.fetch_all.
+    """
+    if not any(
+        (
+            _has_diagnosis_criterion(criteria),
+            getattr(criteria, "medication_rxnorm_codes", None),
+            getattr(criteria, "condition_text", None),
+            getattr(criteria, "age_min", None) is not None,
+            getattr(criteria, "age_max", None) is not None,
+            getattr(criteria, "gender", None),
+            getattr(criteria, "facility", None),
+            getattr(criteria, "last_visit_after", None),
+            getattr(criteria, "last_visit_before", None),
+            getattr(criteria, "zip_code", None),
+            getattr(criteria, "city", None),
+            getattr(criteria, "state", None),
+        )
+    ):
+        raise ValueError("cohort_sql requires at least one search criterion; refusing to issue an unfiltered scan.")
+
+    params: dict = {}
+    join_clauses: list[str] = []
+    # 1=1 is a structural placeholder so the WHERE always parses when
+    # only JOIN-based filters (codes) are active.
+    where_clauses: list[str] = ["1=1"]
+
+    dx = _diagnosis_event_where(criteria)
+    if dx is not None:
+        dx_filter, dx_params = dx
+        params.update(dx_params)
+        join_clauses.append(
+            f"JOIN (SELECT DISTINCT patient_id FROM {schema_prefix}metric_federated_data_v "
+            f"WHERE {' AND '.join(dx_filter)}) dx ON dx.patient_id = p.patient_id"
+        )
+
+    other_joins, other_where, other_params = _build_non_diagnosis_filters(criteria, schema_prefix)
+    join_clauses.extend(other_joins)
+    where_clauses.extend(other_where)
+    params.update(other_params)
+
     sample_size = getattr(criteria, "sample_size", 20)
     join_block = "\n        ".join(join_clauses)
     where_block = " AND ".join(where_clauses)
@@ -180,10 +198,15 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
         # window over the full result before applying the LIMIT, which
         # for broad cohorts (e.g. all-NY + 3 diagnosis codes) can run
         # for many minutes. A pure aggregate is cheap regardless of
-        # population size and never touches per-source-id fan-out from
-        # the isr join (so the count is unique-people, not source-rows).
+        # population size.
+        #
+        # Count distinct source_id (the EMPI-resolved canonical person
+        # identifier, ~1 per person). Using patient_id here would
+        # over-count people who have multiple internal patient_ids. This
+        # matches the sample path's COUNT(*) OVER () grain and the
+        # breakdown path's COUNT(DISTINCT source_id).
         sql = f"""
-            SELECT COUNT(DISTINCT p.patient_id) AS total_count
+            SELECT COUNT(DISTINCT isr.source_id) AS total_count
             FROM {schema_prefix}internal_patient_profile_v p
             JOIN {schema_prefix}internal_source_reference_v isr
               ON isr.patient_id = p.patient_id

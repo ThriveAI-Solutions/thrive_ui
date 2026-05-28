@@ -14,7 +14,6 @@ shape rules:
 from __future__ import annotations
 from datetime import date
 import pandas as pd
-import pytest
 
 from agent.dataframe_adapters import (
     clinical_result_to_df,
@@ -203,3 +202,29 @@ def test_cohort_result_to_df_empty_sample():
     df = cohort_result_to_df(result)
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 0
+
+
+def test_cohort_df_uses_buckets_when_present():
+    from agent.dataframe_adapters import cohort_result_to_df
+    from agent.tools.search_patients_by_criteria import BreakdownBucket, CohortResult
+
+    r = CohortResult(
+        total_count=5,
+        sample=[],
+        data_availability="data_present",
+        buckets=[
+            BreakdownBucket(bucket_label="F", patient_count=3),
+            BreakdownBucket(bucket_label="M", patient_count=2),
+        ],
+    )
+    df = cohort_result_to_df(r)
+    assert list(df.columns) == ["bucket_label", "patient_count"]
+    assert len(df) == 2
+
+
+def test_cohort_df_empty_when_no_sample_no_buckets():
+    from agent.dataframe_adapters import cohort_result_to_df
+    from agent.tools.search_patients_by_criteria import CohortResult
+
+    r = CohortResult(total_count=0, sample=[], data_availability="no_records_found")
+    assert cohort_result_to_df(r).empty

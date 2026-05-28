@@ -536,10 +536,9 @@ class AgenticRunner:
                                     # don't depend on the LLM attaching an artifact.
                                     if info["tool_name"] == "search_patients_by_criteria":
                                         payload = _to_jsonable(result_content)
-                                        if (
-                                            isinstance(payload, dict)
-                                            and isinstance(payload.get("sample"), list)
-                                            and len(payload["sample"]) > 0
+                                        if isinstance(payload, dict) and (
+                                            (isinstance(payload.get("sample"), list) and payload["sample"])
+                                            or (isinstance(payload.get("buckets"), list) and payload["buckets"])
                                         ):
                                             yield CohortSampleEvent(payload=payload)
 

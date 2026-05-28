@@ -399,3 +399,95 @@ def test_dx_plus_geo_concatenates_both_notes(synthetic_db):
     )
     assert _RELIABILITY_DX in (out.reliability_note or "")
     assert _RELIABILITY_GEO in (out.reliability_note or "")
+
+
+def test_criteria_accepts_breakdown_list():
+    from agent.db.queries.cohort_breakdown import BreakdownDimension
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    c = CohortCriteria(gender="F", breakdown=[BreakdownDimension.GENDER])
+    assert c.breakdown == [BreakdownDimension.GENDER]
+
+
+def test_criteria_breakdown_defaults_empty():
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    c = CohortCriteria(gender="F")
+    assert c.breakdown == []
+
+
+def test_cohort_result_carries_breakdown_fields():
+    from agent.tools.search_patients_by_criteria import BreakdownBucket, CohortResult
+
+    r = CohortResult(
+        total_count=3,
+        sample=[],
+        data_availability="data_present",
+        buckets=[BreakdownBucket(bucket_label="F", patient_count=3)],
+        non_additive=False,
+        generated_sql="SELECT 1",
+        breakdown_status="single_dimension",
+    )
+    assert r.buckets[0].patient_count == 3
+    assert r.non_additive is False
+    assert r.breakdown_status == "single_dimension"
+
+
+def _ctx(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected=None)
+    return ctx
+
+
+def test_single_gender_breakdown_returns_buckets(synthetic_db):
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+    from agent.db.queries.cohort_breakdown import BreakdownDimension
+
+    crit = CohortCriteria(age_min=0, breakdown=[BreakdownDimension.GENDER])
+    result = search_patients_by_criteria(_ctx(synthetic_db), crit)
+    assert result.breakdown_status == "single_dimension"
+    assert result.buckets, "expected gender buckets"
+    assert result.sample == [], "sample suppressed in breakdown mode"
+    assert result.non_additive is False
+    assert result.generated_sql and ":age_min" not in result.generated_sql
+
+
+def test_diagnosis_month_breakdown_is_non_additive(synthetic_db):
+    from datetime import date
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+    from agent.db.queries.cohort_breakdown import BreakdownDimension
+
+    crit = CohortCriteria(
+        diagnosis_date_range={"start": date(2025, 1, 1), "end": date(2025, 12, 31)},
+        breakdown=[BreakdownDimension.DIAGNOSIS_MONTH],
+    )
+    result = search_patients_by_criteria(_ctx(synthetic_db), crit)
+    assert result.non_additive is True
+    assert result.reliability_note and "do not sum" in result.reliability_note.lower()
+
+
+def test_two_dimensions_escalates_without_executing(synthetic_db):
+    from datetime import date
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+    from agent.db.queries.cohort_breakdown import BreakdownDimension
+
+    crit = CohortCriteria(
+        diagnosis_date_range={"start": date(2025, 1, 1), "end": date(2025, 12, 31)},
+        breakdown=[BreakdownDimension.DIAGNOSIS_MONTH, BreakdownDimension.GENDER],
+    )
+    result = search_patients_by_criteria(_ctx(synthetic_db), crit)
+    assert result.breakdown_status == "unsupported_multi_dimension"
+    assert result.buckets == []
+    assert result.generated_sql, "must hand back a template for the first dimension"
+    assert result.notes_to_agent and "run_sql" in result.notes_to_agent
+
+
+def test_time_breakdown_missing_anchor_signals(synthetic_db):
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+    from agent.db.queries.cohort_breakdown import BreakdownDimension
+
+    crit = CohortCriteria(gender="F", breakdown=[BreakdownDimension.DIAGNOSIS_MONTH])
+    result = search_patients_by_criteria(_ctx(synthetic_db), crit)
+    assert result.breakdown_status == "missing_diagnosis_anchor"
+    assert result.buckets == []
+    assert result.notes_to_agent and "diagnosis" in result.notes_to_agent.lower()

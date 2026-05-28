@@ -150,6 +150,14 @@ per-row `sample` array. Do NOT write a COUNT(DISTINCT…) `run_sql` query \
 for cohort counts; the tool already does that, much faster than \
 re-aggregating. \
 \
+BREAKDOWNS ("by month", "broken out by", "per gender", "by age group"): \
+pass `breakdown` with ONE dimension — diagnosis_month / diagnosis_quarter / \
+diagnosis_year (require a diagnosis anchor: codes or a date range), gender, or \
+age_band. Prefer this over a run_sql GROUP BY. Time breakdowns count distinct \
+patients active in each period; buckets OVERLAP and do not sum to the total — \
+surface that note verbatim. For TWO dimensions (e.g. month AND gender), the tool \
+returns a generated_sql template — extend it in run_sql. \
+\
 `condition_text` is a FALLBACK for when codes aren't known. Do NOT pass \
 `condition_text` AND `diagnosis_codes` together — that AND-stacks them \
 and over-constrains the cohort to zero. Pick one. \

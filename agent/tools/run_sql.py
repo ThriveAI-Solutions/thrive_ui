@@ -111,8 +111,10 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
     """Execute a read-only SELECT / WITH against the analytics warehouse.
 
     Use this when the curated clinical tools cannot answer the question
-    (e.g., joining across domains in a non-standard way, ad-hoc aggregations).
-    Prefer get_patient_clinical_data for any per-patient clinical question.
+    (e.g., joining across domains in a non-standard way, multi-dimensional
+    or unsupported breakdowns). Prefer get_patient_clinical_data for any
+    per-patient clinical question, and prefer search_patients_by_criteria
+    with `breakdown` for single-dimension population breakdowns.
 
     Results are capped at 500 rows. If truncated, refine the query for
     a smaller result.
