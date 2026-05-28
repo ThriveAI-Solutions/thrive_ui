@@ -144,7 +144,7 @@ def cohort_breakdown_sql(
     from_block = (
         f"FROM {schema_prefix}internal_patient_profile_v p\n"
         f"        JOIN {schema_prefix}internal_source_reference_v isr\n"
-        f"          ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+        f"          ON isr.patient_id = p.patient_id AND isr.empi_rank = 1\n"
         f"        {join_block}\n"
         f"        WHERE {where_block}"
     )

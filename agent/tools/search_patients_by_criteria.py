@@ -130,7 +130,9 @@ from agent.deps import AgentDeps
 
 _RELIABILITY_DX = (
     "ICD-10 coverage in problems ~57%; SNOMED ~25%. Counts are best-effort. "
-    "Some matches may come from claims data refreshed monthly; clinical events refresh bi-weekly."
+    "Some matches may come from claims data refreshed monthly; clinical events refresh bi-weekly. "
+    "Patient counts use each person's current primary identity (CID); historical "
+    "record merges are not back-propagated, so counts are approximate."
 )
 _RELIABILITY_RX = (
     "RxNorm + NDC coverage in medications is ~100%, but cohort counts are still "

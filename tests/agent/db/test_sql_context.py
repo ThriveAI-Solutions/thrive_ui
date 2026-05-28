@@ -12,6 +12,10 @@ import pytest
 from agent.db.sql_context import schema_context_for_sql
 from agent.rag.seed import SCHEMA_DOCS
 
+# Bounds the SCHEMA BLOCK in isolation. The full LLM-visible run_sql
+# description is base docstring + "\n\n" + this block; that assembled string
+# is guarded separately by test_assembled_description_under_budget in
+# tests/agent/tools/test_run_sql_description.py.
 _BUDGET_CHARS = 6000
 
 
