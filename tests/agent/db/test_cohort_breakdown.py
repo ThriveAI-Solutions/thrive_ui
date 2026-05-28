@@ -80,6 +80,13 @@ def test_gender_breakdown_buckets_sum_to_total(synthetic_db):
         total = conn.execute(text(total_sql), params).scalar()
     by_count = {r._mapping["bucket_label"]: r._mapping["patient_count"] for r in buckets}
     assert sum(by_count.values()) == total, "single-valued gender must be additive"
+    # Per-person grain: the isr join uses empi_rank = 1 (one current primary
+    # CID per person), so the 8 synthetic patients count as 8 people total —
+    # John 1962's rank-2 merged CID is deduped. (empi_rank != 99 would count
+    # his rank-1 + rank-2 CIDs as 9, over-counting the M bucket.)
+    assert total == 8, f"expected 8 distinct people (rank-1 primary CID), got {total}"
+    assert by_count.get("M") == 4, f"M = patients 1,2,5,7 counted once each; got {by_count.get('M')}"
+    assert by_count.get("F") == 4, f"F = patients 3,4,6,8; got {by_count.get('F')}"
 
 
 def test_diagnosis_month_breakdown_groups_by_month(synthetic_db):
@@ -94,6 +101,27 @@ def test_diagnosis_month_breakdown_groups_by_month(synthetic_db):
     assert "2025-06" in labels
     assert "2025-09" in labels
     assert all(lbl.startswith("2025-") for lbl in labels)
+
+
+def test_diagnosis_month_breakdown_dedups_multi_event(synthetic_db):
+    """Within-bucket multi-event dedup: Susan (patient 8) has TWO E11.9 rows
+    in 2025-12 (enc-8 + enc-8b). The month join fans her out to two rows in
+    that bucket, but COUNT(DISTINCT source_id) must collapse them to one
+    person — not double-count a patient who saw a provider twice in a month.
+    This is the most likely way an event-join could reintroduce a duplicate."""
+    crit = _crit(
+        diagnosis_codes=["E11.9"],
+        diagnosis_date_range=SimpleNamespace(start=date(2025, 1, 1), end=date(2025, 12, 31)),
+    )
+    bucket_sql, total_sql, params = cohort_breakdown_sql(
+        crit, BreakdownDimension.DIAGNOSIS_MONTH, schema_prefix="", dialect="sqlite"
+    )
+    with synthetic_db.connect() as conn:
+        buckets = conn.execute(text(bucket_sql), params).fetchall()
+    by_count = {r._mapping["bucket_label"]: r._mapping["patient_count"] for r in buckets}
+    assert by_count.get("2025-12") == 1, (
+        f"Susan's two E11.9 events in 2025-12 must count as one person; got {by_count.get('2025-12')}"
+    )
 
 
 def test_time_breakdown_without_anchor_raises():

@@ -64,6 +64,24 @@ def test_prepare_handles_missing_analytics_db_gracefully():
     assert "internal_patient_profile_v" in out.description
 
 
+def test_assembled_description_under_budget():
+    """Guard the FULL LLM-visible description (base docstring + schema block),
+    not just the schema block in isolation. test_sql_context.py bounds only
+    schema_context_for_sql; but the hook ships base + "\\n\\n" + schema, and an
+    oversized description is what actually degrades small-model (gemma4:31b)
+    tool-name retention. Bounding the assembled string is the invariant that
+    matches reality. Budget has ~500 chars of headroom over current (~6.5k);
+    if it trips, trim SCHEMA_DOCS / RUN_SQL_EXAMPLES or the run_sql docstring."""
+    _ASSEMBLED_BUDGET_CHARS = 7000
+    for prefix in ("dw.", ""):
+        ctx = _make_ctx(prefix)
+        out = _run(_augment_run_sql_description(ctx, _base_tool_def()))
+        assert len(out.description) <= _ASSEMBLED_BUDGET_CHARS, (
+            f"assembled run_sql description grew past {_ASSEMBLED_BUDGET_CHARS} "
+            f"chars (got {len(out.description)} at prefix {prefix!r})"
+        )
+
+
 def test_prepare_is_idempotent_across_repeated_invocations():
     """Pydantic-ai re-uses the same ToolDefinition object across the model
     turns within one agent run. The hook MUST rebuild from a stable base

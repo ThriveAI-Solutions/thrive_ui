@@ -201,16 +201,19 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
         # population size.
         #
         # Count distinct source_id (the EMPI-resolved canonical person
-        # identifier, ~1 per person). Using patient_id here would
-        # over-count people who have multiple internal patient_ids. This
-        # matches the sample path's COUNT(*) OVER () grain and the
-        # breakdown path's COUNT(DISTINCT source_id).
+        # identifier). isr.empi_rank = 1 selects each person's current
+        # primary CID (one per person); counting source_id at rank 1 =
+        # distinct people. empi_rank != 99 would include legacy merged CIDs
+        # and over-count ~2x. Using patient_id here would over-count people
+        # who have multiple internal patient_ids. This matches the sample
+        # path's COUNT(*) OVER () grain and the breakdown path's
+        # COUNT(DISTINCT source_id).
         sql = f"""
             SELECT COUNT(DISTINCT isr.source_id) AS total_count
             FROM {schema_prefix}internal_patient_profile_v p
             JOIN {schema_prefix}internal_source_reference_v isr
               ON isr.patient_id = p.patient_id
-              AND isr.empi_rank != 99
+              AND isr.empi_rank = 1
             {join_block}
             WHERE {where_block}
         """
@@ -229,7 +232,7 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
         FROM {schema_prefix}internal_patient_profile_v p
         JOIN {schema_prefix}internal_source_reference_v isr
           ON isr.patient_id = p.patient_id
-          AND isr.empi_rank != 99
+          AND isr.empi_rank = 1
         {join_block}
         WHERE {where_block}
         LIMIT :sample_size_plus_one

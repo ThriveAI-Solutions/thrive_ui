@@ -175,6 +175,36 @@ def test_inactive_empi_rank_99_excluded(synthetic_db):
     assert "src-john-1962-stale" not in src_ids, f"empi_rank=99 row leaked; got {src_ids}"
 
 
+def test_multi_cid_person_counted_once_sample_path(synthetic_db):
+    """Dedup proof (sample path): John 1962 (patient_id=1) has a rank-1
+    primary CID, a rank-2 legacy/merged CID, and a rank-99 inactive CID.
+    The isr join selects empi_rank = 1, so a criterion matching ONLY that
+    person (zip 14223) returns exactly his single primary CID — not the
+    rank-2 src-john-1962-alt that empi_rank != 99 would have leaked in,
+    which over-counted the merged person ~2x."""
+    sql, params = cohort_sql(_make(zip_code="14223"), schema_prefix="")
+    with synthetic_db.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    src_ids = sorted(r._mapping["source_id"] for r in rows)
+    assert src_ids == ["src-john-1962"], f"multi-CID person must count once; got {src_ids}"
+    assert rows[0]._mapping["total_count"] == 1, (
+        f"total_count must be 1 person, not 2 historical CIDs; got {rows[0]._mapping['total_count']}"
+    )
+
+
+def test_multi_cid_person_counted_once_count_only_path(synthetic_db):
+    """Dedup proof (count-only fast path): the same single-person criterion
+    via sample_size=0 must return total_count == 1, not 2. empi_rank = 1
+    selects the one current primary CID per person."""
+    sql, params = cohort_sql(_make(zip_code="14223", sample_size=0), schema_prefix="")
+    with synthetic_db.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    assert len(rows) == 1
+    assert rows[0]._mapping["total_count"] == 1, (
+        f"count-only path must count the merged person once; got {rows[0]._mapping['total_count']}"
+    )
+
+
 def test_schema_prefix_applied(synthetic_db):
     """When schema_prefix='dw.', every view reference must be qualified."""
     sql, _ = cohort_sql(_make(diagnosis_codes=["E11.9"]), schema_prefix="dw.")
