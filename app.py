@@ -48,9 +48,12 @@ if _bootstrap_err is not None:
     st.error(f"Database initialization failed: {_bootstrap_err}")
     st.stop()
 
-# Initialize the cookie manager
+# Initialize the cookie manager. The prefix is configurable so that multiple
+# deployments behind the same hostname (e.g. prod at "/" and a dev instance at
+# "/dev") don't read each other's cookies — a shared prefix points one app at a
+# user_id that only exists in the other's database. Defaults to "thrive_ai_".
 st.session_state.cookies = EncryptedCookieManager(
-    prefix="thrive_ai_",
+    prefix=st.secrets["cookie"].get("prefix", "thrive_ai_"),
     password=st.secrets["cookie"]["password"],
 )
 
@@ -84,13 +87,19 @@ if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
         title="Feedback Dashboard",
         icon="💬",
     )
+    agent_analytics_page = st.Page(
+        page="views/agent_analytics.py",
+        title="Agentic Analytics",
+        icon="🧠",
+    )
     pages.append(analytics_page)
     pages.append(feedback_page)
+    pages.append(agent_analytics_page)
 
 pg = st.navigation(pages=pages)
 
 check_authenticate()
 
-initialize_discord_logging_after_streamlit(st.session_state.username)
+initialize_discord_logging_after_streamlit(st.session_state.get("username"))
 
 pg.run()

@@ -1,9 +1,10 @@
 """Tests for the asyncio bridge used in agent/runtime.py.
 
-Streamlit's script thread sometimes has a running event loop (Tornado),
-sometimes does not. The bridge must:
-- Detect a running loop and run the coroutine in a worker thread.
-- Otherwise use a fresh loop (asyncio.run-equivalent).
+The bridge runs a single persistent event loop forever on a dedicated daemon
+thread; callers on any thread submit coroutines with run_coroutine_threadsafe
+and block on the result. This keeps pydantic-ai's httpx transports bound to one
+live loop and lets concurrent Streamlit script threads share it without the
+"this event loop is already running" collision that run_until_complete caused.
 """
 
 import asyncio
@@ -65,6 +66,47 @@ def test_run_async_reuses_a_persistent_loop_across_calls():
     a = _run_async(get_loop_id())
     b = _run_async(get_loop_id())
     assert a == b
+
+
+def test_run_async_handles_concurrent_calls_from_multiple_threads():
+    """Regression for 'RuntimeError: this event loop is already running'.
+
+    Two Streamlit script threads can drive the shared loop at the same
+    time (two sessions, or a rerun firing while a long run is still
+    unwinding). The old bridge used asyncio.get_running_loop(), which
+    only sees a loop on the *current* thread, then called
+    run_until_complete on the shared loop — which raises if that loop is
+    already running on another thread. Concurrent calls must succeed.
+    """
+    import threading
+
+    from agent.runtime import _run_async
+
+    # Force overlap: both threads enter _run_async together and stay busy
+    # for the same window.
+    barrier = threading.Barrier(2)
+    results: dict[int, object] = {}
+    errors: dict[int, BaseException] = {}
+
+    async def work(tag: int) -> int:
+        await asyncio.sleep(0.3)
+        return tag
+
+    def run(tag: int) -> None:
+        barrier.wait()
+        try:
+            results[tag] = _run_async(work(tag))
+        except BaseException as exc:  # noqa: BLE001 - capture for assertion
+            errors[tag] = exc
+
+    threads = [threading.Thread(target=run, args=(i,)) for i in (0, 1)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors
+    assert results == {0: 0, 1: 1}
 
 
 def test_run_agentic_flow_closes_sqlite_session_on_exception(monkeypatch):

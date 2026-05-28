@@ -63,7 +63,7 @@ async def test_thinking_only_turn_emits_deltas_and_completed():
 
     runner = AgenticRunner(model=FunctionModel(stream_function=stream))
     deps = MagicMock(spec=AgentDeps)
-    deps.audit_logger = None
+    deps.run_logger = None
     deps.analytics_db = None
     deps.selected_patient = None
     deps.last_dataframe = None
@@ -105,7 +105,7 @@ async def test_text_deltas_emitted_for_plain_text_parts():
 
     runner = AgenticRunner(model=FunctionModel(stream_function=stream))
     deps = MagicMock(spec=AgentDeps)
-    deps.audit_logger = None
+    deps.run_logger = None
     deps.analytics_db = None
     deps.selected_patient = None
     deps.last_dataframe = None
@@ -140,7 +140,7 @@ async def test_no_thinking_no_text_emits_nothing_extra():
 
     runner = AgenticRunner(model=FunctionModel(stream_function=stream))
     deps = MagicMock(spec=AgentDeps)
-    deps.audit_logger = None
+    deps.run_logger = None
     deps.analytics_db = None
     deps.selected_patient = None
     deps.last_dataframe = None
@@ -197,7 +197,7 @@ async def test_turn_index_increments_across_model_requests():
     try:
         runner = AgenticRunner(model=FunctionModel(stream_function=stream))
         deps = MagicMock(spec=AgentDeps)
-        deps.audit_logger = None
+        deps.run_logger = None
         deps.analytics_db = None
         deps.selected_patient = None
         deps.last_dataframe = None

@@ -1,29 +1,30 @@
-import json
+"""Developer integration smoke test for the user-questions queries.
+
+This exercises get_user_recent_questions / get_user_questions_page against the
+local dev SQLite DB (./pgDatabase/db.sqlite3) and a known seeded user. It is
+inherently non-hermetic, so it skips cleanly when that DB or user isn't present
+(e.g. CI or a fresh checkout) rather than failing the suite.
+"""
+
 from pathlib import Path
 
-import streamlit as st
+import pytest
 
 from orm.functions import get_user_questions_page, get_user_recent_questions
 from orm.models import SessionLocal, User
 
 
-def _set_sqlite_for_tests(db_path: str):
-    # Override st.secrets sqlite to point to provided path
-    # Note: In this repo, orm.models reads st.secrets['sqlite'] at import time.
-    # So we refresh by reloading orm.models if needed.
-    st.secrets["sqlite"] = {"database": db_path}
-
-
 def test_recent_questions_for_known_user_kr():
-    db_file = str(Path("./pgDatabase/db.sqlite3").resolve())
-    assert Path(db_file).exists(), "Expected SQLite db at ./pgDatabase/db.sqlite3"
+    db_file = Path("./pgDatabase/db.sqlite3").resolve()
+    if not db_file.exists():
+        pytest.skip(f"Local SQLite DB not present at {db_file}; developer-only smoke test")
 
-    _set_sqlite_for_tests(db_file)
-
-    # Find user id for thriveai-kr
+    # orm.models.SessionLocal is already bound to the configured DB at import,
+    # so no secrets mutation is needed (and st.secrets is read-only anyway).
     with SessionLocal() as session:
         user = session.query(User).filter(User.username == "thriveai-kr").first()
-        assert user is not None, "User thriveai-kr must exist in the database"
+        if user is None:
+            pytest.skip("User 'thriveai-kr' not present in local DB; developer-only smoke test")
         user_id = user.id
 
     # Recent questions (deduped)
@@ -36,7 +37,7 @@ def test_recent_questions_for_known_user_kr():
     assert "items" in page and "total" in page
     items = page["items"]
     assert isinstance(items, list)
-    # When there is history for this user, we expect some items. If empty, this will still pass but be informative.
+    # When there is history for this user, we expect well-formed rows.
     if items:
         row = items[0]
         assert "question" in row and "created_at" in row

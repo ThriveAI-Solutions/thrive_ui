@@ -78,7 +78,7 @@ def _scripted_llm():
     return FunctionModel(behavior, model_name="scripted")
 
 
-def _deps(engine, audit_logger=None) -> AgentDeps:
+def _deps(engine, run_logger=None) -> AgentDeps:
     return AgentDeps(
         user_id=1,
         user_role=MagicMock(value=1),
@@ -90,7 +90,7 @@ def _deps(engine, audit_logger=None) -> AgentDeps:
         analytics_db=AnalyticsDbAdapter(engine=engine, dialect="sqlite"),
         rag=MagicMock(),
         sqlite_session=None,
-        audit_logger=audit_logger or MagicMock(),
+        run_logger=run_logger or MagicMock(),
     )
 
 
@@ -189,19 +189,19 @@ async def test_chooser_event_fires_before_final_response():
 
 
 @pytest.mark.asyncio
-async def test_stream_calls_audit_logger_once_per_tool_call():
+async def test_stream_calls_run_logger_once_per_tool_call():
     engine = _make_threadsafe_db()
-    audit_logger = MagicMock()
+    run_logger = MagicMock()
     runner = AgenticRunner(model=_scripted_llm())
-    deps = _deps(engine, audit_logger=audit_logger)
+    deps = _deps(engine, run_logger=run_logger)
     async for _ in runner.stream("Smith", deps=deps):
         pass
 
-    # Exactly one audit call for find_patient. final_result is the
-    # output-bearing tool and should not be audited.
-    audited_tools = [c.kwargs.get("tool_name") for c in audit_logger.log.call_args_list]
-    assert "find_patient" in audited_tools
-    assert "final_result" not in audited_tools
+    # Exactly one log_tool_completed call for find_patient. final_result is the
+    # output-bearing tool and should not be logged as a tool call.
+    logged_tools = [c.kwargs.get("tool_name") for c in run_logger.log_tool_completed.call_args_list]
+    assert logged_tools == ["find_patient"]
+    assert "final_result" not in logged_tools
 
 
 @pytest.mark.asyncio
@@ -236,7 +236,7 @@ async def test_completed_event_carries_reliability_note():
     runner._agent.tool(stub_tool)
 
     deps = MagicMock(spec=AgentDeps)
-    deps.audit_logger = None
+    deps.run_logger = None
     deps.selected_patient = None
 
     events = []

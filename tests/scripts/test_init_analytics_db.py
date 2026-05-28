@@ -43,10 +43,16 @@ def test_init_analytics_db_is_idempotent(tmp_path: Path) -> None:
     target = tmp_path / "analytics.sqlite3"
 
     init_analytics_db(target)
-    init_analytics_db(target)  # second run must not raise
-
     engine = create_engine(f"sqlite:///{target}")
     with engine.connect() as conn:
-        count = conn.execute(text("SELECT COUNT(*) FROM internal_patient_profile_v")).scalar()
-    # idempotent reseed should produce the same row count, not double it
-    assert count == 3
+        first = conn.execute(text("SELECT COUNT(*) FROM internal_patient_profile_v")).scalar()
+
+    init_analytics_db(target)  # second run must not raise
+    with engine.connect() as conn:
+        second = conn.execute(text("SELECT COUNT(*) FROM internal_patient_profile_v")).scalar()
+
+    # The seed drops-and-recreates, so a reseed must produce the same row count,
+    # not double it. Asserting against the first run (rather than a hardcoded
+    # literal) keeps this green as the synthetic seed data grows.
+    assert first and first > 0
+    assert second == first

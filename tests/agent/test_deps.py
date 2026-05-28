@@ -39,7 +39,7 @@ def test_agent_deps_construction():
         analytics_db=None,
         rag=None,
         sqlite_session=None,
-        audit_logger=None,
+        run_logger=None,
     )
     assert deps.user_id == 1
     assert deps.selected_patient is None

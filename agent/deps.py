@@ -52,4 +52,8 @@ class AgentDeps:
     analytics_db: object
     rag: object
     sqlite_session: "Session"
-    audit_logger: object
+    run_logger: object  # AgentRunLogger | None
+    group_id: Optional[str] = None
+    user_message_id: Optional[int] = None
+    parent_run_id: Optional[str] = None
+    resume_reason: Optional[str] = None

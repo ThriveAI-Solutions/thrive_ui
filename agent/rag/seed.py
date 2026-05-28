@@ -34,10 +34,11 @@ SCHEMA_DOCS: List[_Doc] = [
         "kind": "schema",
         "text": (
             "internal_source_reference_v: maps the warehouse-internal patient_id "
-            "(integer) to canonical source_id (varchar). Filter empi_rank != 99 "
-            "for active identities; rank 99 means inactive. One physical patient "
-            "may have multiple source_ids across rank 1, 2, 3 — these are the same "
-            "person under different source systems."
+            "(integer) to canonical source_id (varchar). empi_rank: 1 = current "
+            "primary CID (one per person); 2–10 = legacy/merged CIDs, same "
+            "person; 99 = inactive. Count PEOPLE: COUNT(DISTINCT source_id) at "
+            "empi_rank = 1. empi_rank != 99 returns ALL CIDs and over-counts "
+            "people ~2x — use only to gather a person's facts."
         ),
     },
     {
@@ -174,13 +175,13 @@ IDENTITY_DOCS: List[_Doc] = [
         "kind": "schema",
         "text": (
             "Patient identity (CRITICAL): the canonical patient identifier is "
-            "source_id (varchar). It is stable across insurance changes. "
+            "source_id (varchar), stable across insurance changes. "
             "There are TWO other patient_id columns: (1) federated_*_v.patient_id "
             "is varchar, per-source, changes with insurance — DO NOT aggregate on it. "
             "(2) internal_patient_profile_v.patient_id is integer, warehouse-internal "
-            "— used only for joins to internal_source_reference_v. Always filter "
-            "internal_source_reference_v with empi_rank != 99 to exclude inactive "
-            "identities."
+            "— used only for joins to internal_source_reference_v. To count distinct "
+            "PEOPLE, COUNT(DISTINCT source_id) at empi_rank = 1 (current primary "
+            "CID); empi_rank != 99 over-counts people."
         ),
     },
 ]
@@ -395,6 +396,30 @@ EXAMPLES_DOCS: List[_Doc] = [
             "and returns zero. Surface the geo reliability note from the result."
         ),
     },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'How many people had any diagnosis in 2024? Break it out by month.' "
+            "A: Call search_patients_by_criteria with "
+            "diagnosis_date_range={start:'2024-01-01', end:'2024-12-31'} and "
+            "breakdown=['diagnosis_month']. Do NOT write a run_sql GROUP BY. The "
+            "result returns one bucket per month; surface the note that buckets "
+            "count distinct active patients and OVERLAP (a patient diagnosed in "
+            "two months is counted in both, so months do not sum to the total)."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
+            "Q: 'Diabetic patients by gender.' "
+            "A: search_patients_by_criteria(diagnosis_codes=['E11.9'], "
+            "breakdown=['gender']). Gender is single-valued so buckets sum to the "
+            "total. For TWO dimensions (e.g. month AND gender) the tool returns a "
+            "generated_sql template to extend in run_sql."
+        ),
+    },
 ]
 
 
@@ -412,7 +437,7 @@ RUN_SQL_EXAMPLES: List[_Doc] = [
             "  SELECT isr.source_id, p.full_name, p.age, p.gender, p.last_date_of_visit\n"
             "  FROM {p}internal_patient_profile_v p\n"
             "  JOIN {p}internal_source_reference_v isr\n"
-            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+            "    ON isr.patient_id = p.patient_id AND isr.empi_rank = 1\n"
             "  JOIN (SELECT DISTINCT patient_id FROM {p}metric_federated_data_v\n"
             "        WHERE code = :icd10 AND code_type IN ('ICD-10','ICD10','SNOMED')) dx\n"
             "    ON dx.patient_id = p.patient_id\n"
@@ -429,7 +454,7 @@ RUN_SQL_EXAMPLES: List[_Doc] = [
             "  SELECT p.practice_name, COUNT(DISTINCT isr.source_id) AS patient_count\n"
             "  FROM {p}internal_patient_profile_v p\n"
             "  JOIN {p}internal_source_reference_v isr\n"
-            "    ON isr.patient_id = p.patient_id AND isr.empi_rank != 99\n"
+            "    ON isr.patient_id = p.patient_id AND isr.empi_rank = 1\n"
             "  WHERE p.last_date_of_visit >= :since\n"
             "  GROUP BY p.practice_name\n"
             "  ORDER BY patient_count DESC;"

@@ -5,6 +5,14 @@ pymilvus = pytest.importorskip("pymilvus")
 from utils.milvus_vector import ThriveAI_Milvus
 
 
+@pytest.fixture(autouse=True)
+def _enable_role_restriction(monkeypatch):
+    """Force role-restricted RAG retrieval ON. The dev .streamlit/secrets.toml
+    sets security.restrict_rag_by_role = false, which collapses every effective
+    role to 0 and defeats the role-filter assertions below."""
+    monkeypatch.setattr(ThriveAI_Milvus, "_is_role_restriction_enabled", lambda self: True)
+
+
 def _make_store(tmp_path, role: int):
     return ThriveAI_Milvus(
         user_role=role,

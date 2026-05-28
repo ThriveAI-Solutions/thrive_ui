@@ -108,6 +108,14 @@ def set_user_preferences_in_session_state():
         user_id = json.loads(user_id_str)
         user = get_user(user_id)
 
+        # Cookie points to a user_id that no longer exists (e.g. the SQLite DB
+        # was recreated/migrated and IDs shifted). Treat as not-loaded so the
+        # caller can clear the stale cookie and re-prompt for login, instead of
+        # cascading into a series of 'NoneType' attribute errors.
+        if user is None:
+            logger.warning("Cookie user_id %s does not resolve to a user; treating as logged out.", user_id)
+            return None
+
         # if "loaded" not in st.session_state:
         st.session_state.show_sql = user.show_sql
         st.session_state.show_table = user.show_table
@@ -122,7 +130,8 @@ def set_user_preferences_in_session_state():
         st.session_state.show_elapsed_time = user.show_elapsed_time
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.confirm_magic_commands = getattr(user, "confirm_magic_commands", True)
-        st.session_state.agentic_mode = bool(getattr(user, "agentic_mode", False))
+        agentic_pref = getattr(user, "agentic_mode", True)
+        st.session_state.agentic_mode = bool(agentic_pref) if agentic_pref is not None else True
         st.session_state.min_message_id = user.min_message_id
         st.session_state.user_role = user.role.role.value
         st.session_state.user_theme = user.theme
@@ -195,6 +204,14 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
         bool: True if user was created successfully, False otherwise
     """
     try:
+        # Trim surrounding whitespace so a stray space (e.g. typed into the
+        # admin create-user form) can't silently break login — credential
+        # checks match on the exact stored username. Password is intentionally
+        # left untouched.
+        username = (username or "").strip()
+        first_name = (first_name or "").strip()
+        last_name = (last_name or "").strip()
+
         with SessionLocal() as session:
             # Check if username already exists
             existing_user = session.query(User).filter(func.lower(User.username) == username.lower()).first()

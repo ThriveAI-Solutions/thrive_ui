@@ -38,6 +38,17 @@ def _handle_local_auth():
             expiry_date = datetime.fromisoformat(expiry_date_str)
             user = set_user_preferences_in_session_state()
 
+            # Cookie present but its user_id no longer resolves to a user
+            # (stale cookie after a DB recreate/migrate). Clear the stale
+            # cookie and fall back to the login form rather than dereferencing
+            # a None user below.
+            if user is None:
+                st.session_state.cookies["user_id"] = ""
+                st.session_state.cookies["expiry_date"] = ""
+                st.session_state.cookies.save()
+                _show_local_login()
+                return
+
             # Ensure VannaService instance is cleared when switching users.
             if "_vn_instance" in st.session_state and st.session_state._vn_instance is not None:
                 import json

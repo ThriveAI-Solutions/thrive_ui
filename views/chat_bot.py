@@ -61,6 +61,23 @@ logger = get_logger(__name__)
 
 
 def _clear_selected_patient() -> None:
+    previous_source_id = st.session_state.get("selected_patient_source_id")
+    try:
+        if previous_source_id:
+            from orm.agent_logging_functions import log_patient_selection
+
+            log_patient_selection(
+                session_id=st.session_state.get("agent_session_id", ""),
+                user_id=int(st.session_state.get("user_id") or 0),
+                source_id=None,
+                display_name=None,
+                selection_origin="clear_button",
+                action="cleared",
+                previous_source_id=previous_source_id,
+                run_id=st.session_state.get("agent_current_run_id"),
+            )
+    except Exception:
+        pass
     for k in (
         "selected_patient_source_id",
         "selected_patient_display_name",
@@ -350,9 +367,9 @@ with st.sidebar.expander("Settings"):
             st.toast("Settings saved!")
 
 agentic_mode_initial = bool(
-    getattr(st.session_state.get("user"), "agentic_mode", False)
+    getattr(st.session_state.get("user"), "agentic_mode", True)
     if st.session_state.get("user")
-    else st.session_state.get("agentic_mode", False)
+    else st.session_state.get("agentic_mode", True)
 )
 agentic_mode = st.sidebar.checkbox(
     "Agentic mode (beta)",

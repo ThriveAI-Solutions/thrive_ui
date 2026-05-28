@@ -277,5 +277,10 @@ INSERT INTO metric_federated_data_v VALUES
     -- Daniel Wright — diabetes + metformin via claims (refresh-cadence test)
     (7, 'enc-7c', '2025-11-30', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_claims_icd_diagnosis_detail_v', 1, 'BMG'),
     (7, 'enc-7m', '2026-02-05', NULL, '6809',  'RxNorm', 'RXNORM',  'metformin',                 'federated_meds_v',     0, 'BMG'),
-    -- Susan Park (71F Kaleida) — diabetes (qualifies "diabetics over 65 at Kaleida")
-    (8, 'enc-8',  '2025-12-01', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_problems_v', 0, 'Kaleida');
+    -- Susan Park (71F Kaleida) — diabetes (qualifies "diabetics over 65 at Kaleida").
+    -- Two E11.9 rows in the SAME month (2025-12) on purpose: a within-bucket
+    -- multi-event fan-out. A month breakdown joins each diagnosis row, so Susan
+    -- produces two rows in 2025-12 — COUNT(DISTINCT source_id) must still count
+    -- her once. Asserted by test_diagnosis_month_breakdown_dedups_multi_event.
+    (8, 'enc-8',  '2025-12-01', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_problems_v', 0, 'Kaleida'),
+    (8, 'enc-8b', '2025-12-20', NULL, 'E11.9', 'ICD-10', 'ICD10CM', 'Type 2 diabetes mellitus', 'federated_problems_v', 0, 'Kaleida');

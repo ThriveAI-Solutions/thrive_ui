@@ -48,6 +48,9 @@ class FinalResponseEvent(BaseModel):
     # this module's public surface; the runtime treats it as an opaque
     # list of pydantic-ai ModelMessage instances.
     all_messages: list[Any] = Field(default_factory=list)
+    # Token usage for this run, from pydantic-ai run.usage(). None when the
+    # provider doesn't report usage. Keys: input_tokens, output_tokens, total_tokens.
+    usage: Optional[dict] = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -70,14 +73,15 @@ class PatientChooserEvent(BaseModel):
 
 class CohortSampleEvent(BaseModel):
     """Auto-surfaced after a successful search_patients_by_criteria
-    call so the UI renders the cohort sample as a DataFrame regardless
-    of whether the LLM attaches an artifact to the final response.
+    call (sample rows or breakdown buckets) so the UI renders the cohort
+    result as a DataFrame regardless of whether the LLM attaches an
+    artifact to the final response.
 
     Phase 4 design §3.7.
     """
 
     kind: Literal["cohort_sample"] = "cohort_sample"
-    payload: dict  # CohortResult shape (total_count, sample, data_availability, reliability_note)
+    payload: dict  # CohortResult shape (total_count, sample, buckets, data_availability, reliability_note)
 
 
 class ThinkingDeltaEvent(BaseModel):

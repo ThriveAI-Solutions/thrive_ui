@@ -56,7 +56,7 @@ def _deps(engine) -> AgentDeps:
         analytics_db=AnalyticsDbAdapter(engine=engine, dialect="sqlite"),
         rag=MagicMock(),
         sqlite_session=None,
-        audit_logger=MagicMock(),
+        run_logger=MagicMock(),
     )
 
 
@@ -118,6 +118,45 @@ async def test_cohort_tool_completion_emits_cohort_sample_event():
     assert payload["data_availability"] == "data_present"
     assert len(payload["sample"]) >= 1
     # Must come AFTER ToolCallCompleted for the cohort tool
+    tcc_index = next(
+        i
+        for i, e in enumerate(events)
+        if isinstance(e, ToolCallCompleted) and e.tool_name == "search_patients_by_criteria"
+    )
+    cse_index = events.index(cohort_events[0])
+    assert cse_index > tcc_index
+
+
+@pytest.mark.asyncio
+async def test_cohort_breakdown_buckets_emit_cohort_sample_event():
+    """End-to-end via the streaming runner, exercising the BREAKDOWN path.
+
+    A single-dimension breakdown returns an empty patient sample but a
+    non-empty buckets list. This drives the runner.py gate (runner.py
+    ~line 539) that also fires CohortSampleEvent when buckets are present,
+    not just when a sample is. Mirrors the SAMPLE-path test above exactly,
+    only differing in the scripted criteria args (adds breakdown=["gender"]).
+    """
+    engine = _make_threadsafe_db()
+    runner = AgenticRunner(
+        model=_scripted_llm_cohort({"diagnosis_codes": ["E11.9"], "sample_size": 0, "breakdown": ["gender"]})
+    )
+
+    events = []
+    async for ev in runner.stream("break down diabetics by gender", deps=_deps(engine)):
+        events.append(ev)
+
+    cohort_events = [e for e in events if isinstance(e, CohortSampleEvent)]
+    assert len(cohort_events) == 1, f"expected 1 CohortSampleEvent, got {len(cohort_events)}"
+    payload = cohort_events[0].payload
+    assert payload["data_availability"] == "data_present"
+    assert payload["breakdown_status"] == "single_dimension"
+    assert payload["non_additive"] is False
+    # The buckets branch of the gate is what we're covering: buckets present,
+    # sample empty.
+    assert len(payload["buckets"]) >= 1
+    assert payload["sample"] == []
+    # Must come AFTER ToolCallCompleted for the cohort tool.
     tcc_index = next(
         i
         for i, e in enumerate(events)

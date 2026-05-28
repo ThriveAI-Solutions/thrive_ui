@@ -26,7 +26,8 @@ import uuid
 import streamlit as st
 
 from agent.deps import AgentDeps, SelectedPatient
-from agent.audit import AuditLogger
+from agent.run_logger import AgentRunLogger
+from agent.logging_config import AgentLoggingConfig
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from orm.models import RoleTypeEnum
 
@@ -114,6 +115,22 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
         st.session_state["agent_session_id"] = str(uuid.uuid4())
     session_id = st.session_state["agent_session_id"]
 
+    config = AgentLoggingConfig.from_streamlit()
+    run_id = str(uuid.uuid4())
+    st.session_state["agent_current_run_id"] = run_id
+    group_id = st.session_state.get("current_group_id")
+    run_logger = None
+    if config.enabled:
+        run_logger = AgentRunLogger(
+            session=sqlite_session,
+            config=config,
+            run_id=run_id,
+            session_id=session_id,
+            user_id=user_id,
+            user_role=int(user_role.value),
+            group_id=group_id,
+        )
+
     return AgentDeps(
         user_id=user_id,
         user_role=user_role,
@@ -125,10 +142,9 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
         analytics_db=_analytics_db(),
         rag=_rag(),
         sqlite_session=sqlite_session,
-        audit_logger=AuditLogger(
-            session=sqlite_session,
-            session_id=session_id,
-            user_id=user_id,
-            user_role=int(user_role.value),
-        ),
+        run_logger=run_logger,
+        group_id=group_id,
+        user_message_id=None,
+        parent_run_id=st.session_state.get("agent_parent_run_id"),
+        resume_reason=st.session_state.get("agent_resume_reason"),
     )
