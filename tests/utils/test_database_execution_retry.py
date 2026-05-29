@@ -479,7 +479,8 @@ class TestVannaServiceRunSql:
         # Verify error was stored
         assert result is None
         assert mock_session.get("last_run_sql_error") == "Connection refused"
-        assert mock_session.get("last_failed_sql") == "SELECT 1"
+        # run_sql now enforces a LIMIT before execution
+        assert mock_session.get("last_failed_sql") == "SELECT 1 LIMIT 1000"
 
     def test_run_sql_clears_error_on_success(self, monkeypatch):
         """Test that run_sql clears previous error context on success."""
