@@ -1075,6 +1075,10 @@ class VannaService:
 
         For backwards compatibility, some callers may only expect a DataFrame.
         """
+        from utils.config_helper import ensure_query_has_limit
+
+        sql = ensure_query_has_limit(sql)
+
         try:
             # Clear any previous error context before executing a new query
             try:

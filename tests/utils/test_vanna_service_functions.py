@@ -93,7 +93,8 @@ class TestVannaServiceAdditional:
         result = service.run_sql("SELECT * FROM test_table")
 
         assert result.equals(mock_df)
-        service.vn.run_sql.assert_called_once_with(sql="SELECT * FROM test_table")
+        # run_sql enforces a LIMIT clause before execution
+        service.vn.run_sql.assert_called_once_with(sql="SELECT * FROM test_table LIMIT 1000")
 
     def test_should_generate_chart(self, mock_vanna_service):
         service = mock_vanna_service
