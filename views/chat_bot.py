@@ -167,7 +167,7 @@ if "_messages_loaded" not in st.session_state:
 from utils.config_helper import get_max_session_messages
 
 max_messages = get_max_session_messages()
-if len(st.session_state.messages) > max_messages:
+if st.session_state.messages and len(st.session_state.messages) > max_messages:
     messages_to_remove = len(st.session_state.messages) - max_messages
     st.session_state.messages = st.session_state.messages[messages_to_remove:]
     logger.info(
