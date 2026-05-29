@@ -28,6 +28,7 @@ def labs_sql(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     result_filter: Optional[str] = None,
+    most_recent_only: bool = False,
     schema_prefix: str = "",
 ) -> Tuple[str, dict]:
     where: list[str] = ["source_id = :source_id"]
@@ -46,7 +47,7 @@ def labs_sql(
             params[f"lc_{i}"] = c
 
     if test_name_text:
-        where.append("LOWER(name) LIKE :tnt")
+        where.append("(LOWER(name) LIKE :tnt OR LOWER(mnemonic) LIKE :tnt)")
         params["tnt"] = f"%{test_name_text.lower()}%"
 
     if start_date:
@@ -62,6 +63,8 @@ def labs_sql(
             where.append(clause[0])
             params.update(clause[1])
 
+    limit_clause = "\n        LIMIT 1" if most_recent_only else ""
+
     sql = f"""
         SELECT
             source_id,
@@ -75,6 +78,6 @@ def labs_sql(
             service_provider
         FROM {schema_prefix}federated_results_v
         WHERE {" AND ".join(where)}
-        ORDER BY datetime DESC
+        ORDER BY datetime DESC{limit_clause}
     """
     return sql, params

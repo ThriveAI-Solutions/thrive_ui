@@ -132,6 +132,19 @@ SCHEMA_DOCS: List[_Doc] = [
         ),
     },
     {
+        "view": "federated_adt_v",
+        "kind": "schema",
+        "text": (
+            "federated_adt_v: admit/discharge/transfer events. Columns: source_id, "
+            "event_date, event_location, location_type, clean_setting (normalized "
+            "setting: INPATIENT, OUTPATIENT, EMERGENCY, LONG TERM CARE, SNF), "
+            "status, admit_from, discharge_disposition, discharge_location. "
+            "Use get_patient_clinical_data with domain='admissions' to query this "
+            "view. Supports facility_type filtering (inpatient, ltc, snf, ed, "
+            "outpatient, any) and date_range."
+        ),
+    },
+    {
         "view": "federated_documents_v",
         "kind": "schema",
         "text": (
@@ -226,8 +239,12 @@ EXAMPLES_DOCS: List[_Doc] = [
         "kind": "examples",
         "text": (
             "Q: 'Has patient been admitted to a long-term care facility in 2026?'\n"
-            "Tool sequence: get_patient_clinical_data({domain:'encounters', "
-            "facility_type:'ltc', date_range:{start:'2026-01-01', end:'2026-12-31'}})."
+            "Tool sequence: get_patient_clinical_data({domain:'admissions', "
+            "facility_type:'ltc', date_range:{start:'2026-01-01', end:'2026-12-31'}}). "
+            "The admissions domain queries federated_adt_v for ADT events filtered by "
+            "facility type and date range. For visit history without ADT detail, use "
+            "get_patient_clinical_data({domain:'encounters', facility_type:'ltc', "
+            "date_range:{...}}) instead."
         ),
     },
     {
@@ -274,6 +291,70 @@ EXAMPLES_DOCS: List[_Doc] = [
             "because the claims procedure view has no patient identifier — "
             "results may under-report procedures historically captured only "
             "via claims. Always surface the reliability_note from the result."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'What is the most recent A1C value for this patient?'\n"
+            "Tool sequence: search_codes(vocabulary='loinc', query='a1c') → "
+            "get_patient_clinical_data({domain:'labs', loinc_codes:['4548-4'], "
+            "most_recent_only:True}). The most_recent_only flag returns only "
+            "the single most recent result ordered by datetime DESC."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Has this patient had Measles/Rubeola IgM/IgG testing done ever?'\n"
+            "Tool sequence: search_codes(vocabulary='loinc', query='measles igg') → "
+            "get_patient_clinical_data({domain:'labs', loinc_codes:['22501-7','22502-5']})."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Which facilities was this patient admitted to? What were the "
+            "admission and discharge dates?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'admissions', "
+            "facility_type:'any', include_discharge_details:True}). Returns "
+            "event_location, event_date, discharge_disposition, and "
+            "discharge_location for all ADT events."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Has patient ever had Hepatitis A, Strep Pneumo, Tdap, or Rabies vaccine?'\n"
+            "Tool sequence: For each vaccine, call search_codes(vocabulary='cvx', "
+            "query=<vaccine_name>) to get CVX codes, then call "
+            "get_patient_clinical_data({domain:'immunizations', "
+            "cvx_codes:[<all_codes>]})."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Did patient have imaging done on their knee last year? What type?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'imaging', "
+            "body_region:'knee', date_range:{start:..., end:...}}). "
+            "body_region expands to case-insensitive keyword patterns covering 'knee', 'patella', "
+            "'patellar', 'tibial plateau'."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Was patient admitted to hospital or inpatient during 2025?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'admissions', "
+            "facility_type:'inpatient', date_range:{start:'2025-01-01', "
+            "end:'2025-12-31'}})."
         ),
     },
     {

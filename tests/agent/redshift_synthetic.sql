@@ -1,6 +1,7 @@
 -- Synthetic Redshift mirror for unit tests. Mirrors the §7.12 whitelist
 -- views as SQLite tables. Keep this small (≤30 rows total).
 
+DROP TABLE IF EXISTS federated_adt_v;
 DROP TABLE IF EXISTS internal_patient_profile_v;
 DROP TABLE IF EXISTS internal_source_reference_v;
 DROP TABLE IF EXISTS federated_demographic_v;
@@ -229,6 +230,24 @@ CREATE TABLE federated_vitals_v (
 );
 INSERT INTO federated_vitals_v VALUES
     ('src-john-1962', '8480-6', 'LOINC', 'Systolic BP', '128', '128', 'mmHg', '2026-04-01 09:30');
+
+CREATE TABLE federated_adt_v (
+    source_id TEXT,
+    event_date TIMESTAMP,
+    event_location TEXT,
+    location_type TEXT,
+    clean_setting TEXT,
+    status TEXT,
+    admit_from TEXT,
+    discharge_disposition TEXT,
+    discharge_location TEXT
+);
+INSERT INTO federated_adt_v VALUES
+    ('src-john-1962', '2026-01-10 08:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home'),
+    ('src-john-1962', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Emergency Dept', 'Discharged to SNF', 'Sunrise SNF'),
+    ('src-john-1962', '2025-06-20 10:00', 'Sunrise SNF', 'Skilled Nursing', 'SNF', 'Discharged', 'Buffalo General Hospital', 'Discharged to home', 'Home'),
+    ('src-john-1962', '2024-11-05 14:00', 'ECMC Emergency', 'Emergency', 'EMERGENCY', 'Discharged', 'Self', 'Discharged to home', 'Home'),
+    ('src-john-1971', '2026-03-15 14:00', 'Kaleida Methodist', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home');
 
 CREATE TABLE metric_federated_data_v (
     patient_id INTEGER,

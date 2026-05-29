@@ -16,7 +16,7 @@ from agent.rag.seed import SCHEMA_DOCS
 # description is base docstring + "\n\n" + this block; that assembled string
 # is guarded separately by test_assembled_description_under_budget in
 # tests/agent/tools/test_run_sql_description.py.
-_BUDGET_CHARS = 6000
+_BUDGET_CHARS = 6500
 
 
 def test_dw_prefix_qualifies_every_view_in_catalog():

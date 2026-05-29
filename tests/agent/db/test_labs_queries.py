@@ -65,3 +65,41 @@ def test_labs_loinc_filter_uses_code_type_variants(synthetic_db):
     )
     rows = adapter.fetch_all(sql, params)
     assert rows == []
+
+
+def test_labs_test_name_text_searches_mnemonic(synthetic_db):
+    """test_name_text should search both name and mnemonic columns."""
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    # 'hba1c' is in the mnemonic column but not the name 'Hemoglobin A1c'
+    sql, params = labs_sql(
+        source_id="src-john-1962",
+        test_name_text="hba1c",
+    )
+    rows = adapter.fetch_all(sql, params)
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Hemoglobin A1c"
+
+
+def test_labs_test_name_text_searches_mnemonic_measigg(synthetic_db):
+    """MEASIGG is in mnemonic only, not in name 'Measles IgG Ab'."""
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = labs_sql(
+        source_id="src-john-1962",
+        test_name_text="measigg",
+    )
+    rows = adapter.fetch_all(sql, params)
+    assert len(rows) == 1
+    assert "Measles" in rows[0]["name"]
+
+
+def test_labs_most_recent_only(synthetic_db):
+    """most_recent_only should return only the single most recent result."""
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = labs_sql(
+        source_id="src-john-1962",
+        most_recent_only=True,
+    )
+    rows = adapter.fetch_all(sql, params)
+    assert len(rows) == 1
+    # Most recent row is the one with latest datetime
+    assert rows[0]["name"] == "Hemoglobin A1c"

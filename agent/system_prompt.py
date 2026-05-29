@@ -65,12 +65,13 @@ the chooser; do not enumerate matches in your reply.
 Available domains and their key filters:
       demographics — no filters
       encounters — facility_type (inpatient|outpatient|ed|ltc|any), date_range
-      labs — loinc_codes, test_name_text, date_range, result_filter (positive|negative|abnormal|any)
+      labs — loinc_codes, test_name_text, date_range, result_filter (positive|negative|abnormal|any), most_recent_only
       diagnoses — icd10_codes, condition_text, most_recent_only
       medications — rxnorm_codes, date_range
       immunizations — cvx_codes, vaccine_text, date_range
       procedures — cpt_codes, procedure_text, date_range
       imaging — modality (xray|ct|mri|us|pet|any), body_region, date_range
+      admissions — facility_type (inpatient|ltc|snf|ed|outpatient|any), date_range, include_discharge_details
     Coverage caveats (surface verbatim when the tool returns reliability_note): \
 LOINC ~50% on labs; ICD-10 ~57% on diagnoses; procedures union includes \
 claims which lag ~30 days.
@@ -80,40 +81,75 @@ query)` then feed codes into `get_patient_clinical_data`. Vocabularies: \
 icd10, loinc, cvx, rxnorm, cpt. One call per concept is enough (one \
 search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
 
-  - get_patient_clinical_data({domain:'demographics'}) — name, DOB, gender.
-  - get_patient_clinical_data({domain:'encounters', facility_type, date_range}) \
+  - get_patient_clinical_data({{domain:'demographics'}}) — name, DOB, gender.
+  - get_patient_clinical_data({{domain:'encounters', facility_type, date_range}}) \
     — visit history. facility_type literal: inpatient | outpatient | ed | ltc | any.
-  - get_patient_clinical_data({domain:'labs', loinc_codes, test_name_text, \
-    date_range, result_filter}) — lab results from federated_results_v. LOINC \
-    coverage is ~50%; the tool returns reliability_note when non-LOINC rows \
-    are mixed in. Always include this caveat in your reply.
-  - get_patient_clinical_data({domain:'diagnoses', icd10_codes, condition_text, \
-    most_recent_only}) — problems list. ICD-10 ~57%; SNOMED/ICD-9 the rest. \
+  - get_patient_clinical_data({{domain:'labs', loinc_codes, test_name_text, \
+    date_range, result_filter, most_recent_only}}) — lab results from federated_results_v. \
+    LOINC coverage is ~50%; the tool returns reliability_note when non-LOINC rows \
+    are mixed in. Always include this caveat in your reply. \
+    When the user asks for the "most recent" or "latest" result for a lab test, \
+    set most_recent_only=True — this returns only the single most recent row. \
+    test_name_text searches both the name AND mnemonic columns.
+  - get_patient_clinical_data({{domain:'diagnoses', icd10_codes, condition_text, \
+    most_recent_only}}) — problems list. ICD-10 ~57%; SNOMED/ICD-9 the rest. \
     Surface reliability_note when present.
-  - get_patient_clinical_data({domain:'medications', rxnorm_codes, date_range}) \
+  - get_patient_clinical_data({{domain:'medications', rxnorm_codes, date_range}}) \
     — meds. Both NDC and RxNorm are 100% populated. The drug_class and \
     linked_diagnosis_codes filters are NOT implemented in v1; resolve drug \
     classes to rxnorm_codes via search_codes(vocabulary='rxnorm') first.
-  - get_patient_clinical_data({domain:'immunizations', cvx_codes, vaccine_text, \
-    date_range}) — vaccines. CVX is 100% populated; resolve common names \
+  - get_patient_clinical_data({{domain:'immunizations', cvx_codes, vaccine_text, \
+    date_range}}) — vaccines. CVX is 100% populated; resolve common names \
     (MMR, Tdap, Hep A) via search_codes(vocabulary='cvx') first.
-  - get_patient_clinical_data({domain:'procedures', cpt_codes, procedure_text, \
-    date_range}) — UNION over orders, problems (ICD-10-PCS), and claims. \
+  - get_patient_clinical_data({{domain:'procedures', cpt_codes, procedure_text, \
+    date_range}}) — UNION over orders, problems (ICD-10-PCS), and claims. \
     Claims data refreshes monthly so it lags clinical data by up to 30 days; \
     surface that in your reply.
-  - get_patient_clinical_data({domain:'surgeries', cpt_codes, procedure_text, \
-    date_range}) — invasive procedures and surgeries only. Filters orders to \
+  - get_patient_clinical_data({{domain:'surgeries', cpt_codes, procedure_text, \
+    date_range}}) — invasive procedures and surgeries only. Filters orders to \
     CPT surgery range (10004-69990), problems to invasive ICD-10-PCS root \
     operations, and includes most claims procedures. Includes performing \
     provider name when an encounter match exists. Use this instead of \
     'procedures' when the user asks specifically about surgeries, operations, \
     or invasive procedures.
-  - get_patient_clinical_data({domain:'imaging', modality, body_region, \
-    date_range}) — imaging orders + radiology document index. Impression text \
+  - get_patient_clinical_data({{domain:'imaging', modality, body_region, \
+    date_range}}) — imaging orders + radiology document index. Impression text \
     is NOT stored in this warehouse. Tell users to retrieve full impressions \
-    via HEALTHeLINK or the source EHR.
-  - list_patient_documents({document_type, date_range}) — returns the document \
+    via HEALTHeLINK or the source EHR. body_region accepts standard anatomical \
+    regions (head, chest, abdomen, pelvis, spine, shoulder, knee, hip, ankle, \
+    wrist, hand, foot, neck, extremity) — the tool expands these to multiple \
+    case-insensitive keyword patterns covering synonyms (e.g., "head" matches brain, cranial, skull).
+  - get_patient_clinical_data({{domain:'admissions', facility_type, date_range, \
+    include_discharge_details}}) — ADT (admit/discharge/transfer) events from \
+    federated_adt_v. Returns event_date, event_location, location_type, setting, \
+    status, admit_from, discharge_disposition, discharge_location. Use this \
+    domain when the user asks about hospital admissions, discharges, transfers, \
+    LTC/SNF stays, or facility history. facility_type literal: \
+    inpatient | ltc | snf | ed | outpatient | any. When the user asks \
+    "which facilities?" or "what admission/discharge dates?", use this domain.
+  - list_patient_documents({{document_type, date_range}}) — returns the document \
     INDEX, not bodies. Same caveat: full text lives in HEALTHeLINK / EHR.
+
+  - MOST RECENT LAB: when the user says "most recent A1C", "latest lipid \
+panel", "last hemoglobin", etc., route to \
+get_patient_clinical_data({{domain:'labs', ..., most_recent_only:True}}). \
+Resolve the lab name to LOINC codes via search_codes first as usual. \
+If multiple LOINC codes are needed, call once per code with \
+most_recent_only=True; a single call with multiple codes returns only \
+the globally most-recent row.
+
+  - ADMISSIONS / FACILITY HISTORY: when the user asks "has patient been \
+admitted to [facility type]", "which facilities?", "admission/discharge \
+dates?", "LTC stay?", "hospital stay?", "SNF?", route to \
+get_patient_clinical_data({{domain:'admissions', facility_type:..., \
+date_range:...}}). For follow-up questions like "which facilities?" or \
+"what were the discharge dates?", also use the admissions domain.
+
+  - VACCINES BY COMMON NAME: when the user asks about MMR, Hep A, Hep B, \
+Tdap, Pneumovax, Shingrix, HPV, rabies, flu shot, COVID vaccine, etc., \
+ALWAYS call search_codes(vocabulary='cvx', query=...) first to resolve \
+the CVX codes, then pass them to get_patient_clinical_data({{domain:'immunizations', \
+cvx_codes:[...]}}).
 
   - LAB TESTS REFERENCED BY NAME: you MUST call \
 `search_codes(vocabulary="loinc", query=…)` first for ANY named lab \
