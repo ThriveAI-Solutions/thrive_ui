@@ -20,7 +20,7 @@ MOCK_SECRETS = {
         "user": "test_user",
         "password": "test_pass",
     },
-    "security": {"allow_llm_to_see_data": False, "train_sample_rows": True},
+    "security": {"allow_llm_to_see_data": True, "train_sample_rows": True},
 }
 
 
@@ -72,6 +72,18 @@ class TestParseMarkdownTable:
         assert "Jane" in result
         # Surrounding text should NOT be included
         assert "Here are" not in result
+
+    def test_pipe_in_prose_before_table_still_parses(self):
+        from utils.vanna_calls import _parse_markdown_table
+
+        text = (
+            "The format is col1 | col2 for reference.\n\n"
+            + SAMPLE_LLM_MARKDOWN
+        )
+        result = _parse_markdown_table(text)
+        assert result is not None
+        assert "Jane" in result
+        assert "col1 | col2 for reference" not in result
 
     def test_no_table_returns_none(self):
         from utils.vanna_calls import _parse_markdown_table
@@ -224,6 +236,22 @@ class TestTrainSampleRows:
             result = train_sample_rows()
 
         assert result is False
+
+    def test_allow_llm_to_see_data_false_returns_false_without_llm_call(self):
+        """Verify that allow_llm_to_see_data=False blocks execution and never calls submit_prompt."""
+        from utils.vanna_calls import train_sample_rows
+
+        secrets = _make_secrets({"security": {"allow_llm_to_see_data": False, "train_sample_rows": True}})
+        mocks = self._setup_mocks()
+
+        with (
+            patch("utils.vanna_calls.st.secrets", new=secrets),
+            patch("utils.vanna_calls.VannaService.from_streamlit_session", return_value=mocks["vanna_service"]),
+        ):
+            result = train_sample_rows()
+
+        assert result is False
+        mocks["vanna_service"].submit_prompt.assert_not_called()
 
     def test_old_entries_cleared_before_new_ones(self):
         """Verify that existing sample_rows entries are removed when clear_existing=True."""

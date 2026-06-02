@@ -3766,27 +3766,34 @@ def _parse_markdown_table(text: str) -> str | None:
     Returns the markdown table string if found, or None if the response
     does not contain a valid markdown table (at least a header + separator row).
     """
-    lines = text.strip().splitlines()
-    table_lines: list[str] = []
-    in_table = False
+    lines = [line.strip() for line in text.strip().splitlines()]
 
-    for line in lines:
-        stripped = line.strip()
-        # A markdown table row contains at least one pipe character
-        if "|" in stripped:
-            table_lines.append(stripped)
-            in_table = True
-        elif in_table:
-            # Stop collecting once we leave the table block
+    def _is_separator(line: str) -> bool:
+        return "|" in line and all(
+            part.strip().replace("-", "").replace(":", "") == ""
+            for part in line.split("|")
+            if part.strip()
+        )
+
+    # Slide through lines looking for: pipe-line, separator, pipe-line (header + sep + data)
+    table_start = None
+    for i in range(len(lines) - 2):
+        if "|" in lines[i] and _is_separator(lines[i + 1]) and "|" in lines[i + 2]:
+            table_start = i
+            break
+
+    if table_start is None:
+        return None
+
+    table_lines: list[str] = []
+    for line in lines[table_start:]:
+        if "|" in line:
+            table_lines.append(line)
+        else:
             break
 
     # A valid markdown table needs at least 3 lines: header, separator, 1+ data rows
     if len(table_lines) < 3:
-        return None
-
-    # Verify the second line is a separator (contains dashes between pipes)
-    separator = table_lines[1]
-    if not all(part.strip().replace("-", "").replace(":", "") == "" for part in separator.split("|") if part.strip()):
         return None
 
     return "\n".join(table_lines)
@@ -3815,6 +3822,11 @@ def train_sample_rows(clear_existing: bool = True) -> bool:
     # Check config toggle
     if not st.secrets.get("security", {}).get("train_sample_rows", True):
         logger.info("train_sample_rows disabled by config toggle — skipping")
+        return False
+
+    # Check allow_llm_to_see_data security flag — this function must send rows to the LLM
+    if not st.secrets.get("security", {}).get("allow_llm_to_see_data", False):
+        logger.warning("train_sample_rows requires allow_llm_to_see_data=True — skipping")
         return False
 
     conn = None
