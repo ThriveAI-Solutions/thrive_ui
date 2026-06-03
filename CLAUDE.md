@@ -4,17 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Detailed Documentation
 
-For deeper context on specific systems, see:
-- [Authentication & Users](llmdocs/auth.md) - Cookie sessions, roles, permissions, user preferences
-- [Database Architecture](llmdocs/database.md) - SQLite, PostgreSQL, ChromaDB, Milvus
-- [Streamlit UI Patterns](llmdocs/streamlit-ui.md) - Views, session state, message rendering
-- [Vanna AI Integration](llmdocs/vanna-integration.md) - LLM backends, SQL generation, streaming
-- [Magic Functions (Slash Commands)](llmdocs/magic-functions.md) - Complete command reference
-- [Configuration Reference](llmdocs/configuration.md) - All secrets.toml options
-- [Testing Patterns](llmdocs/testing.md) - Fixtures, mocking, test organization
-- [LLM Guide](llmdocs/LLM_GUIDE.md) - Quick reference for LLM collaboration
-- [Project Outline](llmdocs/PROJECT_OUTLINE.md) - High-level architecture overview
-- [LLM Server & Local Models](llmdocs/llm-server.md) - aillm01 specs, A10G capacity, gemma4 / gpt-oss / qwen3.6 capability notes
+- [Database Architecture](llmdocs/database.md) — SQLite (app state), PostgreSQL (analytics), ChromaDB / Milvus (vector stores)
+- [User Guide](docs/USER_GUIDE.md) — end-user feature walkthrough
+- Agentic replatform spec: `docs/superpowers/specs/2026-05-06-agentic-replatform-design.md` (canonical design for the `agent/` package; tool caps, run-logging, event streaming)
 
 ## Sample Database
 
@@ -81,6 +73,8 @@ app.py (entry point, cookie/auth setup)
 
 - **`orm/functions.py`**: Auth helpers, user preference load/save, recent message retrieval.
 
+- **`agent/`** (pydantic-ai): Multi-step agentic alternative to the Vanna single-shot SQL pipeline. `agent/runner.py` owns the `Agent` and tool registrations; nodes stream via `agent.iter()`. Hard caps from `[agent]` in secrets (`max_tool_calls`, `max_wall_clock_s`). Tools live in `agent/tools/` (`find_patient`, `search_patients_by_criteria`, `get_patient_clinical_data`, `list_patient_documents`, `search_codes`, `search_knowledge_base`, `run_sql`, `make_chart`, `summarize_results`). `agent/db/` is the read-only analytics adapter (separate from the Streamlit Postgres connection — driven by `[analytics_db]`). `agent/rag/` wraps Chroma for the agent's knowledge base; `agent/codes/` loads code-system reference data. `agent/run_logger.py` persists per-run events (subject to `[agent_logging].mode`).
+
 ### Data Flow
 
 1. User question → guardrails check
@@ -111,12 +105,25 @@ chroma_path = "./chromadb"          # ChromaDB
 
 [postgres]
 host = "localhost"
-port = 5432
-database = "analytics"
-user = "user"
-password = "pass"
+port = 5469              # docker-compose maps host 5469 → container 5432
+database = "postgres"
+user = "postgres"
+password = "postgres"
 schema_name = "public"
-object_type = "tables"  # or "views"
+object_type = "tables"   # or "views"
+
+[analytics_db]
+# Read-only warehouse the agent's clinical-data tools query against.
+# Required when agentic mode is enabled. SQLAlchemy URL; for Redshift use
+# redshift+psycopg2:// (plain postgresql+psycopg2:// runs a statement Redshift rejects).
+# url = "redshift+psycopg2://user:pass@host:5439/db"
+# dialect = "redshift"   # adapter taxonomy independent of URL prefix
+
+[agent]
+# max_tool_calls = 7         # hard cap on tool invocations per run
+# max_wall_clock_s = 120.0   # raise for slow local Ollama models
+# expose_query_details_to = ["admin"]   # roles allowed to see SQL/raw rows in tool cards
+# ollama_think = true        # global thinking toggle; per-model override under [agent.ollama_think_per_model]
 
 [sqlite]
 database = "./pgDatabase/db.sqlite3"
@@ -137,8 +144,19 @@ retention_days = 0               # 0 = keep indefinitely
 
 ## Development Guidelines
 
+### Schema Changes (Alembic)
+The SQLite app DB is migrated by Alembic. `app.py` → `init_db()` runs `alembic upgrade head` on every startup and the result is cached for the process. To add a column:
+
+1. Edit `orm/models.py`
+2. `uv run alembic revision --autogenerate -m "..."`
+3. Review `alembic/versions/<latest>.py` — SQLite uses `op.batch_alter_table(...)` for most ALTERs; verify it
+4. `uv run alembic upgrade head` (or just restart the app)
+5. Commit the new revision file
+
+Useful: `uv run alembic current`, `uv run alembic history`, `uv run alembic downgrade -1`. Pre-Alembic raw-SQL scripts in `scripts/legacy_migrations/` are forensic only — do not run them.
+
 ### Adding New Settings
-1. Add column to `orm/models.User`
+1. Add column to `orm/models.User` (then make an Alembic revision per above)
 2. Update load/save in `orm/functions.*`
 3. Expose in `views/chat_bot.py` sidebar
 
@@ -157,6 +175,7 @@ retention_days = 0               # 0 = keep indefinitely
 - `Message` persists DataFrame as JSON; pass `dataframe` consistently when creating summaries/charts
 - SQL errors persist in session state for retry panel UX
 - Missing `cookie.password` prevents login - app stops until cookies ready
+- Multiple deployments on the same hostname (e.g. prod at `/` and a dev at `/dev`) MUST set distinct `cookie.prefix` values, or they'll read each other's session cookies and point at user_ids from the wrong DB
 - Ollama defaults to `http://localhost:11434` - ensure model is pulled and running
 - Role-restricted RAG retrieval on by default; disable with `security.restrict_rag_by_role = false`
 - Agentic run logging defaults to `full` fidelity (verbatim PHI in the app SQLite DB); set `[agent_logging].mode = "scrubbed"` to hash SQL literals and drop full result rows, or `disabled` to turn it off. Protect DB backups accordingly.
