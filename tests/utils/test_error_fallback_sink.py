@@ -657,3 +657,28 @@ class TestLogErrorIntegration:
         assert result.error_message == "happy path"
         # Fallback file must not have been touched.
         assert not cfg.fallback_path.exists()
+
+    def test_log_error_fallback_preserves_caller_traceback(self, tmp_path, monkeypatch):
+        cfg = _make_config(tmp_path)
+        self._patch_streamlit_config(monkeypatch, cfg)
+        self._patch_session_factory_to_raise(monkeypatch)
+
+        from orm import logging_functions
+
+        try:
+            raise ValueError("caller-original-error")
+        except ValueError:
+            result = logging_functions.log_error(
+                category=ErrorCategory.GENERAL,
+                severity=ErrorSeverity.ERROR,
+                error_type="ValueError",
+                error_message="caller-original-error",
+                include_traceback=True,
+            )
+
+        assert result is None
+        records = read_fallback_records(since=datetime(2000, 1, 1), config=cfg)
+        assert len(records) == 1
+        stack_trace = records[0].get("stack_trace")
+        assert stack_trace is not None
+        assert "caller-original-error" in stack_trace

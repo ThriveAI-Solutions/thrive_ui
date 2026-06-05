@@ -421,6 +421,7 @@ def log_error(
     Returns:
         The created ErrorLog record, or None if logging failed
     """
+    captured_traceback = traceback.format_exc() if include_traceback else None
     try:
         with SessionLocal() as session:
             error = ErrorLog(
@@ -431,7 +432,7 @@ def log_error(
                 severity=severity.value,
                 error_type=error_type,
                 error_message=error_message[:2000] if error_message else None,
-                stack_trace=traceback.format_exc() if include_traceback else None,
+                stack_trace=captured_traceback,
                 question=question[:1000] if question else None,
                 generated_sql=generated_sql,
                 llm_provider=llm_provider,
@@ -454,7 +455,7 @@ def log_error(
                     "severity": severity.value,
                     "error_type": error_type,
                     "error_message": error_message[:2000] if error_message else None,
-                    "stack_trace": traceback.format_exc() if include_traceback else None,
+                    "stack_trace": captured_traceback,
                     "question": question[:1000] if question else None,
                     "generated_sql": generated_sql,
                     "llm_provider": llm_provider,

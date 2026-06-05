@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +65,7 @@ _DEFAULT_MAX_BYTES = 5_000_000
 _DEFAULT_BACKUP_COUNT = 5
 
 _INITIALIZED_LOGGER_NAMES: set[str] = set()
+_CACHE_LOCK = threading.Lock()
 
 
 def _coerce_int(value: Any, default: int) -> int:
@@ -119,33 +121,35 @@ def _get_logger(config: ErrorLoggingConfig) -> logging.Logger:
     """Lazy-init a dedicated logger writing to the configured rotating file."""
     name = f"thrive.error_fallback.{config.fallback_path}"
     logger = logging.getLogger(name)
-    if name not in _INITIALIZED_LOGGER_NAMES:
-        logger.propagate = False
-        logger.setLevel(logging.INFO)
-        config.fallback_path.parent.mkdir(parents=True, exist_ok=True)
-        handler = logging.handlers.RotatingFileHandler(
-            str(config.fallback_path),
-            maxBytes=config.fallback_max_bytes,
-            backupCount=config.fallback_backup_count,
-            encoding="utf-8",
-        )
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        logger.addHandler(handler)
-        _INITIALIZED_LOGGER_NAMES.add(name)
+    with _CACHE_LOCK:
+        if name not in _INITIALIZED_LOGGER_NAMES:
+            logger.propagate = False
+            logger.setLevel(logging.INFO)
+            config.fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            handler = logging.handlers.RotatingFileHandler(
+                str(config.fallback_path),
+                maxBytes=config.fallback_max_bytes,
+                backupCount=config.fallback_backup_count,
+                encoding="utf-8",
+            )
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            logger.addHandler(handler)
+            _INITIALIZED_LOGGER_NAMES.add(name)
     return logger
 
 
 def _reset_handler_cache() -> None:
     """Close + remove cached fallback handlers. Test helper; not for app use."""
-    for name in list(_INITIALIZED_LOGGER_NAMES):
-        logger = logging.getLogger(name)
-        for handler in list(logger.handlers):
-            try:
-                handler.close()
-            except Exception:
-                pass
-            logger.removeHandler(handler)
-    _INITIALIZED_LOGGER_NAMES.clear()
+    with _CACHE_LOCK:
+        for name in list(_INITIALIZED_LOGGER_NAMES):
+            logger = logging.getLogger(name)
+            for handler in list(logger.handlers):
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+                logger.removeHandler(handler)
+        _INITIALIZED_LOGGER_NAMES.clear()
 
 
 def write_fallback_record(payload: dict, *, config: ErrorLoggingConfig | None = None) -> None:
