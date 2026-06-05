@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:17
     container_name: postgres_db
     command: -p 5469
     environment:
