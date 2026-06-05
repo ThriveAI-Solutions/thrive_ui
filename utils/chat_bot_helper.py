@@ -339,6 +339,33 @@ def create_summary_cache_key(question: str, df: pd.DataFrame) -> str:
         return hashlib.sha1((question or "").encode("utf-8")).hexdigest()
 
 
+def _consume_optional_step_error(key: str) -> str | None:
+    """Pop a stashed optional-step error (chart/summary/followup) from session state."""
+    try:
+        err = st.session_state.pop(key, None)
+    except Exception:
+        err = None
+    if isinstance(err, str) and err.strip():
+        return err
+    return None
+
+
+def _chart_failure_message(default_text: str, sql: str, my_question: str, elapsed: float) -> Message:
+    """Build a friendly chart-failure ERROR message, including the stashed detail when present."""
+    detail = _consume_optional_step_error("last_chart_error")
+    content = f"{default_text}\n\n{detail}" if detail else default_text
+    return Message(
+        RoleType.ASSISTANT,
+        content,
+        MessageType.ERROR,
+        sql,
+        my_question,
+        None,
+        elapsed,
+        group_id=get_current_group_id(),
+    )
+
+
 def get_chart(my_question, sql, df):
     vn_instance = vn if vn is not None else get_vn()
     elapsed_sum = 0
@@ -387,44 +414,11 @@ def get_chart(my_question, sql, df):
                     )
                 )
             else:
-                add_message(
-                    Message(
-                        RoleType.ASSISTANT,
-                        "I couldn't generate a chart",
-                        MessageType.ERROR,
-                        sql,
-                        my_question,
-                        None,
-                        elapsed_sum,
-                        group_id=get_current_group_id(),
-                    )
-                )
+                add_message(_chart_failure_message("I couldn't generate a chart", sql, my_question, elapsed_sum))
         else:
-            add_message(
-                Message(
-                    RoleType.ASSISTANT,
-                    "I couldn't generate a chart",
-                    MessageType.ERROR,
-                    sql,
-                    my_question,
-                    None,
-                    elapsed_sum,
-                    group_id=get_current_group_id(),
-                )
-            )
+            add_message(_chart_failure_message("I couldn't generate a chart", sql, my_question, elapsed_sum))
     else:
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                "I was unable to generate a chart for this question.",
-                MessageType.ERROR,
-                sql,
-                my_question,
-                None,
-                0,
-                group_id=get_current_group_id(),
-            )
-        )
+        add_message(_chart_failure_message("I was unable to generate a chart for this question.", sql, my_question, 0))
 
 
 def set_question(question: str, render=True):
@@ -452,6 +446,9 @@ def set_question(question: str, render=True):
             st.session_state["last_run_sql_error"] = None
             st.session_state["last_failed_sql"] = None
             st.session_state["show_failed_sql_open"] = False
+            st.session_state["last_chart_error"] = None
+            st.session_state["last_summary_error"] = None
+            st.session_state["last_followup_error"] = None
         except Exception:
             pass
         add_message(Message(RoleType.USER, question, MessageType.TEXT, group_id=group_id), render)
@@ -786,6 +783,22 @@ def render_message_group(messages: list, group_index: int, start_index: int, is_
 def get_followup_questions(my_question, sql, df):
     vn_instance = get_vn()
     followup_questions = vn_instance.generate_followup_questions(question=my_question, sql=sql, df=df)
+
+    # Surface a friendly ERROR card when generation failed instead of silently
+    # dropping a FOLLOWUP message that would render as nothing.
+    detail = _consume_optional_step_error("last_followup_error")
+    if detail:
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                f"I couldn't generate follow-up questions.\n\n{detail}",
+                MessageType.ERROR,
+                sql,
+                my_question,
+                group_id=get_current_group_id(),
+            )
+        )
+        return
 
     add_message(
         Message(
@@ -1662,7 +1675,23 @@ def _run_message_flow(my_question: str):
                 if st.session_state.get("speak_summary", True):
                     speak(summary)
             else:
-                # Do not add a blank/failed summary message per guidance; optionally speak a brief notice
+                # When generation failed (an error was stashed by vanna_calls),
+                # surface a friendly ERROR card so the user knows what happened
+                # instead of silently dropping the summary.
+                detail = _consume_optional_step_error("last_summary_error")
+                if detail and st.session_state.get("show_summary", True):
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            f"I couldn't generate a summary.\n\n{detail}",
+                            MessageType.ERROR,
+                            final_sql,
+                            my_question,
+                            None,
+                            elapsed_time,
+                            group_id=get_current_group_id(),
+                        )
+                    )
                 if st.session_state.get("speak_summary", True):
                     speak("Summary is unavailable for this result")
 

@@ -339,6 +339,148 @@ def test_handle_sql_retry_click_sets_retry_context(monkeypatch):
     assert fake_st.session_state.get("pending_sql_error") is False
 
 
+def test_chart_failure_includes_stashed_error_detail(monkeypatch):
+    """When a chart fails, the friendly ERROR message includes the actual error from session state."""
+    import utils.chat_bot_helper as cbh
+    from utils.enums import MessageType
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+    # get_chart prefers the module-level cbh.vn over get_vn() — null it so other tests
+    # that populated it can't leak in.
+    monkeypatch.setattr(cbh, "vn", None)
+
+    class _ChartFailsVN:
+        def should_generate_chart(self, question, sql, df):
+            return True
+
+        def generate_plotly_code(self, question, sql, df):
+            return None, 0  # simulates the swallowed-exception path; detail is in session state
+
+    monkeypatch.setattr(cbh, "get_vn", lambda: _ChartFailsVN())
+
+    fake_st.session_state["last_chart_error"] = "boom: chart code blew up"
+
+    cbh.get_chart("Q", "SELECT 1", pd.DataFrame({"a": [1, 2]}))
+
+    errors = [m for m in fake_st.session_state["messages"] if getattr(m, "type", None) == MessageType.ERROR.value]
+    assert errors, "expected a friendly chart ERROR message"
+    assert "boom: chart code blew up" in errors[-1].content
+    # And the key is consumed so it doesn't leak into the next flow.
+    assert fake_st.session_state.get("last_chart_error") is None
+
+
+def test_chart_failure_without_stashed_error_uses_generic_text(monkeypatch):
+    """No detail stashed → keep the existing generic message rather than dangling a stray separator."""
+    import utils.chat_bot_helper as cbh
+    from utils.enums import MessageType
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+    monkeypatch.setattr(cbh, "vn", None)
+
+    class _ChartSilentNoneVN:
+        def should_generate_chart(self, question, sql, df):
+            return False
+
+    monkeypatch.setattr(cbh, "get_vn", lambda: _ChartSilentNoneVN())
+
+    cbh.get_chart("Q", "SELECT 1", pd.DataFrame({"a": [1, 2]}))
+
+    errors = [m for m in fake_st.session_state["messages"] if getattr(m, "type", None) == MessageType.ERROR.value]
+    assert errors
+    assert errors[-1].content == "I was unable to generate a chart for this question."
+
+
+def test_followup_failure_emits_friendly_error(monkeypatch):
+    """A followup-generation failure surfaces as an ERROR message, not a silent empty list."""
+    import utils.chat_bot_helper as cbh
+    from utils.enums import MessageType
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+
+    class _FollowupFailsVN:
+        def generate_followup_questions(self, question, sql, df):
+            return []  # vanna_calls swallowed; detail in session state
+
+    monkeypatch.setattr(cbh, "get_vn", lambda: _FollowupFailsVN())
+
+    fake_st.session_state["last_followup_error"] = "kaboom: followup model timeout"
+
+    cbh.get_followup_questions("Q", "SELECT 1", pd.DataFrame({"a": [1, 2]}))
+
+    # Should be an ERROR message, NOT a FOLLOWUP message.
+    types_seen = [getattr(m, "type", None) for m in fake_st.session_state["messages"]]
+    assert MessageType.ERROR.value in types_seen
+    assert MessageType.FOLLOWUP.value not in types_seen
+    err_msg = next(m for m in fake_st.session_state["messages"] if m.type == MessageType.ERROR.value)
+    assert "kaboom: followup model timeout" in err_msg.content
+
+
+def test_followup_success_still_emits_followup(monkeypatch):
+    """No stashed error → the existing FOLLOWUP message path is preserved."""
+    import utils.chat_bot_helper as cbh
+    from utils.enums import MessageType
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+
+    class _FollowupOkVN:
+        def generate_followup_questions(self, question, sql, df):
+            return ["Question A?", "Question B?"]
+
+    monkeypatch.setattr(cbh, "get_vn", lambda: _FollowupOkVN())
+    cbh.get_followup_questions("Q", "SELECT 1", pd.DataFrame({"a": [1, 2]}))
+
+    types_seen = [getattr(m, "type", None) for m in fake_st.session_state["messages"]]
+    assert MessageType.FOLLOWUP.value in types_seen
+    assert MessageType.ERROR.value not in types_seen
+
+
+def test_set_question_clears_optional_step_error_keys(monkeypatch):
+    """Stale chart/summary/followup error stashes don't leak into the next question."""
+    import utils.chat_bot_helper as cbh
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+
+    fake_st.session_state["last_chart_error"] = "stale chart error"
+    fake_st.session_state["last_summary_error"] = "stale summary error"
+    fake_st.session_state["last_followup_error"] = "stale followup error"
+
+    cbh.set_question("a fresh question", render=False)
+
+    assert fake_st.session_state.get("last_chart_error") is None
+    assert fake_st.session_state.get("last_summary_error") is None
+    assert fake_st.session_state.get("last_followup_error") is None
+
+
+def test_vanna_calls_stashes_chart_error(monkeypatch):
+    """The helper in vanna_calls actually writes the error into session state on failure."""
+    import streamlit as st_real
+
+    import utils.vanna_calls as vc
+
+    captured = {}
+
+    class _FakeState(dict):
+        def __setitem__(self, k, v):
+            captured[k] = v
+            super().__setitem__(k, v)
+
+    monkeypatch.setattr(st_real, "session_state", _FakeState())
+
+    vc._stash_optional_step_error("last_chart_error", RuntimeError("plot crashed"))
+
+    assert captured.get("last_chart_error") == "plot crashed"
+
+
 def test_new_question_after_error_clears_pending_state(monkeypatch):
     """After a SQL error, typing a new question proceeds without needing to click Retry."""
     import utils.chat_bot_helper as cbh

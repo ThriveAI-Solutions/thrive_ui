@@ -40,6 +40,20 @@ def _get_user_id_from_session() -> int | None:
     return None
 
 
+def _stash_optional_step_error(key: str, e: Exception) -> None:
+    """Stash an error string on the session for chart/summary/followup callers to surface.
+
+    These optional-step methods deliberately swallow exceptions and return a
+    fallback value so the chat flow keeps moving. The caller in
+    ``utils.chat_bot_helper`` reads this session-state key after invoking the
+    step and emits a friendly MessageType.ERROR card when set, then clears it.
+    """
+    try:
+        st.session_state[key] = str(e)
+    except Exception:
+        pass
+
+
 @dataclass
 class UserContext:
     """User context containing authentication and authorization information."""
@@ -1138,6 +1152,7 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Chart generation check elapsed time is %s", elapsed_time)
         except Exception as e:
+            _stash_optional_step_error("last_chart_error", e)
             logger.exception("%s", e)
             return False
         else:
@@ -1155,6 +1170,7 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Plotly code generation elapsed time is %s", elapsed_time)
         except Exception as e:
+            _stash_optional_step_error("last_chart_error", e)
             logger.exception("%s", e)
             # Log chart generation error
             try:
@@ -1181,6 +1197,7 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Plotly figure generation elapsed time is %s", elapsed_time)
         except Exception as e:
+            _stash_optional_step_error("last_chart_error", e)
             logger.exception("%s", e)
             # Log chart generation error
             try:
@@ -1203,6 +1220,7 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Followup questions generation elapsed time is %s", elapsed_time)
         except Exception as e:
+            _stash_optional_step_error("last_followup_error", e)
             logger.exception("%s", e)
             return []
         else:
@@ -1218,6 +1236,7 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Summary generation elapsed time is %s", elapsed_time)
         except Exception as e:
+            _stash_optional_step_error("last_summary_error", e)
             logger.exception("%s", e)
             return None, 0
         else:
