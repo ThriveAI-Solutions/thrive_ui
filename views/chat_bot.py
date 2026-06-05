@@ -16,6 +16,7 @@ from utils.chat_bot_helper import (
     get_vn,
     group_messages_by_id,
     normal_message_flow,
+    render_friendly_error,
     render_message_group,
     set_question,
 )
@@ -37,14 +38,14 @@ def load_community_questions(csv_file):
 
         # Validate the CSV has a 'question' column
         if "question" not in df.columns:
-            st.error("CSV must have a 'question' column")
+            render_friendly_error("CSV must have a 'question' column")
             return
 
         # Get the list of questions
         questions = df["question"].dropna().tolist()
 
         if not questions:
-            st.error("No questions found in CSV")
+            render_friendly_error("No questions found in CSV")
             return
 
         # Store questions in session state
@@ -52,7 +53,7 @@ def load_community_questions(csv_file):
         st.success(f"✅ Loaded {len(questions)} community questions")
 
     except Exception as e:
-        st.error(f"Error loading CSV: {str(e)}")
+        render_friendly_error(f"Error loading CSV: {str(e)}")
 
 
 from utils.quick_logger import get_logger
@@ -522,44 +523,9 @@ if chat_input:
 # Get question from session state
 my_question = st.session_state.get("my_question", None)
 
-# If we have a pending SQL error from a prior run, render a persistent retry panel
-# Gate on an actual stored error message to avoid showing stale panels
-if not my_question and st.session_state.get("pending_sql_error", False) and st.session_state.get("last_run_sql_error"):
-    pending_question = st.session_state.get("pending_question")
-    error_msg = st.session_state.get("last_run_sql_error")
-    failed_sql = st.session_state.get("last_failed_sql")
-
-    def handle_retry_click():
-        """Callback to handle retry button click - sets up retry context."""
-        user_feedback = st.session_state.get("retry_feedback_persist", "")
-        st.session_state["use_retry_context"] = True
-        st.session_state["retry_failed_sql"] = failed_sql
-        st.session_state["retry_error_msg"] = error_msg
-        st.session_state["retry_user_feedback"] = user_feedback if user_feedback else None
-        st.session_state["my_question"] = pending_question
-        st.session_state["pending_sql_error"] = False
-        st.session_state["show_failed_sql_open"] = False
-
-    with st.chat_message(RoleType.ASSISTANT.value):
-        # Use warning with collapsible details for less intrusive error display
-        st.warning("I couldn't execute the generated SQL.")
-        # Collapsible error details section
-        with st.expander("View error details", expanded=False):
-            if error_msg:
-                st.markdown(f"**Database error:** {error_msg}")
-            if failed_sql:
-                st.markdown("**Failed SQL:**")
-                st.code(failed_sql, language="sql", line_numbers=True)
-        # Feedback input for user hints
-        st.text_input(
-            "Optional feedback to help improve the query",
-            key="retry_feedback_persist",
-            placeholder="e.g., 'try using patient_id instead of id' or 'use a LEFT JOIN'",
-        )
-        # Action button with on_click callback - more reliable than checking return value
-        st.button("Retry", type="primary", key="retry_persist", on_click=handle_retry_click)
-
-    st.stop()
+# Note: pending SQL errors render in-line as MessageType.ERROR via _render_error,
+# which embeds the Retry button when the message matches the active failed SQL.
+# No persistent panel / st.stop() needed — users can also just type a new question.
 
 if my_question:
     if st.session_state.get("agentic_mode", False):

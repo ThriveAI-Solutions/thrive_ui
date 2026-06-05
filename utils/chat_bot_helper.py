@@ -339,6 +339,33 @@ def create_summary_cache_key(question: str, df: pd.DataFrame) -> str:
         return hashlib.sha1((question or "").encode("utf-8")).hexdigest()
 
 
+def _consume_optional_step_error(key: str) -> str | None:
+    """Pop a stashed optional-step error (chart/summary/followup) from session state."""
+    try:
+        err = st.session_state.pop(key, None)
+    except Exception:
+        err = None
+    if isinstance(err, str) and err.strip():
+        return err
+    return None
+
+
+def _chart_failure_message(default_text: str, sql: str, my_question: str, elapsed: float) -> Message:
+    """Build a friendly chart-failure ERROR message, including the stashed detail when present."""
+    detail = _consume_optional_step_error("last_chart_error")
+    content = f"{default_text}\n\n{detail}" if detail else default_text
+    return Message(
+        RoleType.ASSISTANT,
+        content,
+        MessageType.ERROR,
+        sql,
+        my_question,
+        None,
+        elapsed,
+        group_id=get_current_group_id(),
+    )
+
+
 def get_chart(my_question, sql, df):
     vn_instance = vn if vn is not None else get_vn()
     elapsed_sum = 0
@@ -387,44 +414,11 @@ def get_chart(my_question, sql, df):
                     )
                 )
             else:
-                add_message(
-                    Message(
-                        RoleType.ASSISTANT,
-                        "I couldn't generate a chart",
-                        MessageType.ERROR,
-                        sql,
-                        my_question,
-                        None,
-                        elapsed_sum,
-                        group_id=get_current_group_id(),
-                    )
-                )
+                add_message(_chart_failure_message("I couldn't generate a chart", sql, my_question, elapsed_sum))
         else:
-            add_message(
-                Message(
-                    RoleType.ASSISTANT,
-                    "I couldn't generate a chart",
-                    MessageType.ERROR,
-                    sql,
-                    my_question,
-                    None,
-                    elapsed_sum,
-                    group_id=get_current_group_id(),
-                )
-            )
+            add_message(_chart_failure_message("I couldn't generate a chart", sql, my_question, elapsed_sum))
     else:
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                "I was unable to generate a chart for this question.",
-                MessageType.ERROR,
-                sql,
-                my_question,
-                None,
-                0,
-                group_id=get_current_group_id(),
-            )
-        )
+        add_message(_chart_failure_message("I was unable to generate a chart for this question.", sql, my_question, 0))
 
 
 def set_question(question: str, render=True):
@@ -452,6 +446,9 @@ def set_question(question: str, render=True):
             st.session_state["last_run_sql_error"] = None
             st.session_state["last_failed_sql"] = None
             st.session_state["show_failed_sql_open"] = False
+            st.session_state["last_chart_error"] = None
+            st.session_state["last_summary_error"] = None
+            st.session_state["last_followup_error"] = None
         except Exception:
             pass
         add_message(Message(RoleType.USER, question, MessageType.TEXT, group_id=group_id), render)
@@ -787,6 +784,30 @@ def get_followup_questions(my_question, sql, df):
     vn_instance = get_vn()
     followup_questions = vn_instance.generate_followup_questions(question=my_question, sql=sql, df=df)
 
+    # Surface a friendly ERROR card when generation failed instead of silently
+    # dropping a FOLLOWUP message that would render as nothing. Only consult the
+    # error stash when the call did NOT produce results — otherwise a stale
+    # stash from a prior turn could suppress a current-turn success.
+    if not followup_questions:
+        detail = _consume_optional_step_error("last_followup_error")
+        if detail:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"I couldn't generate follow-up questions.\n\n{detail}",
+                    MessageType.ERROR,
+                    sql,
+                    my_question,
+                    group_id=get_current_group_id(),
+                )
+            )
+            return
+    else:
+        try:
+            st.session_state.pop("last_followup_error", None)
+        except Exception:
+            pass
+
     add_message(
         Message(
             RoleType.ASSISTANT,
@@ -858,19 +879,89 @@ def _render_plotly_chart(message: Message, index: int):
     st.plotly_chart(chart, key=f"message_{message.id}")
 
 
+FRIENDLY_ERROR_TITLE = "🤔 Well this is awkward, we seem to have run into an error"
+
+
+def handle_sql_retry_click() -> None:
+    """Shared callback for the in-card SQL Retry button.
+
+    Reads error context from session state and arms the retry path in
+    normal_message_flow. Re-asks the original question with the previous failed
+    SQL + error message fed back to the LLM so it can try a different approach.
+    """
+    user_feedback = st.session_state.get("retry_feedback_active", "")
+    st.session_state["use_retry_context"] = True
+    st.session_state["retry_failed_sql"] = st.session_state.get("last_failed_sql")
+    st.session_state["retry_error_msg"] = st.session_state.get("last_run_sql_error")
+    st.session_state["retry_user_feedback"] = user_feedback if user_feedback else None
+    st.session_state["my_question"] = st.session_state.get("pending_question")
+    st.session_state["pending_sql_error"] = False
+
+
+def render_friendly_error(
+    error_message: str,
+    *,
+    failed_sql: str | None = None,
+    show_retry: bool = False,
+    retry_key_suffix: str = "active",
+    title: str = FRIENDLY_ERROR_TITLE,
+) -> None:
+    """Render a collapsible, friendly error card.
+
+    Replaces Streamlit's red wall for any chat-screen error. The expander is
+    collapsed by default so the surface stays calm; the raw error and failed
+    SQL (if any) live inside it. When ``show_retry`` is True, an in-card Retry
+    button + optional feedback box re-runs the SQL with the error context fed
+    back to the LLM.
+    """
+    with st.expander(title, expanded=False):
+        st.markdown("Sorry about that — here's what happened:")
+        if error_message:
+            st.code(error_message, language="text")
+        if failed_sql:
+            st.markdown("**The SQL we tried:**")
+            st.code(failed_sql, language="sql", line_numbers=True)
+        if show_retry:
+            st.text_input(
+                "Optional feedback to help improve the query",
+                key=f"retry_feedback_{retry_key_suffix}",
+                placeholder="e.g., 'try using patient_id instead of id' or 'use a LEFT JOIN'",
+            )
+            try:
+                st.session_state["retry_feedback_active"] = st.session_state.get(
+                    f"retry_feedback_{retry_key_suffix}", ""
+                )
+            except Exception:
+                pass
+            st.button(
+                "Retry",
+                type="primary",
+                key=f"retry_button_{retry_key_suffix}",
+                on_click=handle_sql_retry_click,
+            )
+
+
+def _is_active_sql_error(message: Message) -> bool:
+    """True if this ERROR message represents the currently-pending SQL failure."""
+    if not st.session_state.get("pending_sql_error"):
+        return False
+    last_failed = st.session_state.get("last_failed_sql")
+    if not last_failed:
+        return False
+    return bool(getattr(message, "query", None)) and message.query == last_failed
+
+
 def _render_error(message: Message, index: int):
     if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
         st.write(f"Elapsed Time: {message.elapsed_time}")
-    # Short error messages are displayed directly; long ones (stack traces) use collapsible
-    error_length_threshold = 300
-    if len(message.content) <= error_length_threshold:
-        # Short, user-friendly error - display directly in warning
-        st.warning(message.content)
-    else:
-        # Long error (likely stack trace) - use collapsible to reduce visual clutter
-        st.warning("An error occurred while processing your request.")
-        with st.expander("View error details", expanded=False):
-            st.code(message.content, language="text")
+    show_retry = _is_active_sql_error(message)
+    failed_sql = getattr(message, "query", None) if show_retry else None
+    render_friendly_error(
+        message.content,
+        failed_sql=failed_sql,
+        show_retry=show_retry,
+        retry_key_suffix=f"msg_{getattr(message, 'id', index)}",
+    )
 
 
 def _render_dataframe(message: Message, index: int):
@@ -1170,6 +1261,48 @@ def add_acknowledgement():
 
 
 def normal_message_flow(my_question: str):
+    """Top-level entry point — wraps the flow in a safety net so that any
+    unexpected exception surfaces as a friendly ERROR card instead of
+    Streamlit's default red traceback wall."""
+    try:
+        return _run_message_flow(my_question)
+    except BaseException as e:
+        # Re-raise Streamlit's own control-flow exceptions (RerunException,
+        # StopException) so the script runner can act on them. Identifying
+        # them by class name keeps us version-independent across Streamlit
+        # internals.
+        if type(e).__name__ in ("RerunException", "StopException"):
+            raise
+        if not isinstance(e, Exception):
+            raise
+        logger.exception("Unexpected error in chat flow")
+        try:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"Something went wrong while processing your question.\n\n{e}",
+                    MessageType.ERROR,
+                    "",
+                    my_question,
+                    None,
+                    None,
+                    group_id=get_current_group_id(),
+                )
+            )
+        except Exception:
+            logger.exception("Failed to persist friendly error message")
+            try:
+                with st.chat_message(RoleType.ASSISTANT.value):
+                    render_friendly_error(str(e))
+            except Exception:
+                logger.exception("Failed to render fallback friendly error")
+        try:
+            st.session_state["my_question"] = None
+        except Exception:
+            pass
+
+
+def _run_message_flow(my_question: str):
     # Live source of truth for the toggle is st.session_state.agentic_mode —
     # see views/chat_bot.py where the sidebar checkbox writes to it. The
     # User ORM object is the persistence layer; reading user.agentic_mode
@@ -1561,7 +1694,23 @@ def normal_message_flow(my_question: str):
                 if st.session_state.get("speak_summary", True):
                     speak(summary)
             else:
-                # Do not add a blank/failed summary message per guidance; optionally speak a brief notice
+                # When generation failed (an error was stashed by vanna_calls),
+                # surface a friendly ERROR card so the user knows what happened
+                # instead of silently dropping the summary.
+                detail = _consume_optional_step_error("last_summary_error")
+                if detail and st.session_state.get("show_summary", True):
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            f"I couldn't generate a summary.\n\n{detail}",
+                            MessageType.ERROR,
+                            final_sql,
+                            my_question,
+                            None,
+                            elapsed_time,
+                            group_id=get_current_group_id(),
+                        )
+                    )
                 if st.session_state.get("speak_summary", True):
                     speak("Summary is unavailable for this result")
 
@@ -1574,15 +1723,35 @@ def normal_message_flow(my_question: str):
         # Trigger a rerun to properly refresh the UI
         st.rerun()
     elif final_sql:
-        # SQL was generated but execution/validation failed after all retries
+        # SQL was generated but execution/validation failed after all retries.
+        # We surface the failure as a persisted ERROR message that renders via
+        # _render_error as a friendly collapsible card with an in-card Retry
+        # button. No st.stop() — the user can also just type a new question.
         error_msg = last_error_msg or st.session_state.get("last_run_sql_error")
         failed_sql = last_failed_sql or st.session_state.get("last_failed_sql")
 
-        # Add error message to messages for test verification and history
+        # Set the active-error session keys BEFORE adding the message so that
+        # _render_error sees pending_sql_error=True during the immediate render.
+        # We populate both the canonical (last_*) and retry-context (retry_*)
+        # keys so the in-card Retry button can pick them up later.
+        st.session_state["pending_sql_error"] = True
+        st.session_state["pending_question"] = my_question
+        st.session_state["last_run_sql_error"] = error_msg
+        st.session_state["last_failed_sql"] = failed_sql
+        st.session_state["retry_error_msg"] = error_msg
+        st.session_state["retry_failed_sql"] = failed_sql
+
+        if attempt > 1:
+            display_msg = f"I couldn't execute the SQL after {attempt - 1} automatic retries."
+        else:
+            display_msg = "I couldn't execute the generated SQL."
+        if error_msg:
+            display_msg = f"{display_msg}\n\n{error_msg}"
+
         add_message(
             Message(
                 RoleType.ASSISTANT,
-                f"SQL failed: {error_msg}" if error_msg else "SQL failed after retries",
+                display_msg,
                 MessageType.ERROR,
                 failed_sql,
                 my_question,
@@ -1607,46 +1776,6 @@ def normal_message_flow(my_question: str):
                         group_id=get_current_group_id(),
                     )
                 )
-
-        # Store context in session state for use after page rerun
-        st.session_state["pending_sql_error"] = True
-        st.session_state["pending_question"] = my_question
-        st.session_state["retry_failed_sql"] = failed_sql
-        st.session_state["retry_error_msg"] = error_msg
-
-        def handle_inline_retry_click():
-            """Callback to handle inline retry button click - sets up retry context."""
-            user_feedback = st.session_state.get("retry_feedback_inline", "")
-            st.session_state["use_retry_context"] = True
-            st.session_state["retry_user_feedback"] = user_feedback if user_feedback else None
-            st.session_state["my_question"] = st.session_state.get("pending_question")
-            st.session_state["pending_sql_error"] = False
-
-        with st.chat_message(RoleType.ASSISTANT.value):
-            # Use warning with collapsible details for less intrusive error display
-            if attempt > 1:
-                st.warning(f"I couldn't execute the SQL after {attempt - 1} automatic retries.")
-            else:
-                st.warning("I couldn't execute the generated SQL.")
-            # Collapsible error details section
-            with st.expander("View error details", expanded=False):
-                if error_msg:
-                    st.markdown(f"**Database error:** {error_msg}")
-                if failed_sql:
-                    st.markdown("**Failed SQL:**")
-                    st.code(failed_sql, language="sql", line_numbers=True)
-            # Feedback input for user hints
-            st.text_input(
-                "Optional feedback to help improve the query",
-                key="retry_feedback_inline",
-                placeholder="e.g., 'try using patient_id instead of id' or 'use a LEFT JOIN'",
-            )
-            # Action button with on_click callback - more reliable than checking return value
-            cols = st.columns([0.2, 0.8])
-            with cols[0]:
-                st.button("Retry", type="primary", key="retry_inline", on_click=handle_inline_retry_click)
-
-        st.stop()
     else:
         # Show the LLM's actual response if it gave one, otherwise use generic message
         llm_response = st.session_state.pop("last_llm_non_sql_response", None)
