@@ -159,71 +159,64 @@ class TestVannaServiceExceptions:
 
     @patch("streamlit.error")
     def test_generate_sql_exception(self, mock_st_error, mock_vanna_service):
-        """Test that exceptions in generate_sql are handled properly."""
+        """generate_sql swallows the exception silently; the friendly error card is rendered
+        by the chat-flow layer when no SQL is produced."""
         service = mock_vanna_service
         service.vn.generate_sql.side_effect = Exception("Failed to generate SQL")
 
         with patch.dict("streamlit.secrets", {"security": {"allow_llm_to_see_data": False}}):
             result, elapsed_time = service.generate_sql("Show me the data")
 
-            # Should return None and display error
             assert result is None
             assert elapsed_time == 0
-            mock_st_error.assert_called_once()
-            assert "Error generating SQL" in mock_st_error.call_args[0][0]
+            mock_st_error.assert_not_called()
 
     @patch("streamlit.error")
     def test_is_sql_valid_exception(self, mock_st_error, mock_vanna_service):
-        """Test that exceptions in is_sql_valid are handled properly."""
+        """is_sql_valid returns False on exception without surfacing a red-wall st.error."""
         service = mock_vanna_service
         service.vn.is_sql_valid.side_effect = Exception("SQL validation error")
 
         result = service.is_sql_valid("SELECT * FROM table")
 
-        # Should return False and display error
         assert result is False
-        mock_st_error.assert_called_once()
-        assert "Error checking SQL validity" in mock_st_error.call_args[0][0]
+        mock_st_error.assert_not_called()
 
     @patch("streamlit.error")
     def test_run_sql_exception(self, mock_st_error, mock_vanna_service):
-        """Test that exceptions in run_sql are handled properly."""
+        """run_sql stores error context in session state but does not render st.error;
+        normal_message_flow renders the friendly ERROR card after retries are exhausted."""
         service = mock_vanna_service
         service.vn.run_sql.side_effect = Exception("Failed to run SQL")
 
         result = service.run_sql("SELECT * FROM table")
 
-        # Should return None and display error
         assert result is None
-        mock_st_error.assert_called_once()
-        assert "Error running SQL" in mock_st_error.call_args[0][0]
+        mock_st_error.assert_not_called()
 
     @patch("streamlit.error")
     def test_should_generate_chart_exception(self, mock_st_error, mock_vanna_service):
-        """Test that exceptions in should_generate_chart are handled properly."""
+        """should_generate_chart returns False on exception without an st.error red wall."""
         service = mock_vanna_service
         service.vn.should_generate_chart.side_effect = Exception("Chart generation decision error")
 
         result = service.should_generate_chart("question", "sql", DataFrame())
 
-        # Should return False and display error
         assert result is False
-        mock_st_error.assert_called_once()
-        assert "Error checking if we should generate a chart" in mock_st_error.call_args[0][0]
+        mock_st_error.assert_not_called()
 
     @patch("streamlit.error")
     def test_generate_plotly_code_exception(self, mock_st_error, mock_vanna_service):
-        """Test that exceptions in generate_plotly_code are handled properly."""
+        """generate_plotly_code returns (None, 0) on exception. The caller (get_chart) emits a
+        friendly ERROR message via the existing fallback path."""
         service = mock_vanna_service
         service.vn.generate_plotly_code.side_effect = Exception("Plotly code generation error")
 
         result, elapsed_time = service.generate_plotly_code("question", "sql", DataFrame())
 
-        # Should return None and display error
         assert result is None
         assert elapsed_time == 0
-        mock_st_error.assert_called_once()
-        assert "Error generating Plotly code" in mock_st_error.call_args[0][0]
+        mock_st_error.assert_not_called()
 
     @pytest.mark.skip(reason="Streamlit caching interferes with MagicMock serialization")
     @patch("streamlit.error")
@@ -246,16 +239,15 @@ class TestVannaServiceExceptions:
 
     @patch("streamlit.error")
     def test_generate_followup_questions_exception(self, mock_st_error, mock_vanna_service):
-        """Test that exceptions in generate_followup_questions are handled properly."""
+        """generate_followup_questions returns [] on exception without an st.error red wall.
+        Follow-ups are optional, so silent failure is the right behavior."""
         service = mock_vanna_service
         service.vn.generate_followup_questions.side_effect = Exception("Followup questions error")
 
         result = service.generate_followup_questions("question", "sql", DataFrame())
 
-        # Should return empty list and display error
         assert result == []
-        mock_st_error.assert_called_once()
-        assert "Error generating followup questions" in mock_st_error.call_args[0][0]
+        mock_st_error.assert_not_called()
 
     @pytest.mark.skip(reason="Streamlit caching interferes with this test")
     def test_generate_summary_exception(self, mock_vanna_service):

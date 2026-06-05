@@ -981,7 +981,6 @@ class VannaService:
             except Exception as log_err:
                 logger.warning("Failed to log LLM context: %s", log_err)
         except Exception as e:
-            st.error(f"Error generating SQL: {e}")
             logger.exception("%s", e)
             # Log error to database
             try:
@@ -1049,7 +1048,6 @@ class VannaService:
 
             return _self.generate_sql(augmented_question)
         except Exception as e:
-            st.error(f"Error regenerating SQL: {e}")
             logger.exception("%s", e)
             return None, 0
 
@@ -1063,7 +1061,6 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("SQL validation elapsed time is %s", elapsed_time)
         except Exception as e:
-            st.error(f"Error checking SQL validity: {e}")
             logger.exception("%s", e)
             return False
         else:
@@ -1104,13 +1101,15 @@ class VannaService:
             except Exception:
                 pass
         except Exception as e:
-            # Persist error context for downstream UI/logic (e.g., retry flow)
+            # Persist error context for downstream UI/logic (e.g., retry flow).
+            # We deliberately do NOT render st.error here — the failure surfaces
+            # to the user via the friendly MessageType.ERROR card emitted by
+            # normal_message_flow once all retries are exhausted.
             try:
                 st.session_state["last_run_sql_error"] = str(e)
                 st.session_state["last_failed_sql"] = sql
             except Exception:
                 pass
-            st.error(f"Error running SQL: {e}")
             logger.exception("%s", e)
             # Log SQL execution error to database
             try:
@@ -1139,7 +1138,6 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Chart generation check elapsed time is %s", elapsed_time)
         except Exception as e:
-            st.error(f"Error checking if we should generate a chart: {e}")
             logger.exception("%s", e)
             return False
         else:
@@ -1157,7 +1155,6 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Plotly code generation elapsed time is %s", elapsed_time)
         except Exception as e:
-            st.error(f"Error generating Plotly code: {e}")
             logger.exception("%s", e)
             # Log chart generation error
             try:
@@ -1184,7 +1181,6 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Plotly figure generation elapsed time is %s", elapsed_time)
         except Exception as e:
-            st.error(f"Error generating plot: {e}")
             logger.exception("%s", e)
             # Log chart generation error
             try:
@@ -1207,7 +1203,6 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Followup questions generation elapsed time is %s", elapsed_time)
         except Exception as e:
-            st.error(f"Error generating followup questions: {e}")
             logger.exception("%s", e)
             return []
         else:
@@ -1223,7 +1218,6 @@ class VannaService:
             elapsed_time = end_time - start_time
             logger.info("Summary generation elapsed time is %s", elapsed_time)
         except Exception as e:
-            st.error(f"Error generating summary: {e}")
             logger.exception("%s", e)
             return None, 0
         else:

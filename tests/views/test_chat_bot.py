@@ -341,20 +341,23 @@ class TestRenderMessage:
 
     @patch("utils.chat_bot_helper.st")
     def test_render_short_error_message(self, mock_st):
-        """Short error messages are displayed directly in warning without collapsible."""
+        """All errors render inside the friendly collapsible card — no st.warning or st.error."""
+        mock_st.session_state = {}
         msg = Message(role=RoleType.ASSISTANT, content="An error occurred", type=MessageType.ERROR)
 
         render_message(msg, 4)
 
         self.common_asserts(mock_st, RoleType.ASSISTANT.value)
-        # Short errors display directly in warning
-        mock_st.warning.assert_called_once_with("An error occurred")
-        mock_st.expander.assert_not_called()
+        mock_st.warning.assert_not_called()
+        mock_st.error.assert_not_called()
+        mock_st.expander.assert_called_once()
+        title_arg = mock_st.expander.call_args.args[0]
+        assert "Well this is awkward" in title_arg
 
     @patch("utils.chat_bot_helper.st")
     def test_render_long_error_message(self, mock_st):
-        """Long error messages (stack traces) use collapsible details."""
-        # Create a long error message (over 300 chars) to trigger collapsible
+        """Long error messages also use the friendly collapsible card (no separate branching)."""
+        mock_st.session_state = {}
         long_error = "x" * 350
 
         msg = Message(role=RoleType.ASSISTANT, content=long_error, type=MessageType.ERROR)
@@ -362,9 +365,11 @@ class TestRenderMessage:
         render_message(msg, 4)
 
         self.common_asserts(mock_st, RoleType.ASSISTANT.value)
-        # Long errors use warning with collapsible details
-        mock_st.warning.assert_called_once_with("An error occurred while processing your request.")
-        mock_st.expander.assert_called_once_with("View error details", expanded=False)
+        mock_st.warning.assert_not_called()
+        mock_st.error.assert_not_called()
+        mock_st.expander.assert_called_once()
+        title_arg = mock_st.expander.call_args.args[0]
+        assert "Well this is awkward" in title_arg
 
     @patch("utils.chat_bot_helper.st")
     def test_render_dataframe_message(self, mock_st):
