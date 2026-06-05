@@ -785,20 +785,28 @@ def get_followup_questions(my_question, sql, df):
     followup_questions = vn_instance.generate_followup_questions(question=my_question, sql=sql, df=df)
 
     # Surface a friendly ERROR card when generation failed instead of silently
-    # dropping a FOLLOWUP message that would render as nothing.
-    detail = _consume_optional_step_error("last_followup_error")
-    if detail:
-        add_message(
-            Message(
-                RoleType.ASSISTANT,
-                f"I couldn't generate follow-up questions.\n\n{detail}",
-                MessageType.ERROR,
-                sql,
-                my_question,
-                group_id=get_current_group_id(),
+    # dropping a FOLLOWUP message that would render as nothing. Only consult the
+    # error stash when the call did NOT produce results — otherwise a stale
+    # stash from a prior turn could suppress a current-turn success.
+    if not followup_questions:
+        detail = _consume_optional_step_error("last_followup_error")
+        if detail:
+            add_message(
+                Message(
+                    RoleType.ASSISTANT,
+                    f"I couldn't generate follow-up questions.\n\n{detail}",
+                    MessageType.ERROR,
+                    sql,
+                    my_question,
+                    group_id=get_current_group_id(),
+                )
             )
-        )
-        return
+            return
+    else:
+        try:
+            st.session_state.pop("last_followup_error", None)
+        except Exception:
+            pass
 
     add_message(
         Message(
@@ -919,6 +927,12 @@ def render_friendly_error(
                 key=f"retry_feedback_{retry_key_suffix}",
                 placeholder="e.g., 'try using patient_id instead of id' or 'use a LEFT JOIN'",
             )
+            try:
+                st.session_state["retry_feedback_active"] = st.session_state.get(
+                    f"retry_feedback_{retry_key_suffix}", ""
+                )
+            except Exception:
+                pass
             st.button(
                 "Retry",
                 type="primary",
@@ -1277,6 +1291,11 @@ def normal_message_flow(my_question: str):
             )
         except Exception:
             logger.exception("Failed to persist friendly error message")
+            try:
+                with st.chat_message(RoleType.ASSISTANT.value):
+                    render_friendly_error(str(e))
+            except Exception:
+                logger.exception("Failed to render fallback friendly error")
         try:
             st.session_state["my_question"] = None
         except Exception:

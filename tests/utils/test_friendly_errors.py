@@ -339,6 +339,49 @@ def test_handle_sql_retry_click_sets_retry_context(monkeypatch):
     assert fake_st.session_state.get("pending_sql_error") is False
 
 
+def test_retry_feedback_from_dynamic_textbox_key_reaches_handler(monkeypatch):
+    """End-to-end: feedback typed into the active error's dynamic widget key
+    flows through render_friendly_error → handle_sql_retry_click → retry_user_feedback.
+
+    Regression test: before the fix, render_friendly_error wrote the textbox to
+    `retry_feedback_msg_<id>` while handle_sql_retry_click only read
+    `retry_feedback_active`, so feedback was silently dropped.
+    """
+    import utils.chat_bot_helper as cbh
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+
+    # Simulate that Streamlit's text_input has stored the user's typed value
+    # under the dynamic widget key (this is what real Streamlit does).
+    fake_st.session_state.update(
+        {
+            "pending_sql_error": True,
+            "pending_question": "Show me data",
+            "last_failed_sql": "SELECT 1",
+            "last_run_sql_error": "syntax error",
+            "retry_feedback_msg_42": "use a JOIN",
+        }
+    )
+
+    # Render the active error card — this is where the canonical key gets mirrored.
+    cbh.render_friendly_error(
+        "syntax error",
+        failed_sql="SELECT 1",
+        show_retry=True,
+        retry_key_suffix="msg_42",
+    )
+
+    # After rendering, the canonical key should mirror the dynamic one.
+    assert fake_st.session_state.get("retry_feedback_active") == "use a JOIN"
+
+    # Now click Retry.
+    cbh.handle_sql_retry_click()
+
+    assert fake_st.session_state.get("retry_user_feedback") == "use a JOIN"
+    assert fake_st.session_state.get("use_retry_context") is True
+
+
 def test_chart_failure_includes_stashed_error_detail(monkeypatch):
     """When a chart fails, the friendly ERROR message includes the actual error from session state."""
     import utils.chat_bot_helper as cbh

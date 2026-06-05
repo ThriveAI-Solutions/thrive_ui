@@ -1445,6 +1445,7 @@ class VannaService:
                             yield summary_result
                     except Exception as e:
                         logger.warning(f"Failed to generate summary for streaming fallback: {e}")
+                        _stash_optional_step_error("last_summary_error", e)
                         # Return empty string to avoid breaking the UI
                         yield ""
             finally:
@@ -1505,6 +1506,7 @@ class VannaService:
                         elapsed = time.perf_counter() - start
                 except Exception as e:
                     logger.warning("Failed to generate non-streaming summary: %s", e)
+                    _stash_optional_step_error("last_summary_error", e)
                     summary_text = ""
                     elapsed = 0
                 # Persist final content to session_state for downstream helpers/cache
@@ -3932,7 +3934,9 @@ def auto_generate_sql_pairs(count: int = 5) -> dict:
             prompt_parts = [f"Database Schema (DDL):\n{ddl_context}"]
 
             if example_pairs_text:
-                prompt_parts.append(f"Working Example Question/SQL Pairs (use these as reference for table names, JOINs, and filters):\n{example_pairs_text}")
+                prompt_parts.append(
+                    f"Working Example Question/SQL Pairs (use these as reference for table names, JOINs, and filters):\n{example_pairs_text}"
+                )
 
             if doc_context:
                 prompt_parts.append(f"Documentation:\n{doc_context}")
@@ -3974,7 +3978,9 @@ def auto_generate_sql_pairs(count: int = 5) -> dict:
             # Also check via VannaService.check_references
             checked_sql = vanna_service.check_references(sql)
             if checked_sql is None:
-                _reject_pair(pair_detail, results, "Forbidden reference or configuration error detected by check_references")
+                _reject_pair(
+                    pair_detail, results, "Forbidden reference or configuration error detected by check_references"
+                )
                 continue
 
             # Step 3: Execute SQL against database
@@ -4041,7 +4047,9 @@ def _parse_question_sql_response(response_text: str) -> tuple[str | None, str | 
     sql = None
 
     # Try structured QUESTION:/SQL: format (tolerates markdown bold in various positions)
-    q_match = re.search(r"\*{0,2}QUESTION\*{0,2}:\s*(.+?)(?=\n\*{0,2}SQL\*{0,2}:)", response_text, re.DOTALL | re.IGNORECASE)
+    q_match = re.search(
+        r"\*{0,2}QUESTION\*{0,2}:\s*(.+?)(?=\n\*{0,2}SQL\*{0,2}:)", response_text, re.DOTALL | re.IGNORECASE
+    )
     s_match = re.search(r"(?:^|\n)\*{0,2}SQL\*{0,2}:\s*(.+)", response_text, re.DOTALL | re.IGNORECASE)
 
     if q_match and s_match:
