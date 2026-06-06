@@ -49,7 +49,7 @@ def _df_with_mixed_rows() -> pd.DataFrame:
                 "start_password": "pw",
                 "First Name ": "Charlie",
                 "Last Name ": "Brown",
-                "Email": "",
+                "Email": float("nan"),
                 "Organization": "Acme",
             },
             # Missing organization
@@ -59,7 +59,7 @@ def _df_with_mixed_rows() -> pd.DataFrame:
                 "First Name ": "Dave",
                 "Last Name ": "Lee",
                 "Email": "dave@example.com",
-                "Organization": "",
+                "Organization": float("nan"),
             },
             # Malformed email
             {

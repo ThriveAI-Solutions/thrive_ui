@@ -50,6 +50,24 @@ except Exception:
 logger = get_logger(__name__)
 
 
+def _cell_text(raw) -> str:
+    """Return the cleaned text for a spreadsheet cell.
+
+    pandas reads blank Excel cells as float NaN, which str()-ifies to 'nan'
+    (truthy) and would silently bypass the empty-field pre-flight checks.
+    Returns "" when the cell is missing, NaN, or whitespace-only.
+    """
+    if raw is None:
+        return ""
+    try:
+        if pd.isna(raw):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    text = str(raw).strip()
+    return "" if text.lower() == "nan" else text
+
+
 def import_users():
     """
     Import users from Excel file and save them to the database.
@@ -120,15 +138,16 @@ def import_users():
                     "physician": role_map.get("doctor", None),
                 }
             )
+            _patient_fallback_role_id = role_map.get("patient", 1)
 
         for index, row in df.iterrows():
             try:
-                username = str(row.get("UserID", "")).strip()
-                password = str(row.get("start_password", "")).strip()
-                first_name = str(row.get("First Name ", "")).strip()  # Note the space after 'Name'
-                last_name = str(row.get("Last Name ", "")).strip()  # Note the space after 'Name'
-                email = str(row.get("Email", row.get("email", ""))).strip()
-                organization = str(row.get("Organization", row.get("organization", ""))).strip()
+                username = _cell_text(row.get("UserID"))
+                password = _cell_text(row.get("start_password"))
+                first_name = _cell_text(row.get("First Name "))  # trailing space
+                last_name = _cell_text(row.get("Last Name "))  # trailing space
+                email = _cell_text(row.get("Email", row.get("email")))
+                organization = _cell_text(row.get("Organization", row.get("organization")))
                 role_name = "Doctor"  # Default role since not in Excel
 
                 # Skip rows with missing required data
@@ -148,10 +167,7 @@ def import_users():
                 # Map role name to role ID
                 role_id = role_map.get(role_name.lower())
                 if not role_id:
-                    # Default to Patient role if role not found
-                    with SessionLocal() as fallback_session:
-                        default_role = fallback_session.query(UserRole).filter(UserRole.role_name == "Patient").first()
-                        role_id = default_role.id if default_role else 1
+                    role_id = _patient_fallback_role_id
                     logger.warning(f"Role '{role_name}' not found for user {username}, defaulting to Patient")
 
                 # Delegate format + uniqueness validation and persistence to
@@ -649,7 +665,6 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 "📁 Import users from Excel file: `./utils/config/user_list.xlsx`. "
                 "Required columns: UserID, start_password, First Name, Last Name, Email, Organization."
             )
-            st.caption("Expected columns: UserID, start_password, 'First Name ', 'Last Name '")
             if st.button("Import Users", type="primary", help="Import users from ./utils/config/user_list.xlsx"):
                 import_users()
 
