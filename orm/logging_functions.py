@@ -23,6 +23,7 @@ from orm.models import (
     SessionLocal,
     UserActivity,
 )
+from utils.error_fallback_sink import write_fallback_record
 from utils.quick_logger import get_logger
 
 logger = get_logger(__name__)
@@ -420,6 +421,7 @@ def log_error(
     Returns:
         The created ErrorLog record, or None if logging failed
     """
+    captured_traceback = traceback.format_exc() if include_traceback else None
     try:
         with SessionLocal() as session:
             error = ErrorLog(
@@ -430,7 +432,7 @@ def log_error(
                 severity=severity.value,
                 error_type=error_type,
                 error_message=error_message[:2000] if error_message else None,
-                stack_trace=traceback.format_exc() if include_traceback else None,
+                stack_trace=captured_traceback,
                 question=question[:1000] if question else None,
                 generated_sql=generated_sql,
                 llm_provider=llm_provider,
@@ -445,6 +447,30 @@ def log_error(
             session.refresh(error)
             return error
     except Exception as e:
+        try:
+            write_fallback_record(
+                {
+                    "created_at": datetime.now().isoformat(),
+                    "category": category.value,
+                    "severity": severity.value,
+                    "error_type": error_type,
+                    "error_message": error_message[:2000] if error_message else None,
+                    "stack_trace": captured_traceback,
+                    "question": question[:1000] if question else None,
+                    "generated_sql": generated_sql,
+                    "llm_provider": llm_provider,
+                    "llm_model": llm_model,
+                    "context_data": json.dumps(context_data) if context_data else None,
+                    "user_id": user_id,
+                    "message_id": message_id,
+                    "group_id": group_id,
+                    "auto_retry_attempted": auto_retry_attempted,
+                    "retry_successful": retry_successful,
+                    "retry_count": retry_count,
+                }
+            )
+        except Exception:
+            pass  # write_fallback_record is already defensive; belt-and-braces
         logger.warning("Failed to log error: %s", e)
         return None
 
