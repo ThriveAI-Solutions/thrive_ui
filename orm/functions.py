@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 
 import streamlit as st
 from sqlalchemy import case, func
@@ -8,6 +9,20 @@ from sqlalchemy.orm import joinedload
 from orm.models import Message, SessionLocal, User, UserRole
 from utils.enums import MessageType, RoleType
 from utils.quick_logger import get_logger
+
+# Lightweight email format check per Epic #98 — no MX lookups, no RFC compliance.
+# Requires at least one non-space + "@" + non-space + "." + non-space.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _is_valid_email(value: str | None) -> bool:
+    if value is None:
+        return False
+    stripped = value.strip()
+    if not stripped:
+        return False
+    return bool(_EMAIL_RE.match(stripped))
+
 
 logger = get_logger(__name__)
 
@@ -189,7 +204,17 @@ def save_user_settings():
         logger.error(f"Error saving user settings: {e}")
 
 
-def create_user(username: str, password: str, first_name: str, last_name: str, role_id: int, theme: str = None) -> bool:
+def create_user(
+    username: str,
+    password: str,
+    first_name: str,
+    last_name: str,
+    role_id: int,
+    *,
+    email: str,
+    organization: str,
+    theme: str | None = None,
+) -> bool:
     """
     Create a new user with the specified details.
 
@@ -199,6 +224,10 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
         first_name: User's first name
         last_name: User's last name
         role_id: The ID of the user role
+        email: Required keyword-only. Validated against a lightweight regex
+            and rejected if a case-insensitive duplicate already exists.
+        organization: Required keyword-only. Stripped and rejected if empty.
+        theme: Optional theme preference.
 
     Returns:
         bool: True if user was created successfully, False otherwise
@@ -211,11 +240,24 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
         username = (username or "").strip()
         first_name = (first_name or "").strip()
         last_name = (last_name or "").strip()
+        email = (email or "").strip()
+        organization = (organization or "").strip()
+
+        # Validate email format and organization presence before opening a session.
+        if not _is_valid_email(email):
+            return False
+        if not organization:
+            return False
 
         with SessionLocal() as session:
             # Check if username already exists
             existing_user = session.query(User).filter(func.lower(User.username) == username.lower()).first()
             if existing_user:
+                return False
+
+            # Check if email already exists (case-insensitive).
+            existing_email = session.query(User).filter(func.lower(User.email) == email.lower()).first()
+            if existing_email:
                 return False
 
             # Hash the password using SHA-256 (matching existing pattern)
@@ -228,6 +270,8 @@ def create_user(username: str, password: str, first_name: str, last_name: str, r
                 first_name=first_name,
                 last_name=last_name,
                 user_role_id=role_id,
+                email=email,
+                organization=organization,
                 show_sql=True,
                 show_table=True,
                 show_plotly_code=False,

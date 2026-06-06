@@ -620,8 +620,18 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                     if not cu_username or not cu_password or not cu_first:
                         st.error("Please provide username, password, and first name.")
                     else:
+                        # TODO(#101): replace these placeholders with real Email + Organization
+                        # input fields. Keeping the form functional in the gap between #99 (which
+                        # adds the required keyword-only args) and #101 (which wires the inputs).
                         ok = create_user(
-                            cu_username, cu_password, cu_first, cu_last, role_id_by_name.get(cu_role_name), cu_theme
+                            cu_username,
+                            cu_password,
+                            cu_first,
+                            cu_last,
+                            role_id_by_name.get(cu_role_name),
+                            email=f"{cu_username}@placeholder.local",
+                            organization="(not set)",
+                            theme=cu_theme,
                         )
                         if ok:
                             st.success("User created.")

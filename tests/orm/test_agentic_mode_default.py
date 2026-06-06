@@ -20,7 +20,18 @@ def test_create_user_defaults_agentic_mode_on(in_memory_orm_session):
     with in_memory_orm_session() as session:
         role_id = session.query(UserRole).filter(UserRole.role_name == "Doctor").one().id
 
-    assert create_user("newdoc", "pw", "New", "Doc", role_id) is True
+    assert (
+        create_user(
+            "newdoc",
+            "pw",
+            "New",
+            "Doc",
+            role_id,
+            email="newdoc@example.com",
+            organization="Acme",
+        )
+        is True
+    )
 
     with in_memory_orm_session() as session:
         user = session.query(User).filter(User.username == "newdoc").one()
