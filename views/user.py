@@ -396,8 +396,8 @@ with tab1:
                 if st.form_submit_button("Save Profile", type="primary"):
                     ok = update_user(
                         int(user_id),
-                        email=my_email,
-                        organization=my_organization,
+                        email=my_email.strip() or None,
+                        organization=my_organization.strip() or None,
                     )
                     if ok:
                         st.success("Profile updated.")
@@ -870,8 +870,8 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                                 nu_last,
                                 role_id_by_name.get(nu_role_name),
                                 nu_theme,
-                                email=nu_email,
-                                organization=nu_organization,
+                                email=nu_email.strip() or None,
+                                organization=nu_organization.strip() or None,
                             )
                             if ok:
                                 st.success("Profile updated.")

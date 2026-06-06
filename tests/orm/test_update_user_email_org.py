@@ -134,6 +134,20 @@ def test_update_user_leaves_email_unchanged_when_kwarg_omitted(in_memory_orm_ses
         assert user.organization == "Acme"
 
 
+def test_update_user_email_none_organization_set_updates_only_organization(in_memory_orm_session):
+    """None email kwarg leaves email untouched while organization is updated."""
+    role_id = _doctor_role_id(in_memory_orm_session)
+    user_id = _seed_alice(in_memory_orm_session, role_id)
+
+    ok = update_user(user_id, email=None, organization="Globex")
+    assert ok is True
+
+    with in_memory_orm_session() as session:
+        user = session.query(User).filter(User.id == user_id).one()
+        assert user.email == "alice@example.com"
+        assert user.organization == "Globex"
+
+
 # ── Whitespace handling ───────────────────────────────────────────────────
 
 
