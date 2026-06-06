@@ -1,10 +1,8 @@
-import hashlib
 import io
 
 import pandas as pd
 import streamlit as st
 from pandas import DataFrame
-from sqlalchemy import func
 
 from orm.functions import (
     admin_change_password,
@@ -27,16 +25,27 @@ from utils.chat_bot_helper import get_vn
 from utils.enums import ThemeType
 from utils.vanna_calls import auto_generate_sql_pairs, refresh_stats, train_all
 
-# Get the current user ID from session state cookies
-user_id = st.session_state.cookies.get("user_id")
+# Get the current user ID from session state cookies. Guarded so the module
+# stays importable when no Streamlit runtime is attached (e.g., pytest);
+# mirrors the defensive pattern in orm.functions._get_current_user_id.
+try:
+    user_id = st.session_state.cookies.get("user_id")
+except Exception:
+    user_id = None
 # Get the current user role from session state (not cookies) and default to least privileged
-user_role = st.session_state.get("user_role", RoleTypeEnum.PATIENT.value)
+try:
+    user_role = st.session_state.get("user_role", RoleTypeEnum.PATIENT.value)
+except Exception:
+    user_role = RoleTypeEnum.PATIENT.value
 # Don't get training data at module load time - get it when rendering the page
 # df = vn.get_training_data()
 
 from utils.quick_logger import get_logger, pvlog
 
-pvlog("debug", f"{st.session_state.to_dict()=}")
+try:
+    pvlog("debug", f"{st.session_state.to_dict()=}")
+except Exception:
+    pass
 
 logger = get_logger(__name__)
 
@@ -44,7 +53,14 @@ logger = get_logger(__name__)
 def import_users():
     """
     Import users from Excel file and save them to the database.
-    Expected columns in Excel: username, password, first_name, last_name, role_name
+
+    Expected columns: UserID, start_password, First Name, Last Name, Email, Organization.
+    Both `Email` / `email` and `Organization` / `organization` casings are accepted.
+
+    Rows with missing or invalid fields are skipped and surfaced in the
+    failures expander. Validation + persistence is delegated to
+    `orm.functions.create_user`, which enforces email format, email
+    uniqueness (case-insensitive), and organization presence.
     """
     try:
         import os
@@ -93,12 +109,11 @@ def import_users():
         failed_count = 0
         failed_users = []
 
+        # Look up roles once (read-only) so the per-row create_user calls don't
+        # need their own UserRole query.
         with SessionLocal() as session:
-            # Get all existing roles for mapping
             roles = session.query(UserRole).all()
             role_map = {role.role_name.lower(): role.id for role in roles}
-
-            # Also check for common variations
             role_map.update(
                 {
                     "administrator": role_map.get("admin", None),
@@ -106,73 +121,62 @@ def import_users():
                 }
             )
 
-            # Process each row in the DataFrame
-            for index, row in df.iterrows():
-                try:
-                    # Extract user data with default values if columns are missing
-                    username = str(row.get("UserID", "")).strip()
-                    password = str(row.get("start_password", "")).strip()
-                    first_name = str(row.get("First Name ", "")).strip()  # Note the space after 'Name'
-                    last_name = str(row.get("Last Name ", "")).strip()  # Note the space after 'Name'
-                    role_name = "Doctor"  # Default role since not in Excel
+        for index, row in df.iterrows():
+            try:
+                username = str(row.get("UserID", "")).strip()
+                password = str(row.get("start_password", "")).strip()
+                first_name = str(row.get("First Name ", "")).strip()  # Note the space after 'Name'
+                last_name = str(row.get("Last Name ", "")).strip()  # Note the space after 'Name'
+                email = str(row.get("Email", row.get("email", ""))).strip()
+                organization = str(row.get("Organization", row.get("organization", ""))).strip()
+                role_name = "Doctor"  # Default role since not in Excel
 
-                    # Skip rows with missing required data
-                    if not username or not password:
-                        failed_count += 1
-                        failed_users.append(f"Row {index + 2}: Missing username or password")
-                        continue
+                # Skip rows with missing required data
+                if not username or not password:
+                    failed_count += 1
+                    failed_users.append(f"Row {index + 2}: Missing username or password")
+                    continue
+                if not email:
+                    failed_count += 1
+                    failed_users.append(f"Row {index + 2} ({username}): Missing email")
+                    continue
+                if not organization:
+                    failed_count += 1
+                    failed_users.append(f"Row {index + 2} ({username}): Missing organization")
+                    continue
 
-                    # Check if user already exists
-                    existing_user = session.query(User).filter(func.lower(User.username) == username.lower()).first()
-
-                    if existing_user:
-                        failed_count += 1
-                        failed_users.append(f"{username}: Already exists")
-                        continue
-
-                    # Map role name to role ID
-                    role_id = role_map.get(role_name.lower())
-                    if not role_id:
-                        # Default to Patient role if role not found
-                        default_role = session.query(UserRole).filter(UserRole.role_name == "Patient").first()
+                # Map role name to role ID
+                role_id = role_map.get(role_name.lower())
+                if not role_id:
+                    # Default to Patient role if role not found
+                    with SessionLocal() as fallback_session:
+                        default_role = fallback_session.query(UserRole).filter(UserRole.role_name == "Patient").first()
                         role_id = default_role.id if default_role else 1
-                        logger.warning(f"Role '{role_name}' not found for user {username}, defaulting to Patient")
+                    logger.warning(f"Role '{role_name}' not found for user {username}, defaulting to Patient")
 
-                    # Hash the password using SHA-256 (matching existing pattern)
-                    hashed_password = hashlib.sha256(password.encode()).hexdigest()
-
-                    # Create new user
-                    new_user = User(
-                        username=username,
-                        password=hashed_password,
-                        first_name=first_name if first_name else username,
-                        last_name=last_name if last_name else "",
-                        user_role_id=role_id,
-                        show_sql=True,
-                        show_table=True,
-                        show_plotly_code=False,
-                        show_chart=False,
-                        show_question_history=True,
-                        show_summary=True,
-                        voice_input=False,
-                        speak_summary=False,
-                        show_suggested=False,
-                        show_followup=False,
-                        show_elapsed_time=True,
-                        llm_fallback=False,
-                        min_message_id=0,
+                # Delegate format + uniqueness validation and persistence to
+                # create_user — single source of truth per Epic #98.
+                ok = create_user(
+                    username,
+                    password,
+                    first_name if first_name else username,
+                    last_name if last_name else "",
+                    role_id,
+                    email=email,
+                    organization=organization,
+                )
+                if ok:
+                    success_count += 1
+                else:
+                    failed_count += 1
+                    failed_users.append(
+                        f"{username}: create_user rejected (duplicate username/email, bad email format, or invalid input)"
                     )
 
-                    session.add(new_user)
-                    success_count += 1
-
-                except Exception as e:
-                    failed_count += 1
-                    failed_users.append(f"{row.get('username', f'Row {index + 2}')}: {str(e)}")
-                    logger.error(f"Error importing user at row {index + 2}: {e}")
-
-            # Commit all successful imports
-            session.commit()
+            except Exception as e:
+                failed_count += 1
+                failed_users.append(f"{row.get('username', f'Row {index + 2}')}: {str(e)}")
+                logger.error(f"Error importing user at row {index + 2}: {e}")
 
         # Display results
         if success_count > 0:
@@ -641,7 +645,10 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
 
             st.divider()
             st.markdown("**Bulk User Import**")
-            st.info("📁 Import users from Excel file: `./utils/config/user_list.xlsx`")
+            st.info(
+                "📁 Import users from Excel file: `./utils/config/user_list.xlsx`. "
+                "Required columns: UserID, start_password, First Name, Last Name, Email, Organization."
+            )
             st.caption("Expected columns: UserID, start_password, 'First Name ', 'Last Name '")
             if st.button("Import Users", type="primary", help="Import users from ./utils/config/user_list.xlsx"):
                 import_users()
