@@ -379,6 +379,36 @@ tab2 = tab_objects[1] if len(tab_objects) > 1 else None
 tab3 = tab_objects[2] if len(tab_objects) > 2 else None
 
 with tab1:
+    # My Profile — every logged-in user can view and update their own email
+    # and organization. The admin Edit User panel in tab3 covers admin
+    # edits-on-behalf; this section is for self-service.
+    if user_id:
+        try:
+            with SessionLocal() as session:
+                _me = session.query(User).filter(User.id == int(user_id)).first()
+        except Exception:
+            _me = None
+        if _me is not None:
+            st.markdown("**My Profile**")
+            with st.form("my_profile_form"):
+                my_email = st.text_input("My Email", value=_me.email or "")
+                my_organization = st.text_input("My Organization", value=_me.organization or "")
+                if st.form_submit_button("Save Profile", type="primary"):
+                    ok = update_user(
+                        int(user_id),
+                        email=my_email,
+                        organization=my_organization,
+                    )
+                    if ok:
+                        st.success("Profile updated.")
+                        st.rerun()
+                    else:
+                        st.error(
+                            "Failed to update profile. Possible causes: email already "
+                            "in use, email format is invalid, or organization is empty."
+                        )
+            st.divider()
+
     with st.form("change_password_form"):
         current_password = st.text_input("Current Password", type="password")
         new_password = st.text_input("New Password", type="password")
@@ -630,6 +660,8 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 cu_password = st.text_input("Temporary Password", type="password")
                 cu_first = st.text_input("First Name")
                 cu_last = st.text_input("Last Name")
+                cu_email = st.text_input("Email")
+                cu_organization = st.text_input("Organization")
                 cu_role_name = st.selectbox(
                     "Role", options=role_names, index=role_names.index("Patient") if "Patient" in role_names else 0
                 )
@@ -637,27 +669,33 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 cu_theme = st.selectbox("Theme", options=theme_options, index=0)
                 submitted = st.form_submit_button("Create User", type="primary")
                 if submitted:
-                    if not cu_username or not cu_password or not cu_first:
-                        st.error("Please provide username, password, and first name.")
+                    if (
+                        not cu_username
+                        or not cu_password
+                        or not cu_first
+                        or not cu_email.strip()
+                        or not cu_organization.strip()
+                    ):
+                        st.error("Please provide username, password, first name, email, and organization.")
                     else:
-                        # TODO(#101): replace these placeholders with real Email + Organization
-                        # input fields. Keeping the form functional in the gap between #99 (which
-                        # adds the required keyword-only args) and #101 (which wires the inputs).
                         ok = create_user(
                             cu_username,
                             cu_password,
                             cu_first,
                             cu_last,
                             role_id_by_name.get(cu_role_name),
-                            email=f"{cu_username}@placeholder.local",
-                            organization="(not set)",
+                            email=cu_email,
+                            organization=cu_organization,
                             theme=cu_theme,
                         )
                         if ok:
                             st.success("User created.")
                             st.rerun()
                         else:
-                            st.error("Failed to create user. Username may already exist.")
+                            st.error(
+                                "Failed to create user. Possible causes: username or email already exists, "
+                                "email format is invalid."
+                            )
 
             st.divider()
             st.markdown("**Bulk User Import**")
@@ -808,6 +846,8 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                     nu_username = st.text_input("Username", value=selected["username"])
                     nu_first = st.text_input("First Name", value=selected["first_name"])
                     nu_last = st.text_input("Last Name", value=selected["last_name"])
+                    nu_email = st.text_input("Email", value=selected.get("email") or "")
+                    nu_organization = st.text_input("Organization", value=selected.get("organization") or "")
                     nu_role_name = st.selectbox(
                         "Role",
                         options=role_names,
@@ -830,6 +870,8 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                                 nu_last,
                                 role_id_by_name.get(nu_role_name),
                                 nu_theme,
+                                email=nu_email,
+                                organization=nu_organization,
                             )
                             if ok:
                                 st.success("Profile updated.")

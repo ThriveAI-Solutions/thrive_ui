@@ -345,6 +345,8 @@ def get_all_users():
                         "role_id": user.user_role_id,
                         "role_name": user.role.role_name if user.role else "No Role",
                         "theme": user.theme,
+                        "email": user.email,
+                        "organization": user.organization,
                         "created_at": user.created_at,
                     }
                 )
@@ -361,9 +363,31 @@ def update_user(
     last_name: str = None,
     role_id: int = None,
     theme: str = None,
+    *,
+    email: str | None = None,
+    organization: str | None = None,
 ) -> bool:
-    """Update user details."""
+    """Update user details.
+
+    ``email`` and ``organization`` are keyword-only optional updates. When
+    non-None, they are stripped and validated using the same gate as
+    ``create_user``: email format via :func:`_is_valid_email` and
+    case-insensitive uniqueness against ``thrive_user``; organization
+    must be non-empty after strip. Returns ``False`` on any validation
+    failure, leaving the row unchanged.
+    """
     try:
+        # Strip + validate the optional new fields before opening a session
+        # so a bad input doesn't even touch the DB.
+        if email is not None:
+            email = email.strip()
+            if not _is_valid_email(email):
+                return False
+        if organization is not None:
+            organization = organization.strip()
+            if not organization:
+                return False
+
         with SessionLocal() as session:
             user = session.query(User).filter(User.id == user_id).first()
             if not user:
@@ -376,6 +400,8 @@ def update_user(
                 "last_name": user.last_name,
                 "role_id": user.user_role_id,
                 "theme": user.theme,
+                "email": user.email,
+                "organization": user.organization,
             }
 
             # Check if new username is taken (if changing username)
@@ -386,6 +412,14 @@ def update_user(
                     .first()
                 )
                 if existing:
+                    return False
+
+            # Check if new email is taken (if changing email, case-insensitive)
+            if email is not None and (user.email is None or email.lower() != user.email.lower()):
+                existing_email = (
+                    session.query(User).filter(func.lower(User.email) == email.lower(), User.id != user_id).first()
+                )
+                if existing_email:
                     return False
 
             # Update fields if provided
@@ -399,6 +433,10 @@ def update_user(
                 user.user_role_id = role_id
             if theme:
                 user.theme = theme
+            if email is not None:
+                user.email = email
+            if organization is not None:
+                user.organization = organization
 
             session.commit()
 
@@ -415,6 +453,8 @@ def update_user(
                         "last_name": last_name,
                         "role_id": role_id,
                         "theme": theme,
+                        "email": email,
+                        "organization": organization,
                     }
                     # Only include changed values
                     changes = {k: v for k, v in new_values.items() if v is not None}
