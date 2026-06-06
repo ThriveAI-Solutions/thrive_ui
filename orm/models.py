@@ -175,6 +175,7 @@ class User(Base):
     # docs/superpowers/specs/2026-05-01-okta-oidc-integration-design.md §5.
     okta_sub = Column(String(255), nullable=True, unique=True)
     email = Column(String(320, collation="NOCASE"), nullable=True, unique=True)
+    organization = Column(String(120), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     show_sql = Column(Boolean, default=True)
