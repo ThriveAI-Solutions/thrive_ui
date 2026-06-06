@@ -22,6 +22,7 @@ from orm.error_read_model import ErrorSource
 from orm.models import ErrorCategory, ErrorSeverity, RoleTypeEnum
 from utils.error_fallback_sink import try_drain_fallback_to_db
 from views.errors_helpers import (
+    MAX_ROW_LIMIT,
     _export_filename,
     _format_results_table,
     _pretty_context_data,
@@ -155,7 +156,10 @@ with cols[2]:
 
 st.divider()
 
-st.caption(f"Showing {len(rows_dicts)} error(s) under the current filters.")
+caption_text = f"Showing {len(rows_dicts)} error(s) under the current filters."
+if len(rows_dicts) >= MAX_ROW_LIMIT:
+    caption_text += f" (capped at {MAX_ROW_LIMIT} — narrow the time range or apply more filters to see older rows)"
+st.caption(caption_text)
 
 export_payload = json.dumps(rows_dicts, indent=2)
 export_name = _export_filename(_time_range_to_since(range_choice), sources_csv)

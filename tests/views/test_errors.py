@@ -8,6 +8,7 @@ import pandas as pd
 
 from orm.error_read_model import DEFAULT_SOURCES, ErrorRow, ErrorSource
 from views.errors_helpers import (
+    MAX_ROW_LIMIT,
     _csv_to_set,
     _export_filename,
     _format_results_table,
@@ -422,3 +423,51 @@ class TestQueryFilteredSmoke:
             fallback_config=cfg,
         )
         assert [r["error_message"] for r in rows_dicts] == ["match"]
+
+    def test_query_filtered_applies_max_row_limit(self, tmp_path, monkeypatch):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from orm import error_read_model
+        from orm.models import Base, ErrorLog
+        from utils.error_fallback_sink import (
+            ErrorLoggingConfig,
+            _reset_handler_cache,
+        )
+
+        _reset_handler_cache()
+
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+        monkeypatch.setattr(error_read_model, "SessionLocal", Session)
+
+        with Session() as session:
+            for i in range(MAX_ROW_LIMIT + 50):
+                session.add(
+                    ErrorLog(
+                        category="sql_execution",
+                        severity="error",
+                        error_type="RuntimeError",
+                        error_message=f"error-{i}",
+                        created_at=dt.datetime.now() - dt.timedelta(hours=1),
+                    )
+                )
+            session.commit()
+
+        cfg = ErrorLoggingConfig(
+            fallback_path=tmp_path / "limit.jsonl",
+            fallback_max_bytes=5_000_000,
+            fallback_backup_count=5,
+        )
+
+        rows_dicts, _ = _query_filtered(
+            days=7,
+            sources_csv="error_log",
+            categories_csv="",
+            severities_csv="",
+            search="",
+            user_id_text="",
+            fallback_config=cfg,
+        )
+        assert len(rows_dicts) == MAX_ROW_LIMIT

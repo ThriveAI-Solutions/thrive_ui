@@ -21,6 +21,8 @@ from orm.error_read_model import (
 )
 from utils.error_fallback_sink import ErrorLoggingConfig
 
+MAX_ROW_LIMIT = 500
+
 _RESULT_COLUMNS = (
     "created_at",
     "source",
@@ -147,6 +149,7 @@ def _query_filtered(
         user_id=_parse_user_id(user_id_text),
         search=search.strip() or None,
         fallback_config=fallback_config,
+        limit=MAX_ROW_LIMIT,
     )
     counts = count_errors_by_source(since, fallback_config=fallback_config)
     return (
