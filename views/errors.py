@@ -21,6 +21,7 @@ import streamlit as st
 from orm.error_read_model import ErrorSource
 from orm.models import ErrorCategory, ErrorSeverity, RoleTypeEnum
 from utils.error_fallback_sink import try_drain_fallback_to_db
+from utils.quick_logger import get_logger
 from views.errors_helpers import (
     MAX_ROW_LIMIT,
     _export_filename,
@@ -39,6 +40,8 @@ _KNOWN_SEVERITIES = [s.value for s in ErrorSeverity]
 # short compared to admin_analytics's 300s.
 ERRORS_CACHE_TTL_SECONDS = 60
 
+logger = get_logger(__name__)
+
 
 def _guard_admin() -> None:
     if st.session_state.get("user_role") != RoleTypeEnum.ADMIN.value:
@@ -46,11 +49,32 @@ def _guard_admin() -> None:
         st.stop()
 
 
-def _kpi_card(label: str, value) -> None:
+def _kpi_card(
+    label: str,
+    value,
+    help_text: str | None = None,
+    dim: bool = False,
+) -> None:
+    """Render one source-count badge.
+
+    When ``dim=True`` (the source is excluded by the Sources chip filter
+    above), the label is struck through and the value rendered at 50%
+    opacity so the admin sees both the per-source total *and* that the
+    source is currently filtered out of the results list.
+    """
     c = st.container(border=True)
     with c:
-        st.markdown(f"**{label}**")
-        st.markdown(f"<h3 style='margin-top:0'>{value}</h3>", unsafe_allow_html=True)
+        if dim:
+            st.markdown(f"**~~{label}~~**")
+            st.markdown(
+                f"<h3 style='margin-top:0; opacity:0.5'>{value}</h3>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(f"**{label}**")
+            st.markdown(f"<h3 style='margin-top:0'>{value}</h3>", unsafe_allow_html=True)
+        if help_text:
+            st.caption(help_text)
 
 
 @st.cache_data(ttl=ERRORS_CACHE_TTL_SECONDS, show_spinner="Loading errors...")
@@ -146,13 +170,33 @@ rows_dicts, counts = _load(
     user_id_text,
 )
 
+_KPI_HELP_TEXT = (
+    "Total in the selected time range. Not affected by category / severity / "
+    "user / search filters — those narrow the table below only."
+)
+
 cols = st.columns(3)
 with cols[0]:
-    _kpi_card("Error Log", counts.get(ErrorSource.ERROR_LOG.value, 0))
+    _kpi_card(
+        "Error Log",
+        counts.get(ErrorSource.ERROR_LOG.value, 0),
+        help_text=_KPI_HELP_TEXT,
+        dim=ErrorSource.ERROR_LOG.value not in selected_source_values,
+    )
 with cols[1]:
-    _kpi_card("Agent Runs", counts.get(ErrorSource.AGENT_RUN.value, 0))
+    _kpi_card(
+        "Agent Runs",
+        counts.get(ErrorSource.AGENT_RUN.value, 0),
+        help_text=_KPI_HELP_TEXT,
+        dim=ErrorSource.AGENT_RUN.value not in selected_source_values,
+    )
 with cols[2]:
-    _kpi_card("Fallback File", counts.get(ErrorSource.FALLBACK_SINK.value, 0))
+    _kpi_card(
+        "Fallback File",
+        counts.get(ErrorSource.FALLBACK_SINK.value, 0),
+        help_text=_KPI_HELP_TEXT,
+        dim=ErrorSource.FALLBACK_SINK.value not in selected_source_values,
+    )
 
 st.divider()
 
@@ -281,6 +325,7 @@ with st.expander("Maintenance — drain pending fallback records"):
             _load.clear()
             st.rerun()
         except Exception as exc:  # pragma: no cover — defensive in UI
+            logger.exception("Errors page: try_drain_fallback_to_db raised")
             st.error(f"Drain failed: {exc}")
 
 # Helper reserved for a future migration replacing the inline expander rendering.
