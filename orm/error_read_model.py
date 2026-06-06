@@ -19,6 +19,7 @@ entry points consumed by the UI Feature Spec.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -152,11 +153,12 @@ def _read_from_error_log(
     if user_id is not None:
         query = query.filter(ErrorLog.user_id == user_id)
     if search:
-        pattern = f"%{search}%"
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         query = query.filter(
             or_(
-                ErrorLog.error_message.ilike(pattern),
-                ErrorLog.question.ilike(pattern),
+                ErrorLog.error_message.ilike(pattern, escape="\\"),
+                ErrorLog.question.ilike(pattern, escape="\\"),
             )
         )
     return [_row_from_error_log(r) for r in query.all()]
@@ -232,11 +234,12 @@ def _read_from_agent_run(
     if user_id is not None:
         query = query.filter(AgentRun.user_id == user_id)
     if search:
-        pattern = f"%{search}%"
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         query = query.filter(
             or_(
-                AgentRun.error.ilike(pattern),
-                AgentRun.question.ilike(pattern),
+                AgentRun.error.ilike(pattern, escape="\\"),
+                AgentRun.question.ilike(pattern, escape="\\"),
             )
         )
 
@@ -266,7 +269,10 @@ def _row_from_fallback_record(record: dict) -> ErrorRow | None:
 
     error_type = record.get("error_type") or ""
     error_message = record.get("error_message") or ""
-    synthetic_id = f"fallback_sink:{created_raw}:{error_type}:{hash(error_message)}"
+    synthetic_id = (
+        f"fallback_sink:{created_raw}:{error_type}:"
+        f"{hashlib.md5(error_message.encode('utf-8')).hexdigest()[:16]}"  # noqa: S324  # non-security: stable id for UI selection
+    )
 
     return ErrorRow(
         id=synthetic_id,

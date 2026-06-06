@@ -457,6 +457,15 @@ class TestReadFromErrorLog:
             result = _read_from_error_log(session, since=self.EPOCH)
         assert result[0].source is ErrorSource.ERROR_LOG
 
+    def test_search_treats_underscore_as_literal_not_wildcard(self, fresh_db):
+        with fresh_db() as session:
+            _seed_error_log(session, error_message="my_table not found")
+            _seed_error_log(session, error_message="myXtable not found")
+            result = _read_from_error_log(session, since=self.EPOCH, search="my_table")
+        messages = [r.error_message for r in result]
+        assert "my_table not found" in messages
+        assert "myXtable not found" not in messages
+
 
 # ── _read_from_agent_run adapter ──────────────────────────────────────────
 
@@ -628,6 +637,15 @@ class TestReadFromAgentRun:
             _seed_agent_run(session, error="y", question="something else")
             result = _read_from_agent_run(session, since=self.EPOCH, search="patients")
         assert [r.error_message for r in result] == ["x"]
+
+    def test_search_treats_underscore_as_literal_not_wildcard(self, fresh_db):
+        with fresh_db() as session:
+            _seed_agent_run(session, error="my_table not found")
+            _seed_agent_run(session, error="myXtable not found")
+            result = _read_from_agent_run(session, since=self.EPOCH, search="my_table")
+        messages = [r.error_message for r in result]
+        assert "my_table not found" in messages
+        assert "myXtable not found" not in messages
 
 
 # ── _read_from_fallback adapter ───────────────────────────────────────────
@@ -822,6 +840,21 @@ class TestReadFromFallback:
             fallback_config=cfg,
         )
         assert [r.error_message for r in result] == ["match"]
+
+    def test_id_is_stable_for_same_payload(self, tmp_path_factory):
+        cfg1 = _make_fallback_cfg(tmp_path_factory.mktemp("fb1"))
+        cfg2 = _make_fallback_cfg(tmp_path_factory.mktemp("fb2"))
+        payload = dict(
+            created_at="2026-06-05T12:00:00",
+            error_type="RuntimeError",
+            error_message="same message for both",
+        )
+        _seed_fallback(cfg1, **payload)
+        _seed_fallback(cfg2, **payload)
+        result1 = _read_from_fallback(self.EPOCH, fallback_config=cfg1)
+        result2 = _read_from_fallback(self.EPOCH, fallback_config=cfg2)
+        assert result1[0].id == result2[0].id
+        assert "-" not in result1[0].id.split(":")[-1]
 
 
 # ── query_errors public entry ─────────────────────────────────────────────
