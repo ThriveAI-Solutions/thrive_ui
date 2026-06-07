@@ -26,7 +26,7 @@ from utils.magic_functions import is_magic_do_magic
 
 
 def get_themed_asset_path(asset_name):
-    theme = st.session_state.get("user_theme", ThemeType.WELLTELLAI.value).lower()
+    theme = st.session_state.get("user_theme", ThemeType.THRIVEAI.value).lower()
     return f"assets/themes/{theme}/{asset_name}"
 
 

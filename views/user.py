@@ -22,7 +22,7 @@ from orm.functions import (
 from orm.models import RoleTypeEnum, SessionLocal, User, UserRole
 from utils.authentication_management import get_user_list_excel
 from utils.chat_bot_helper import get_vn
-from utils.enums import ThemeType
+from utils.enums import ThemeType, user_selectable_themes
 from utils.vanna_calls import auto_generate_sql_pairs, refresh_stats, train_all
 
 # Get the current user ID from session state cookies. Guarded so the module
@@ -665,7 +665,7 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                 cu_role_name = st.selectbox(
                     "Role", options=role_names, index=role_names.index("Patient") if "Patient" in role_names else 0
                 )
-                theme_options = [t.value for t in ThemeType]
+                theme_options = user_selectable_themes()
                 cu_theme = st.selectbox("Theme", options=theme_options, index=0)
                 submitted = st.form_submit_button("Create User", type="primary")
                 if submitted:
@@ -853,7 +853,7 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                         options=role_names,
                         index=role_names.index(selected["role_name"]) if selected["role_name"] in role_names else 0,
                     )
-                    theme_options = [t.value for t in ThemeType]
+                    theme_options = user_selectable_themes()
                     current_theme = selected.get("theme", ThemeType.HEALTHELINK.value)
                     nu_theme = st.selectbox(
                         "Theme",
