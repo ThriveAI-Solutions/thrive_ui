@@ -229,7 +229,7 @@ def render(days_int: int) -> None:
     st.subheader("Analytics")
     st.caption(
         "Time-range totals across all three sources. Not narrowed by the "
-        "category / severity / user / search filters above."
+        "Sources chip or the category / severity / user / search filters above."
     )
 
     a1, a2, a3, a4 = st.columns(4)

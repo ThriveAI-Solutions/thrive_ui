@@ -761,6 +761,9 @@ def main():
     with control_cols[1]:
         if st.button("Refresh Data", help="Clear cached data and reload metrics"):
             _read_metrics.clear()
+            from views.errors import _load as _errors_load, _load_aggregates as _errors_load_aggregates
+            _errors_load.clear()
+            _errors_load_aggregates.clear()
             st.rerun()
 
     days_int = {"7 days": 7, "30 days": 30, "90 days": 90}.get(days or "30 days", 30)
