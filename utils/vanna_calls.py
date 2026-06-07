@@ -3117,11 +3117,6 @@ def train_ai_documentation():
         schema_name = get_configured_schema()
         object_type = get_configured_object_type()
 
-        # Validate object_type to prevent SQL injection (should only be 'tables' or 'views')
-        if object_type not in ("tables", "views"):
-            st.error(f"Invalid object_type: {object_type}")
-            return False
-
         # Connect to database
         conn = psycopg2.connect(
             host=st.secrets["postgres"]["host"],
@@ -3852,11 +3847,6 @@ def train_sample_rows(clear_existing: bool = True) -> bool:
         # Get configuration
         schema_name = get_configured_schema()
         object_type = get_configured_object_type()
-
-        # Validate object_type
-        if object_type not in ("tables", "views"):
-            st.error(f"Invalid object_type: {object_type}")
-            return False
 
         # --- Clear existing sample_rows entries ---
         if clear_existing:
