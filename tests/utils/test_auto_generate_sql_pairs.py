@@ -151,6 +151,7 @@ class TestAutoGenerateSqlPairs:
         from utils.vanna_calls import auto_generate_sql_pairs
 
         mock_from_session.return_value = mock_vanna_service
+        mock_write.return_value = True
         mock_st.progress.return_value = MagicMock()
         mock_st.empty.return_value = MagicMock()
 
