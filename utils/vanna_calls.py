@@ -3295,7 +3295,7 @@ def auto_enhance_schema(clear_existing: bool = True):
         clear_existing: If True, remove existing auto-enhance documentation before
             re-adding (prevents duplicates on repeated runs). Defaults to True.
     """
-    vanna_service = get_vn()
+    vanna_service = VannaService.from_streamlit_session()
     forbidden_tables, forbidden_columns, forbidden_tables_str = read_forbidden_from_json()
     schema_name = get_configured_schema()
     object_type = get_configured_object_type()
