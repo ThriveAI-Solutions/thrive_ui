@@ -178,6 +178,7 @@ class TestApprovalWorkflow:
             mock_session.query.return_value.filter.return_value.first.return_value = mock_message
 
             with patch("views.admin_feedback.write_to_file_and_training") as mock_train:
+                mock_train.return_value = True
                 from views.admin_feedback import _approve_for_training
 
                 result = _approve_for_training(1, 2)
@@ -187,6 +188,43 @@ class TestApprovalWorkflow:
                 assert mock_message.training_status == "approved"
                 assert mock_message.reviewed_by == 2
                 mock_session.commit.assert_called_once()
+
+    def test_approve_for_training_training_failure_does_not_commit_approved(self):
+        """If write_to_file_and_training returns False, the DB must NOT advance to APPROVED.
+
+        Regression test for issue #68: previously the training write swallowed
+        all exceptions and returned None, so admin_feedback marked the message
+        APPROVED and committed even though nothing was persisted to ChromaDB.
+        """
+        original_status = "pending"
+        mock_message = MagicMock()
+        mock_message.question = "Test question"
+        mock_message.query = "SELECT * FROM test"
+        mock_message.training_status = original_status
+        mock_message.reviewed_by = None
+        mock_message.reviewed_at = None
+
+        with patch("views.admin_feedback.SessionLocal") as mock_session_local:
+            mock_session = MagicMock()
+            mock_session.__enter__ = MagicMock(return_value=mock_session)
+            mock_session.__exit__ = MagicMock(return_value=None)
+            mock_session_local.return_value = mock_session
+            mock_session.query.return_value.filter.return_value.first.return_value = mock_message
+
+            with patch("views.admin_feedback.write_to_file_and_training") as mock_train:
+                mock_train.return_value = False
+                from views.admin_feedback import _approve_for_training
+
+                result = _approve_for_training(1, 2)
+
+                assert result is False
+                mock_train.assert_called_once()
+                # In-memory status must be reverted to the original value.
+                assert mock_message.training_status == original_status
+                assert mock_message.reviewed_by is None
+                assert mock_message.reviewed_at is None
+                # Crucially: no commit happened, so the DB state did not advance.
+                mock_session.commit.assert_not_called()
 
     def test_reject_feedback_success(self):
         """Test that rejection updates status without training."""
