@@ -661,116 +661,6 @@ def _render_activity_tab(days_int: int):
         st.info("No recent activity found.")
 
 
-def _render_errors_tab(days_int: int):
-    """Render the Error Analysis tab."""
-    from orm.logging_functions import (
-        get_error_counts_by_category,
-        get_error_over_time,
-        get_error_severity_breakdown,
-        get_error_stats,
-        get_recent_errors_detailed,
-    )
-
-    stats = get_error_stats(days=days_int)
-
-    # KPI Row
-    k1, k2, k3, k4 = st.columns(4)
-    with k1:
-        _kpi_card("Total Errors", stats["total"])
-    with k2:
-        _kpi_card("Critical", stats["critical"], "Requires attention")
-    with k3:
-        _kpi_card("SQL Errors", stats["sql_errors"], "Generation + Execution")
-    with k4:
-        _kpi_card("Retry Success", f"{stats['retry_success_rate']}%")
-
-    st.divider()
-
-    # Error Trends
-    st.subheader("Error Trends by Category")
-    over_time = get_error_over_time(days=days_int)
-    if over_time:
-        ot_df = pd.DataFrame(over_time)
-        ot_df["date"] = pd.to_datetime(ot_df["date"])
-        # Pivot for stacked area
-        pivot_df = ot_df.pivot(index="date", columns="category", values="count").fillna(0).reset_index()
-        fig = px.area(pivot_df, x="date", y=pivot_df.columns[1:], title="Errors Over Time by Category")
-        fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), legend_title_text="Category")
-        st.plotly_chart(fig, width="stretch")
-    else:
-        st.info("No error time series data available yet.")
-
-    st.divider()
-
-    # Category & Severity Breakdown
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Errors by Category")
-        by_category = get_error_counts_by_category(days=days_int)
-        if by_category:
-            cat_df = pd.DataFrame(list(by_category.items()), columns=["Category", "Count"])
-            fig = px.bar(cat_df, x="Count", y="Category", orientation="h")
-            fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig, width="stretch")
-        else:
-            st.info("No category data available.")
-
-    with col2:
-        st.subheader("Errors by Severity")
-        by_severity = get_error_severity_breakdown(days=days_int)
-        if by_severity:
-            sev_df = pd.DataFrame(by_severity)
-            # Color mapping
-            color_map = {"warning": "#FFA500", "error": "#FF6347", "critical": "#DC143C"}
-            fig = px.pie(
-                sev_df,
-                values="count",
-                names="severity",
-                color="severity",
-                color_discrete_map=color_map,
-            )
-            fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig, width="stretch")
-        else:
-            st.info("No severity data available.")
-
-    st.divider()
-
-    # Error Details
-    st.subheader("Recent Errors")
-    recent = get_recent_errors_detailed(days=days_int, limit=50)
-    if recent:
-        for error in recent:
-            severity_color = {"warning": "orange", "error": "red", "critical": "red"}.get(error["severity"], "gray")
-            with st.expander(
-                f":{severity_color}[{error['severity'].upper()}] **{error['category']}** - {error['error_type']} - {error['created_at'].strftime('%Y-%m-%d %H:%M')}",
-                expanded=False,
-            ):
-                st.markdown("**Error Message:**")
-                st.error(error["error_message"][:500] if error["error_message"] else "No message")
-
-                if error["question"]:
-                    st.markdown("**Question:**")
-                    st.info(error["question"])
-
-                if error["generated_sql"]:
-                    st.markdown("**Generated SQL:**")
-                    st.code(error["generated_sql"], language="sql")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Retry Attempted", "Yes" if error["auto_retry_attempted"] else "No")
-                with col2:
-                    if error["auto_retry_attempted"]:
-                        st.metric("Retry Successful", "Yes" if error["retry_successful"] else "No")
-
-                if error["stack_trace"]:
-                    with st.expander("Stack Trace", expanded=False):
-                        st.code(error["stack_trace"], language="python")
-    else:
-        st.info("No recent errors found.")
-
-
 def _render_audit_tab(days_int: int):
     """Render the Admin Audit tab."""
     from orm.logging_functions import (
@@ -871,12 +761,20 @@ def main():
     with control_cols[1]:
         if st.button("Refresh Data", help="Clear cached data and reload metrics"):
             _read_metrics.clear()
+            from views.errors import _load as _errors_load, _load_aggregates as _errors_load_aggregates
+            _errors_load.clear()
+            _errors_load_aggregates.clear()
             st.rerun()
 
     days_int = {"7 days": 7, "30 days": 30, "90 days": 90}.get(days or "30 days", 30)
 
-    # Tab navigation
-    tabs = st.tabs(["Overview", "LLM Performance", "User Activity", "Error Analysis", "Admin Audit"])
+    # Tab navigation. The Errors tab (#106) hosts what used to be the
+    # standalone "Errors" page from the admin sidebar — moved here so admins
+    # land on a single Analytics surface for usage, performance, audit, and
+    # error visibility.
+    from views.errors import render as render_errors_tab
+
+    tabs = st.tabs(["Overview", "LLM Performance", "User Activity", "Errors", "Admin Audit"])
 
     with tabs[0]:
         _render_overview_tab(days_int)
@@ -888,7 +786,7 @@ def main():
         _render_activity_tab(days_int)
 
     with tabs[3]:
-        _render_errors_tab(days_int)
+        render_errors_tab(days_int)
 
     with tabs[4]:
         _render_audit_tab(days_int)

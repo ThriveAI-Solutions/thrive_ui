@@ -578,25 +578,6 @@ def get_recent_errors(
         return []
 
 
-def get_error_counts_by_category(days: int = 7) -> dict[str, int]:
-    """Get error counts grouped by category for the specified time period."""
-    try:
-        since = datetime.now() - timedelta(days=days)
-        with SessionLocal() as session:
-            from sqlalchemy import func as sqla_func
-
-            results = (
-                session.query(ErrorLog.category, sqla_func.count(ErrorLog.id))
-                .filter(ErrorLog.created_at >= since)
-                .group_by(ErrorLog.category)
-                .all()
-            )
-            return {category: count for category, count in results}
-    except Exception as e:
-        logger.warning("Failed to get error counts: %s", e)
-        return {}
-
-
 # ============== Analytics Query Functions ==============
 
 
@@ -932,86 +913,6 @@ def get_error_stats(days: int = 7) -> dict:
     except Exception as e:
         logger.warning("Failed to get error stats: %s", e)
         return {"total": 0, "critical": 0, "sql_errors": 0, "retry_success_rate": 0}
-
-
-def get_error_over_time(days: int = 7) -> list[dict]:
-    """Get error counts over time by category."""
-    try:
-        since = datetime.now() - timedelta(days=days)
-        with SessionLocal() as session:
-            from sqlalchemy import func as sqla_func
-
-            date_expr = sqla_func.strftime("%Y-%m-%d", ErrorLog.created_at)
-            results = (
-                session.query(
-                    date_expr.label("date"),
-                    ErrorLog.category,
-                    sqla_func.count(ErrorLog.id).label("count"),
-                )
-                .filter(ErrorLog.created_at >= since)
-                .group_by(date_expr, ErrorLog.category)
-                .order_by(date_expr)
-                .all()
-            )
-            return [{"date": r.date, "category": r.category, "count": r.count} for r in results]
-    except Exception as e:
-        logger.warning("Failed to get error over time: %s", e)
-        return []
-
-
-def get_error_severity_breakdown(days: int = 7) -> list[dict]:
-    """Get error counts by severity."""
-    try:
-        since = datetime.now() - timedelta(days=days)
-        with SessionLocal() as session:
-            from sqlalchemy import func as sqla_func
-
-            results = (
-                session.query(
-                    ErrorLog.severity,
-                    sqla_func.count(ErrorLog.id).label("count"),
-                )
-                .filter(ErrorLog.created_at >= since)
-                .group_by(ErrorLog.severity)
-                .all()
-            )
-            return [{"severity": r.severity, "count": r.count} for r in results]
-    except Exception as e:
-        logger.warning("Failed to get error severity breakdown: %s", e)
-        return []
-
-
-def get_recent_errors_detailed(days: int = 7, limit: int = 50) -> list[dict]:
-    """Get recent errors with full details for drill-down."""
-    try:
-        since = datetime.now() - timedelta(days=days)
-        with SessionLocal() as session:
-            results = (
-                session.query(ErrorLog)
-                .filter(ErrorLog.created_at >= since)
-                .order_by(ErrorLog.created_at.desc())
-                .limit(limit)
-                .all()
-            )
-            return [
-                {
-                    "id": r.id,
-                    "created_at": r.created_at,
-                    "category": r.category,
-                    "severity": r.severity,
-                    "error_type": r.error_type,
-                    "error_message": r.error_message,
-                    "stack_trace": r.stack_trace,
-                    "question": r.question,
-                    "generated_sql": r.generated_sql,
-                    "auto_retry_attempted": r.auto_retry_attempted,
-                    "retry_successful": r.retry_successful,
-                }
-                for r in results
-            ]
-    except Exception as e:
-        logger.warning("Failed to get recent errors detailed: %s", e)
-        return []
 
 
 def get_admin_action_stats(days: int = 30) -> dict:

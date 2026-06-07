@@ -13,12 +13,14 @@ from sqlalchemy.orm import sessionmaker
 from orm import error_read_model
 from orm.error_read_model import (
     DEFAULT_SOURCES,
+    ErrorAggregates,
     ErrorRow,
     ErrorSource,
     _read_from_agent_run,
     _read_from_error_log,
     _read_from_fallback,
     count_errors_by_source,
+    query_aggregates,
     query_errors,
 )
 from orm.models import AgentRun, Base, ErrorLog
@@ -1154,3 +1156,175 @@ class TestCountErrorsBySource:
         assert counts[ErrorSource.AGENT_RUN] == 0
         # Fallback still works since it doesn't use SessionLocal
         assert counts[ErrorSource.FALLBACK_SINK] == 1
+
+
+# ── query_aggregates ──────────────────────────────────────────────────────
+
+
+class TestQueryAggregates:
+    EPOCH = datetime(2000, 1, 1)
+
+    def test_returns_zero_kpis_and_empty_series_when_no_data(self, patched_session_local, tmp_path):
+        cfg = _make_fallback_cfg(tmp_path)
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        assert isinstance(agg, ErrorAggregates)
+        assert agg.total == 0
+        assert agg.critical == 0
+        assert agg.sql_errors == 0
+        assert agg.retry_attempted == 0
+        assert agg.retry_successful == 0
+        assert agg.retry_success_rate == 0.0
+        assert agg.over_time_by_category == []
+        assert agg.by_category == {}
+        assert agg.by_severity == []
+
+    def test_total_counts_rows_from_every_source(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session)
+            _seed_error_log(session)
+            _seed_agent_run(session)
+        _seed_fallback(cfg)
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        assert agg.total == 4
+
+    def test_critical_only_counts_critical_severity(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session, severity="critical")
+            _seed_error_log(session, severity="error")
+            _seed_error_log(session, severity="warning")
+        _seed_fallback(cfg, severity="critical")
+        _seed_fallback(cfg, seconds=1, severity="error")
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        assert agg.critical == 2
+
+    def test_sql_errors_counts_sql_generation_and_execution(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session, category="sql_generation")
+            _seed_error_log(session, category="sql_execution")
+            _seed_error_log(session, category="chart_generation")
+        _seed_fallback(cfg, category="sql_execution")
+        # agent_run rows synthesize category="agent_run" and should NOT count as sql_errors
+        with Session() as session:
+            _seed_agent_run(session)
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        assert agg.sql_errors == 3
+
+    def test_retry_success_rate_uses_retry_columns(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session, auto_retry_attempted=True, retry_successful=True)
+            _seed_error_log(session, auto_retry_attempted=True, retry_successful=True)
+            _seed_error_log(session, auto_retry_attempted=True, retry_successful=False)
+            _seed_error_log(session, auto_retry_attempted=False, retry_successful=None)
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        assert agg.retry_attempted == 3
+        assert agg.retry_successful == 2
+        assert agg.retry_success_rate == round(2 / 3 * 100, 1)
+
+    def test_retry_success_rate_zero_when_no_attempts(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session, auto_retry_attempted=False)
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        assert agg.retry_attempted == 0
+        assert agg.retry_success_rate == 0.0
+
+    def test_by_category_includes_synthetic_agent_run_slice(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session, category="sql_execution")
+            _seed_agent_run(session)
+            _seed_agent_run(session)
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        assert agg.by_category.get("agent_run") == 2
+        assert agg.by_category.get("sql_execution") == 1
+
+    def test_by_severity_aggregates_across_sources(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session, severity="error")
+            _seed_error_log(session, severity="critical")
+            _seed_agent_run(session, status="cap_reached")  # synth -> "warning"
+            _seed_agent_run(session, status="error")  # synth -> "error"
+        _seed_fallback(cfg, severity="critical")
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        sev_counts = {row["severity"]: row["count"] for row in agg.by_severity}
+        assert sev_counts == {"warning": 1, "error": 2, "critical": 2}
+
+    def test_over_time_by_category_groups_by_date_and_category(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(
+                session,
+                category="sql_execution",
+                created_at=datetime(2026, 6, 5, 9, 0),
+            )
+            _seed_error_log(
+                session,
+                category="sql_execution",
+                created_at=datetime(2026, 6, 5, 14, 0),
+            )
+            _seed_error_log(
+                session,
+                category="chart_generation",
+                created_at=datetime(2026, 6, 6, 9, 0),
+            )
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        by_key = {(r["date"], r["category"]): r["count"] for r in agg.over_time_by_category}
+        assert by_key[("2026-06-05", "sql_execution")] == 2
+        assert by_key[("2026-06-06", "chart_generation")] == 1
+
+    def test_time_range_applied_via_since(self, patched_session_local, tmp_path):
+        Session = patched_session_local
+        cfg = _make_fallback_cfg(tmp_path)
+        with Session() as session:
+            _seed_error_log(session, error_message="old", created_at=datetime(2025, 1, 1))
+            _seed_error_log(session, error_message="new", created_at=datetime(2026, 6, 5))
+
+        agg = query_aggregates(datetime(2026, 1, 1), fallback_config=cfg)
+        assert agg.total == 1
+
+    def test_isolates_db_failure_keeps_fallback_counted(self, patched_session_local, tmp_path, monkeypatch):
+        cfg = _make_fallback_cfg(tmp_path)
+        _seed_fallback(cfg, severity="critical")
+
+        def boom_session():
+            raise RuntimeError("DB unreachable")
+
+        monkeypatch.setattr(error_read_model, "SessionLocal", boom_session)
+
+        agg = query_aggregates(self.EPOCH, fallback_config=cfg)
+        # DB sources contribute zero; the fallback record still counts.
+        assert agg.total == 1
+        assert agg.critical == 1
+
+    def test_fallback_config_handoff(self, patched_session_local, tmp_path_factory):
+        # Two distinct fallback files: only the one passed in should be read.
+        cfg_a = _make_fallback_cfg(tmp_path_factory.mktemp("a"))
+        cfg_b = _make_fallback_cfg(tmp_path_factory.mktemp("b"))
+        _seed_fallback(cfg_a, error_message="from-a")
+        _seed_fallback(cfg_b, error_message="from-b")
+
+        agg_a = query_aggregates(self.EPOCH, fallback_config=cfg_a)
+        agg_b = query_aggregates(self.EPOCH, fallback_config=cfg_b)
+        assert agg_a.total == 1
+        assert agg_b.total == 1

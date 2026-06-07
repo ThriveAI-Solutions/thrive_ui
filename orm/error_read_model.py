@@ -29,7 +29,7 @@ from sqlalchemy import func as sqla_func
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from orm.models import AgentRun, ErrorLog, SessionLocal
+from orm.models import AgentRun, ErrorCategory, ErrorLog, ErrorSeverity, SessionLocal
 from utils.error_fallback_sink import ErrorLoggingConfig, read_fallback_records
 from utils.quick_logger import get_logger
 
@@ -469,3 +469,97 @@ def count_errors_by_source(
         logger.warning("Fallback count failed: %s", exc)
 
     return counts
+
+
+# ── Aggregates for the Errors-page KPI cards + charts ─────────────────────
+
+
+_SQL_CATEGORIES = frozenset({ErrorCategory.SQL_GENERATION.value, ErrorCategory.SQL_EXECUTION.value})
+
+
+@dataclass(frozen=True)
+class ErrorAggregates:
+    """Pre-rolled-up totals + chart series for the Errors page.
+
+    Mirrors the four KPI cards from the legacy Admin Analytics → Error
+    Analysis tab (``total`` / ``critical`` / ``sql_errors`` /
+    ``retry_success_rate``) plus the three Plotly chart inputs
+    (``over_time_by_category`` / ``by_category`` / ``by_severity``),
+    rolled up across all three sources merged by :func:`query_errors`.
+    """
+
+    total: int
+    critical: int
+    sql_errors: int
+    retry_attempted: int
+    retry_successful: int
+    retry_success_rate: float
+    over_time_by_category: list[dict[str, Any]]
+    by_category: dict[str, int]
+    by_severity: list[dict[str, Any]]
+
+
+def query_aggregates(
+    since: datetime,
+    until: datetime | None = None,
+    *,
+    fallback_config: ErrorLoggingConfig | None = None,
+) -> ErrorAggregates:
+    """Roll up errors across all three sources into KPI + chart summaries.
+
+    Reads via :func:`query_errors` (no row limit) so the per-source
+    ``try/except`` isolation already in that function handles partial
+    source failures — a broken source contributes zero rows here rather
+    than blanking the KPIs. The synthetic ``"agent_run"`` category
+    appears as its own slice in :pyattr:`ErrorAggregates.by_category` and
+    :pyattr:`ErrorAggregates.over_time_by_category`, matching the
+    filter-chip experience already established by the Errors page.
+
+    Cache this call at ~300s in the UI — chart data tolerates a longer
+    TTL than the per-row drill-down list (60s).
+    """
+    rows = query_errors(
+        since,
+        until=until,
+        fallback_config=fallback_config,
+    )
+
+    total = len(rows)
+    critical = sum(1 for r in rows if r.severity == ErrorSeverity.CRITICAL.value)
+    sql_errors = sum(1 for r in rows if r.category in _SQL_CATEGORIES)
+    retry_attempted = sum(1 for r in rows if r.auto_retry_attempted)
+    retry_successful = sum(1 for r in rows if r.retry_successful)
+    retry_success_rate = round(retry_successful / retry_attempted * 100, 1) if retry_attempted else 0.0
+
+    over_time_counts: dict[tuple[str, str], int] = {}
+    by_category: dict[str, int] = {}
+    by_severity_counts: dict[str, int] = {}
+
+    for r in rows:
+        date_key = r.created_at.strftime("%Y-%m-%d")
+        cat_key = r.category or "unknown"
+        sev_key = r.severity or "unknown"
+        over_time_counts[(date_key, cat_key)] = over_time_counts.get((date_key, cat_key), 0) + 1
+        by_category[cat_key] = by_category.get(cat_key, 0) + 1
+        by_severity_counts[sev_key] = by_severity_counts.get(sev_key, 0) + 1
+
+    over_time_by_category = sorted(
+        ({"date": d, "category": c, "count": n} for (d, c), n in over_time_counts.items()),
+        key=lambda x: (x["date"], x["category"]),
+    )
+    by_severity = sorted(
+        ({"severity": s, "count": n} for s, n in by_severity_counts.items()),
+        key=lambda x: x["severity"],
+    )
+
+    return ErrorAggregates(
+        total=total,
+        critical=critical,
+        sql_errors=sql_errors,
+        retry_attempted=retry_attempted,
+        retry_successful=retry_successful,
+        retry_success_rate=retry_success_rate,
+        over_time_by_category=over_time_by_category,
+        by_category=by_category,
+        by_severity=by_severity,
+    )
