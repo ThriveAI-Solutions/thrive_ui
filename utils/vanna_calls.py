@@ -3144,11 +3144,6 @@ def train_ai_documentation():
         schema_name = get_configured_schema()
         object_type = get_configured_object_type()
 
-        # Validate object_type to prevent SQL injection (should only be 'tables' or 'views')
-        if object_type not in ("tables", "views"):
-            st.error(f"Invalid object_type: {object_type}")
-            return False
-
         # Connect to database
         conn = psycopg2.connect(
             host=st.secrets["postgres"]["host"],
@@ -3760,17 +3755,302 @@ def auto_enhance_schema(clear_existing: bool = True):
     return results
 
 
-def train_all():
-    """Run the full training pipeline: DDL → Plan → Auto-Enhance → AI Docs.
+_DEIDENTIFICATION_SYSTEM_PROMPT = """You are a data de-identification specialist. Given a database table's DDL and a few sample rows, replace ALL values with realistic but completely synthetic equivalents.
 
-    Provides st.status progress showing 4 sequential steps with elapsed time per step.
+Rules:
+1. Preserve column data types, formats, string lengths, and NULL positions exactly
+2. Replace ALL identifiers (IDs, MRNs, SSNs) with synthetic ones in the same format
+3. Replace ALL names, addresses, phone numbers, emails with fake but realistic values
+4. Shift ALL dates by a random offset (keep relative ordering between date columns)
+5. Jitter numeric values by 10-30% while keeping them in realistic ranges
+6. Preserve inter-column relationships (e.g., city/state/zip should be consistent)
+7. For coded values (diagnosis codes, procedure codes), use real valid codes but different from the originals
+8. Output ONLY a markdown table with the same columns — no explanation, no extra text"""
+
+
+def _build_deidentification_prompt(schema_name: str, table_name: str, ddl: str, sample_df: pd.DataFrame) -> str:
+    """Build the user prompt for LLM-based de-identification of sample rows."""
+    markdown_table = sample_df.to_markdown(index=False)
+    return f"""De-identify the following sample rows from {schema_name}.{table_name}.
+
+**DDL:**
+```sql
+{ddl}
+```
+
+**Original rows (replace ALL values with synthetic equivalents):**
+{markdown_table}"""
+
+
+def _parse_markdown_table(text: str) -> str | None:
+    """Extract a markdown table from LLM response text.
+
+    Returns the markdown table string if found, or None if the response
+    does not contain a valid markdown table (at least a header + separator row).
+    """
+    lines = [line.strip() for line in text.strip().splitlines()]
+
+    def _is_separator(line: str) -> bool:
+        return "|" in line and all(
+            part.strip().replace("-", "").replace(":", "") == ""
+            for part in line.split("|")
+            if part.strip()
+        )
+
+    # Slide through lines looking for: pipe-line, separator, pipe-line (header + sep + data)
+    table_start = None
+    for i in range(len(lines) - 2):
+        if "|" in lines[i] and _is_separator(lines[i + 1]) and "|" in lines[i + 2]:
+            table_start = i
+            break
+
+    if table_start is None:
+        return None
+
+    table_lines: list[str] = []
+    for line in lines[table_start:]:
+        if "|" in line:
+            table_lines.append(line)
+        else:
+            break
+
+    # A valid markdown table needs at least 3 lines: header, separator, 1+ data rows
+    if len(table_lines) < 3:
+        return None
+
+    return "\n".join(table_lines)
+
+
+def train_sample_rows(clear_existing: bool = True) -> bool:
+    """Generate de-identified sample rows for each table and store in RAG.
+
+    For each non-forbidden table:
+    1. Fetch ~5 random sample rows
+    2. Get table DDL for context
+    3. Send rows + DDL to LLM for de-identification (all values replaced with synthetic ones)
+    4. Parse the synthetic markdown table from LLM response
+    5. Store as RAG documentation with metadata ``auto_type: sample_rows``
+
+    The config toggle ``[security].train_sample_rows`` (default True) controls
+    whether this step runs. When False, the function returns immediately.
+
+    Args:
+        clear_existing: If True, remove existing sample_rows entries before
+            re-adding (prevents duplicates on repeated runs). Defaults to True.
+
+    Returns:
+        True if at least one table was processed successfully, False otherwise.
+    """
+    # Check config toggle
+    if not st.secrets.get("security", {}).get("train_sample_rows", True):
+        logger.info("train_sample_rows disabled by config toggle — skipping")
+        return False
+
+    # Check allow_llm_to_see_data security flag — this function must send rows to the LLM
+    if not st.secrets.get("security", {}).get("allow_llm_to_see_data", False):
+        logger.warning("train_sample_rows requires allow_llm_to_see_data=True — skipping")
+        return False
+
+    conn = None
+    progress_bar = None
+    status_text = None
+    try:
+        st.toast("Starting de-identified sample row generation...")
+        logger.info("Starting de-identified sample row generation")
+
+        vanna_service = VannaService.from_streamlit_session()
+        if not vanna_service:
+            st.error("Failed to initialize VannaService")
+            return False
+
+        # Get forbidden tables
+        try:
+            forbidden_tables, _forbidden_columns, _ = read_forbidden_from_json()
+            logger.info("Loaded %d forbidden tables for sample row exclusion", len(forbidden_tables))
+        except Exception as e:
+            logger.warning("Error reading forbidden tables: %s", e)
+            forbidden_tables = []
+
+        # Get configuration
+        schema_name = get_configured_schema()
+        object_type = get_configured_object_type()
+
+        # --- Clear existing sample_rows entries ---
+        if clear_existing:
+            try:
+                training_data = vanna_service.get_training_data()
+                if training_data is not None and not training_data.empty:
+                    removed = 0
+                    for _, row in training_data.iterrows():
+                        content = str(row.get("content", ""))
+                        if content.startswith("SAMPLE DATA (synthetic/de-identified) for "):
+                            vanna_service.remove_from_training(row["id"])
+                            removed += 1
+                    if removed:
+                        logger.info("Removed %d previous sample_rows entries", removed)
+            except Exception as clear_err:
+                logger.warning("Could not clear existing sample_rows data: %s", clear_err)
+
+        # Connect to database
+        conn = psycopg2.connect(
+            host=st.secrets["postgres"]["host"],
+            port=st.secrets["postgres"]["port"],
+            database=st.secrets["postgres"]["database"],
+            user=st.secrets["postgres"]["user"],
+            password=st.secrets["postgres"]["password"],
+        )
+
+        # Get table list (excluding forbidden tables)
+        cursor = conn.cursor()
+        if forbidden_tables:
+            placeholders = ", ".join(["%s"] * len(forbidden_tables))
+            table_list_query = f"""
+                SELECT table_name
+                FROM information_schema.{object_type}
+                WHERE table_schema = %s
+                AND table_name NOT IN ({placeholders})
+                ORDER BY table_name
+            """
+            cursor.execute(table_list_query, [schema_name] + forbidden_tables)
+        else:
+            table_list_query = f"""
+                SELECT table_name
+                FROM information_schema.{object_type}
+                WHERE table_schema = %s
+                ORDER BY table_name
+            """
+            cursor.execute(table_list_query, (schema_name,))
+
+        tables = [row[0] for row in cursor.fetchall()]
+        cursor.close()
+
+        if not tables:
+            st.warning("No tables found for sample row generation.")
+            conn.close()
+            return False
+
+        total_tables = len(tables)
+        st.toast(f"Generating de-identified sample rows for {total_tables} tables")
+
+        # Create progress tracking
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        tables_processed = 0
+        tables_skipped = 0
+        tables_failed = []
+
+        for i, table_name in enumerate(tables):
+            try:
+                status_text.text(f"De-identifying samples for {table_name}... ({i + 1}/{total_tables})")
+                progress_bar.progress((i + 1) / total_tables)
+
+                # Fetch 5 random rows
+                sample_df = _get_random_sample_data(conn, schema_name, table_name, limit=5)
+                if sample_df.empty:
+                    tables_skipped += 1
+                    logger.info("Table %s.%s has no rows — skipping sample generation", schema_name, table_name)
+                    continue
+
+                # Get DDL for context
+                ddl = _get_single_table_ddl(conn, schema_name, table_name)
+
+                # Build de-identification prompt
+                user_prompt = _build_deidentification_prompt(schema_name, table_name, ddl, sample_df)
+
+                # Call LLM to de-identify
+                llm_response = vanna_service.submit_prompt(_DEIDENTIFICATION_SYSTEM_PROMPT, user_prompt)
+
+                if not llm_response or isinstance(llm_response, Exception):
+                    tables_failed.append((table_name, "LLM returned empty or error response"))
+                    continue
+
+                # Parse markdown table from response
+                synthetic_table = _parse_markdown_table(str(llm_response))
+                if not synthetic_table:
+                    tables_failed.append((table_name, "Could not parse markdown table from LLM response"))
+                    logger.warning("Failed to parse de-identified table for %s", table_name)
+                    continue
+
+                # Format documentation entry
+                doc_text = f"SAMPLE DATA (synthetic/de-identified) for {schema_name}.{table_name}:\n{synthetic_table}"
+
+                # Generate deterministic ID for idempotent upsert
+                doc_id = f"sample_rows_{schema_name}_{table_name}"
+
+                # Remove any existing entry with this ID (belt-and-suspenders with clear_existing)
+                try:
+                    vanna_service.remove_from_training(doc_id)
+                except Exception:
+                    pass
+
+                # Store in RAG
+                success = vanna_service.train(
+                    documentation=doc_text,
+                    metadata={"auto_type": "sample_rows", "table_name": table_name},
+                    id=doc_id,
+                )
+                if success:
+                    tables_processed += 1
+                    logger.info("Stored de-identified sample rows for %s.%s", schema_name, table_name)
+                else:
+                    tables_failed.append((table_name, "Failed to store documentation"))
+
+            except Exception as e:
+                logger.exception("Error generating sample rows for %s: %s", table_name, e)
+                tables_failed.append((table_name, str(e)))
+                continue
+
+        # Report results
+        if tables_failed:
+            failed_names = [t for t, _ in tables_failed[:5]]
+            more_msg = f" and {len(tables_failed) - 5} more" if len(tables_failed) > 5 else ""
+            st.warning(f"Some tables failed sample row generation: {', '.join(failed_names)}{more_msg}")
+            for table_name, error in tables_failed:
+                logger.warning("Failed sample rows for %s: %s", table_name, error)
+
+        st.success(
+            f"De-identified sample rows generated for {tables_processed}/{total_tables} tables"
+            f" ({tables_skipped} empty, {len(tables_failed)} failed)"
+        )
+        logger.info(
+            "train_sample_rows complete: %d succeeded, %d empty, %d failed",
+            tables_processed,
+            tables_skipped,
+            len(tables_failed),
+        )
+        return tables_processed > 0
+
+    except Exception as e:
+        st.error(f"Error generating de-identified sample rows: {e}")
+        logger.exception("Error in train_sample_rows: %s", e)
+        return False
+    finally:
+        try:
+            if progress_bar:
+                progress_bar.empty()
+            if status_text:
+                status_text.empty()
+        except Exception:
+            pass
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def train_all():
+    """Run the full training pipeline: DDL → Plan → Auto-Enhance → AI Docs → Sample Rows.
+
+    Provides st.status progress showing 5 sequential steps with elapsed time per step.
     """
     with st.status("Running full training pipeline...", expanded=True) as status:
         perf_start = set_start_time()
         overall_start = time.perf_counter()
         pvlog("info", "Step 1 - Starting full training pipeline", logger=logger, step=1)
 
-        st.write("**Step 1/4:** Training DDL structures...")
+        st.write("**Step 1/5:** Training DDL structures...")
         step_start = time.perf_counter()
         try:
             train_ddl()
@@ -3779,7 +4059,7 @@ def train_all():
             st.write(f"  Step 1 failed: {e}")
             logger.exception("train_all step 1 (DDL) failed: %s", e)
 
-        st.write("**Step 2/4:** Building schema plan...")
+        st.write("**Step 2/5:** Building schema plan...")
         step_start = time.perf_counter()
         try:
             training_plan()
@@ -3788,7 +4068,7 @@ def train_all():
             st.write(f"  Step 2 failed: {e}")
             logger.exception("train_all step 2 (Plan) failed: %s", e)
 
-        st.write("**Step 3/4:** Auto-enhancing schema...")
+        st.write("**Step 3/5:** Auto-enhancing schema...")
         step_start = time.perf_counter()
         try:
             auto_enhance_schema(clear_existing=True)
@@ -3797,7 +4077,7 @@ def train_all():
             st.write(f"  Step 3 failed: {e}")
             logger.exception("train_all step 3 (Auto-Enhance) failed: %s", e)
 
-        st.write("**Step 4/4:** Generating AI documentation (LLM-powered, may take a few minutes)...")
+        st.write("**Step 4/5:** Generating AI documentation (LLM-powered, may take a few minutes)...")
         step_start = time.perf_counter()
         try:
             train_ai_documentation()
@@ -3805,6 +4085,15 @@ def train_all():
         except Exception as e:
             st.write(f"  Step 4 failed: {e}")
             logger.exception("train_all step 4 (AI Docs) failed: %s", e)
+
+        st.write("**Step 5/5:** Generating de-identified sample rows...")
+        step_start = time.perf_counter()
+        try:
+            train_sample_rows(clear_existing=True)
+            st.write(f"  Step 5 complete ({time.perf_counter() - step_start:.1f}s)")
+        except Exception as e:
+            st.write(f"  Step 5 failed: {e}")
+            logger.exception("train_all step 5 (Sample Rows) failed: %s", e)
 
         total_elapsed = time.perf_counter() - overall_start
         calculate_process_performance("train_all", perf_start, logger=logger)
