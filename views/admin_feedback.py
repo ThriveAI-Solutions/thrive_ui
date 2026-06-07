@@ -170,14 +170,21 @@ def _approve_for_training(message_id: int, reviewer_id: int) -> bool:
         # Trigger training before commit - if it fails, don't commit
         if message.question and message.query:
             new_entry = {"question": message.question, "query": message.query}
-            try:
-                write_to_file_and_training(new_entry)
-            except Exception:
-                # Revert status and log error
+            # write_to_file_and_training catches its own exceptions and shows a
+            # user-facing st.error; it returns False on failure. We must NOT
+            # advance training_status to APPROVED unless the underlying write
+            # actually succeeded, otherwise the DB will claim a pair was
+            # trained that never made it into ChromaDB / training_data.json.
+            if not write_to_file_and_training(new_entry):
+                # Revert in-memory status and bail out without committing so the
+                # approval stays pending and an admin can retry.
                 message.training_status = original_status
                 message.reviewed_by = None
                 message.reviewed_at = None
-                logger.exception("Failed to add message %s to training data", message_id)
+                logger.error(
+                    "Failed to add message %s to training data; approval not committed",
+                    message_id,
+                )
                 return False
 
         session.commit()

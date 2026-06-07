@@ -431,3 +431,40 @@ class TestAutoGenerateSqlPairs:
         assert results["passed"] == 0
         assert results["failed"] == 1
         assert "LLM generation failed" in results["details"][0]["reason"]
+
+    @patch("utils.vanna_calls.st")
+    @patch("utils.vanna_calls.write_to_file_and_training")
+    @patch("utils.vanna_calls.VannaService.from_streamlit_session")
+    def test_training_write_failure_counted_as_failed(self, mock_from_session, mock_write, mock_st, mock_vanna_service):
+        """If write_to_file_and_training returns False, the pair must be marked failed.
+
+        Regression test for issue #68: previously the function ignored the
+        return value of write_to_file_and_training, so a swallowed exception
+        was counted as a "passed" pair even though nothing was persisted.
+        """
+        from utils.vanna_calls import auto_generate_sql_pairs
+
+        mock_from_session.return_value = mock_vanna_service
+        mock_st.progress.return_value = MagicMock()
+        mock_st.empty.return_value = MagicMock()
+
+        # Generation + review both succeed, so we reach the training step.
+        mock_vanna_service.submit_prompt.side_effect = [
+            "QUESTION: How many patients?\nSQL: SELECT COUNT(*) FROM patients;",
+            "PASS",
+        ]
+        mock_vanna_service.vn.run_sql.return_value = pd.DataFrame({"count": [42]})
+        mock_vanna_service.check_references.return_value = "SELECT COUNT(*) FROM patients;"
+
+        # Simulate the training write itself failing.
+        mock_write.return_value = False
+
+        with patch("utils.security_validator.security_validator") as mock_sv:
+            mock_sv.validate_sql_content.return_value = (True, [])
+            results = auto_generate_sql_pairs(count=1)
+
+        mock_write.assert_called_once()
+        assert results["attempted"] == 1
+        assert results["passed"] == 0
+        assert results["failed"] == 1
+        assert "Training write failed" in results["details"][0]["reason"]

@@ -2368,7 +2368,17 @@ def remove_from_file_training(new_entry: dict):
         logger.exception("Error removing entry from training_data.json: %s", e)
 
 
-def write_to_file_and_training(new_entry: dict):
+def write_to_file_and_training(new_entry: dict) -> bool:
+    """Persist a training pair to ChromaDB and the local training_data.json file.
+
+    Returns:
+        bool: True if the training write completed successfully, False if any
+        exception was caught. Callers that want to react to failures (e.g.,
+        avoid marking a record as APPROVED) should branch on this value.
+        Existing callers that ignore the return value continue to work
+        unchanged because the user-facing ``st.error`` message and exception
+        log are still emitted on failure.
+    """
     try:
         vanna_service = VannaService.from_streamlit_session()
         vanna_service.train(question=new_entry["question"], sql=new_entry["query"])
@@ -2393,9 +2403,11 @@ def write_to_file_and_training(new_entry: dict):
             pvlog("info", "New entry added to training_data.json", logger=logger)
         else:
             pvlog("info", "Duplicate entry found. No new entry added.", logger=logger)
+        return True
     except Exception as e:
         st.error(f"Error writing to training_data.json: {e}")
         logger.exception("%s", e)
+        return False
 
 
 def training_plan():
@@ -4015,8 +4027,13 @@ Does this result correctly answer the question? Respond PASS or FAIL."""
 
             # Step 5: Train the valid pair
             new_entry = {"question": question, "query": sql}
-            # write_to_file_and_training handles its own errors internally via st.error
-            write_to_file_and_training(new_entry)
+            # write_to_file_and_training returns False if the training write
+            # failed (the user-facing st.error and exception log are already
+            # emitted from inside the function). Treat that as a failed pair so
+            # we don't claim a successful training that never persisted.
+            if not write_to_file_and_training(new_entry):
+                _reject_pair(pair_detail, results, "Training write failed (see logs)")
+                continue
 
             pair_detail["status"] = "passed"
             results["passed"] += 1

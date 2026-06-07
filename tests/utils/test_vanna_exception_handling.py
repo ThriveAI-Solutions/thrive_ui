@@ -319,7 +319,7 @@ class TestUtilityFunctionExceptions:
 
     @patch("streamlit.error")
     def test_write_to_file_and_training_exception(self, mock_st_error):
-        """Test that exceptions in write_to_file_and_training are handled properly."""
+        """Exceptions are caught, surfaced to the user, and reported as False."""
         # Mock all file operations to prevent them from affecting real files
         m = mock_open(read_data='{"sample_queries": [], "sample_documents": []}')
 
@@ -334,11 +334,34 @@ class TestUtilityFunctionExceptions:
             mock_get_instance.return_value = mock_service
             mock_service.train.side_effect = Exception("Training error")
 
-            # Should catch the exception
-            write_to_file_and_training({"question": "q", "query": "sql"})
+            # Should catch the exception and report failure to the caller
+            result = write_to_file_and_training({"question": "q", "query": "sql"})
 
+            assert result is False
             mock_st_error.assert_called_once()
             assert "Error writing to training_data.json" in mock_st_error.call_args[0][0]
+
+    @patch("streamlit.error")
+    def test_write_to_file_and_training_success_returns_true(self, mock_st_error):
+        """Successful training writes return True and do not surface any error."""
+        m = mock_open(read_data='{"sample_queries": [], "sample_documents": []}')
+
+        with (
+            patch("utils.vanna_calls.VannaService.from_streamlit_session") as mock_from_session,
+            patch("builtins.open", m),
+            patch("pathlib.Path.open", m),
+            patch("json.load", return_value={"sample_queries": [], "sample_documents": []}),
+            patch("json.dump") as mock_dump,
+        ):
+            mock_service = MagicMock()
+            mock_from_session.return_value = mock_service
+
+            result = write_to_file_and_training({"question": "new q", "query": "SELECT 1"})
+
+            assert result is True
+            mock_service.train.assert_called_once_with(question="new q", sql="SELECT 1")
+            mock_st_error.assert_not_called()
+            mock_dump.assert_called_once()
 
     @patch("streamlit.error")
     def test_remove_from_file_training_exception(self, mock_st_error):
