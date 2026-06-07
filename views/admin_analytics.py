@@ -661,25 +661,6 @@ def _render_activity_tab(days_int: int):
         st.info("No recent activity found.")
 
 
-def _render_errors_tab(days_int: int):
-    """Stub — error visibility moved to the dedicated Errors page (#106)."""
-    # The KPIs, trend chart, category/severity breakdowns, and drill-down
-    # that used to live here now render on the Errors page alongside the
-    # agent-run and fallback-sink sources — one canonical surface instead
-    # of two overlapping ones.
-    st.info("Error visibility has moved to the dedicated **Errors** page.")
-    try:
-        st.page_link(
-            "views/errors.py",
-            label="→ Open the Errors page",
-            icon="⚠️",
-        )
-    except Exception:
-        # st.page_link only works inside the registered multipage runtime;
-        # fall back to a plain caption when the view is rendered standalone.
-        st.caption("Navigate to *Errors* in the admin sidebar.")
-
-
 def _render_audit_tab(days_int: int):
     """Render the Admin Audit tab."""
     from orm.logging_functions import (
@@ -784,8 +765,9 @@ def main():
 
     days_int = {"7 days": 7, "30 days": 30, "90 days": 90}.get(days or "30 days", 30)
 
-    # Tab navigation
-    tabs = st.tabs(["Overview", "LLM Performance", "User Activity", "Error Analysis", "Admin Audit"])
+    # Tab navigation — Error Analysis tab removed in #106; errors live on
+    # the dedicated Errors page in the admin sidebar.
+    tabs = st.tabs(["Overview", "LLM Performance", "User Activity", "Admin Audit"])
 
     with tabs[0]:
         _render_overview_tab(days_int)
@@ -797,9 +779,6 @@ def main():
         _render_activity_tab(days_int)
 
     with tabs[3]:
-        _render_errors_tab(days_int)
-
-    with tabs[4]:
         _render_audit_tab(days_int)
 
 
