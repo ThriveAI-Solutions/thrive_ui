@@ -193,7 +193,7 @@ class User(Base):
     confirm_magic_commands = Column(Boolean, default=True)  # True = show popup, False = auto-execute
     agentic_mode = Column(Boolean, default=True)
     min_message_id = Column(Integer, default=0)
-    theme = Column(String(50), default=ThemeType.WELLTELLAI.value)
+    theme = Column(String(50), default=ThemeType.THRIVEAI.value)
     selected_llm_provider = Column(String(50), default=None)
     selected_llm_model = Column(String(100), default=None)
 
