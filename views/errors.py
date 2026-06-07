@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-from orm.error_read_model import ErrorSource
+from orm.error_read_model import ErrorSource, query_aggregates
 from orm.models import ErrorCategory, ErrorSeverity, RoleTypeEnum
 from utils.error_fallback_sink import try_drain_fallback_to_db
 from utils.quick_logger import get_logger
@@ -39,6 +41,17 @@ _KNOWN_SEVERITIES = [s.value for s in ErrorSeverity]
 # Admins often watch errors arrive in near-real-time, so the TTL is
 # short compared to admin_analytics's 300s.
 ERRORS_CACHE_TTL_SECONDS = 60
+# Aggregate KPIs + chart series tolerate a longer cache so toggling filters
+# doesn't re-roll up every row. Mirrors admin_analytics.ANALYTICS_CACHE_TTL_SECONDS.
+AGGREGATES_CACHE_TTL_SECONDS = 300
+
+# Pie-slice colors match the legacy Errors by Severity chart from
+# views/admin_analytics.py so admins don't relearn the visual encoding.
+_SEVERITY_COLOR_MAP = {
+    "warning": "#FFA500",
+    "error": "#FF6347",
+    "critical": "#DC143C",
+}
 
 logger = get_logger(__name__)
 
@@ -99,6 +112,26 @@ def _load(
         search,
         user_id_text,
     )
+
+
+@st.cache_data(ttl=AGGREGATES_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_aggregates(days: int) -> dict:
+    """Roll up KPI + chart data for the Analytics block.
+
+    Cached at 300s — chart data churns less than the per-row drill-down.
+    Returns a plain dict (not the dataclass) so Streamlit's cache key
+    handling does not need to fingerprint a dataclass.
+    """
+    agg = query_aggregates(_time_range_to_since(days))
+    return {
+        "total": agg.total,
+        "critical": agg.critical,
+        "sql_errors": agg.sql_errors,
+        "retry_success_rate": agg.retry_success_rate,
+        "over_time_by_category": agg.over_time_by_category,
+        "by_category": agg.by_category,
+        "by_severity": agg.by_severity,
+    }
 
 
 # ── Page render (runs every Streamlit script execution) ───────────────────
@@ -197,6 +230,71 @@ with cols[2]:
         help_text=_KPI_HELP_TEXT,
         dim=ErrorSource.FALLBACK_SINK.value not in selected_source_values,
     )
+
+st.divider()
+
+# ── Analytics block (migrated from Admin Analytics → Error Analysis tab) ──
+
+aggregates = _load_aggregates(range_choice)
+
+st.subheader("Analytics")
+st.caption(
+    "Time-range totals across all three sources. Not narrowed by the category / severity / user / search filters above."
+)
+
+a1, a2, a3, a4 = st.columns(4)
+with a1:
+    _kpi_card("Total Errors", aggregates["total"])
+with a2:
+    _kpi_card("Critical", aggregates["critical"], help_text="Severity = critical")
+with a3:
+    _kpi_card("SQL Errors", aggregates["sql_errors"], help_text="Generation + Execution")
+with a4:
+    _kpi_card("Retry Success", f"{aggregates['retry_success_rate']}%")
+
+st.markdown("**Error Trends by Category**")
+over_time = aggregates["over_time_by_category"]
+if over_time:
+    ot_df = pd.DataFrame(over_time)
+    ot_df["date"] = pd.to_datetime(ot_df["date"])
+    pivot_df = ot_df.pivot(index="date", columns="category", values="count").fillna(0).reset_index()
+    trends_fig = px.area(pivot_df, x="date", y=pivot_df.columns[1:], title=None)
+    trends_fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), legend_title_text="Category")
+    st.plotly_chart(trends_fig, width="stretch")
+else:
+    st.info("No error time-series data in this range.")
+
+chart_cols = st.columns(2)
+with chart_cols[0]:
+    st.markdown("**Errors by Category**")
+    by_category = aggregates["by_category"]
+    if by_category:
+        cat_df = pd.DataFrame(
+            sorted(by_category.items(), key=lambda kv: kv[1], reverse=True),
+            columns=["Category", "Count"],
+        )
+        cat_fig = px.bar(cat_df, x="Count", y="Category", orientation="h")
+        cat_fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(cat_fig, width="stretch")
+    else:
+        st.info("No category data.")
+
+with chart_cols[1]:
+    st.markdown("**Errors by Severity**")
+    by_severity = aggregates["by_severity"]
+    if by_severity:
+        sev_df = pd.DataFrame(by_severity)
+        sev_fig = px.pie(
+            sev_df,
+            values="count",
+            names="severity",
+            color="severity",
+            color_discrete_map=_SEVERITY_COLOR_MAP,
+        )
+        sev_fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(sev_fig, width="stretch")
+    else:
+        st.info("No severity data.")
 
 st.divider()
 
@@ -321,8 +419,10 @@ with st.expander("Maintenance — drain pending fallback records"):
                     "No records were replayed — the fallback file was empty "
                     "or all records were duplicates of existing rows."
                 )
-            # Bust the load cache so the per-source badges refresh.
+            # Bust the load caches so the per-source badges and the
+            # analytics block both refresh.
             _load.clear()
+            _load_aggregates.clear()
             st.rerun()
         except Exception as exc:  # pragma: no cover — defensive in UI
             logger.exception("Errors page: try_drain_fallback_to_db raised")
