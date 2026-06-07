@@ -34,5 +34,5 @@ def user_selectable_themes() -> list[str]:
     """Themes shown in user-facing dropdowns. WellTellAI is intentionally
     excluded (#108) but remains in ThemeType so persisted DB rows still
     parse — render-time fallback coerces them to the default theme."""
-    hidden = {ThemeType.WELLTELLAI.value}
-    return [t.value for t in ThemeType if t.value not in hidden]
+    hidden = {ThemeType.WELLTELLAI}
+    return [t.value for t in ThemeType if t not in hidden]
