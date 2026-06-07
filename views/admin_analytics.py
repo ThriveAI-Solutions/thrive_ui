@@ -765,9 +765,13 @@ def main():
 
     days_int = {"7 days": 7, "30 days": 30, "90 days": 90}.get(days or "30 days", 30)
 
-    # Tab navigation — Error Analysis tab removed in #106; errors live on
-    # the dedicated Errors page in the admin sidebar.
-    tabs = st.tabs(["Overview", "LLM Performance", "User Activity", "Admin Audit"])
+    # Tab navigation. The Errors tab (#106) hosts what used to be the
+    # standalone "Errors" page from the admin sidebar — moved here so admins
+    # land on a single Analytics surface for usage, performance, audit, and
+    # error visibility.
+    from views.errors import render as render_errors_tab
+
+    tabs = st.tabs(["Overview", "LLM Performance", "User Activity", "Errors", "Admin Audit"])
 
     with tabs[0]:
         _render_overview_tab(days_int)
@@ -779,6 +783,9 @@ def main():
         _render_activity_tab(days_int)
 
     with tabs[3]:
+        render_errors_tab(days_int)
+
+    with tabs[4]:
         _render_audit_tab(days_int)
 
 
