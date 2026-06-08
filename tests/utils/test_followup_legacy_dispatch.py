@@ -85,6 +85,24 @@ def test_get_last_assistant_dataframe_returns_none_when_no_history(monkeypatch):
     assert cbh.get_last_assistant_dataframe() is None
 
 
+def test_get_last_assistant_dataframe_returns_none_on_corrupt_most_recent(monkeypatch):
+    """If the newest assistant df is corrupt, return None — never silently fall back
+    to an older frame, which would mislead the caller into running follow-up commands
+    against stale data."""
+    import utils.chat_bot_helper as cbh
+
+    df_old = pd.DataFrame({"a": [1, 2, 3]})
+    messages = [
+        _FakeMessage("assistant", dataframe=df_old.to_json(date_format="iso")),
+        _FakeMessage("user"),
+        _FakeMessage("assistant", dataframe="not-valid-json{["),  # newest, corrupt
+    ]
+    fake_st = _fake_st(messages)
+    monkeypatch.setattr(cbh, "st", fake_st)
+
+    assert cbh.get_last_assistant_dataframe() is None
+
+
 def test_get_last_assistant_dataframe_tolerates_messages_none(monkeypatch):
     """Defensive: session_state.messages can legitimately be missing at boot."""
     import utils.chat_bot_helper as cbh

@@ -477,6 +477,10 @@ def get_last_assistant_dataframe():
     Used to drive `FOLLOW_UP_MAGIC_RENDERERS` in the legacy (non-agentic) chat flow so
     bare follow-up commands like `head 3` or `distribution glucose` can operate on the
     previous result without requiring agentic mode.
+
+    If the most recent assistant message carrying a `dataframe` payload fails to decode,
+    return None — never silently fall back to an older message, which would mislead the
+    caller into running a follow-up against stale data.
     """
     messages = st.session_state.get("messages") or []
     for msg in reversed(messages):
@@ -484,7 +488,7 @@ def get_last_assistant_dataframe():
             try:
                 return pd.read_json(StringIO(msg.dataframe))
             except Exception:
-                continue
+                return None
     return None
 
 
