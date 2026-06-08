@@ -11,6 +11,7 @@ from orm.functions import (
     update_user_preferences,
 )
 from utils.chat_bot_helper import (
+    get_last_assistant_dataframe,
     get_message_group_css,
     get_unique_messages,
     get_vn,
@@ -528,10 +529,13 @@ my_question = st.session_state.get("my_question", None)
 # No persistent panel / st.stop() needed — users can also just type a new question.
 
 if my_question:
+    # Surface the previous result for follow-up magic commands (`head 3`,
+    # `distribution glucose`, …). Agentic mode keeps its session-state df;
+    # legacy mode pulls the latest assistant message's dataframe from history.
     if st.session_state.get("agentic_mode", False):
         previous_df = st.session_state.get("df")
     else:
-        previous_df = None
+        previous_df = get_last_assistant_dataframe()
     magic_response = is_magic_do_magic(my_question, previous_df=previous_df)
     if magic_response == True:
         st.stop()

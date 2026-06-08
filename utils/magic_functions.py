@@ -476,7 +476,28 @@ def is_magic_do_magic(question, previous_df=None):
             st.session_state["semantic_magic_result"] = None
             return False  # User declined, proceed to normal flow
 
-        # STEP 1: Try exact regex matching (existing behavior - highest priority)
+        # STEP 1a: Try main MAGIC_RENDERERS first — handles /-prefixed commands
+        # (/help, /tables, /describe, …) plus the bare `loop` and history-search.
+        # These are always available, regardless of whether a previous dataframe exists.
+        for key, meta in MAGIC_RENDERERS.items():
+            match = re.match(key, question)  # .strip()
+            if match:
+                if meta["func"] != _followup and meta["func"] != _history_search:
+                    add_message(
+                        Message(
+                            RoleType.ASSISTANT,
+                            "Sounds like magic!",
+                            MessageType.TEXT,
+                            group_id=get_current_group_id(),
+                        )
+                    )
+                meta["func"](question, match.groupdict(), None)
+                return True
+
+        # STEP 1b: If a previous dataframe is available, try FOLLOW_UP_MAGIC_RENDERERS
+        # for bare follow-up syntax (`head 3`, `distribution glucose`, `heatmap`, …).
+        # Available in both legacy and agentic modes — the caller is responsible for
+        # supplying previous_df from session history.
         if previous_df is not None:
             for key, meta in FOLLOW_UP_MAGIC_RENDERERS.items():
                 match = re.match(key, question.strip())
@@ -491,31 +512,16 @@ def is_magic_do_magic(question, previous_df=None):
                     )
                     meta["func"](question, match.groupdict(), previous_df)
                     return True
-        else:
-            for key, meta in MAGIC_RENDERERS.items():
-                match = re.match(key, question)  # .strip()
-                if match:
-                    if meta["func"] != _followup and meta["func"] != _history_search:
-                        add_message(
-                            Message(
-                                RoleType.ASSISTANT,
-                                "Sounds like magic!",
-                                MessageType.TEXT,
-                                group_id=get_current_group_id(),
-                            )
-                        )
-                    meta["func"](question, match.groupdict(), None)
-                    return True
 
-        # STEP 2: Semantic classification for non-regex queries
-        # Skip semantic classification for follow-up context (previous_df is set)
-        # Also check feature flag
+        # STEP 2: Semantic classification for non-regex queries.
+        # Gated on the agentic_mode toggle (agent handles natural language directly)
+        # and the feature flag. Runs in legacy mode regardless of whether a previous
+        # dataframe is available — the classifier targets MAGIC_RENDERERS (slash
+        # commands), which are independent of follow-up state.
         semantic_enabled = st.secrets.get("features", {}).get("semantic_magic_enabled", True)
-        # In agentic mode, skip the LLM classifier — the agent handles natural language.
-        # Literal slash commands (handled in STEP 1 above) still work.
         if st.session_state.get("agentic_mode", False):
             semantic_enabled = False
-        if previous_df is None and semantic_enabled:
+        if semantic_enabled:
             from utils.semantic_magic_service import SemanticMagicService
 
             result = SemanticMagicService.classify(question, MAGIC_RENDERERS)
