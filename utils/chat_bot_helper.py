@@ -471,6 +471,23 @@ def get_unique_messages():
     return unique_messages
 
 
+def get_last_assistant_dataframe():
+    """Return the most recent assistant message's DataFrame (decoded from JSON), or None.
+
+    Used to drive `FOLLOW_UP_MAGIC_RENDERERS` in the legacy (non-agentic) chat flow so
+    bare follow-up commands like `head 3` or `distribution glucose` can operate on the
+    previous result without requiring agentic mode.
+    """
+    messages = st.session_state.get("messages") or []
+    for msg in reversed(messages):
+        if msg.role == RoleType.ASSISTANT.value and getattr(msg, "dataframe", None):
+            try:
+                return pd.read_json(StringIO(msg.dataframe))
+            except Exception:
+                continue
+    return None
+
+
 def set_feedback(index: int, value: str, feedback_comment: str = None):
     message = st.session_state.messages[index]
     message.feedback = value
