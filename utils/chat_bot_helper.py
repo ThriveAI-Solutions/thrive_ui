@@ -428,7 +428,7 @@ def set_question(question: str, render=True):
             save_user_settings()
             # Clear questions history when resetting
             st.session_state.my_question = None
-            st.session_state.messages = None
+            st.session_state.messages = []
 
     else:
         # For /followup commands, use the previous group to keep messages together
