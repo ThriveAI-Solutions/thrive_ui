@@ -347,8 +347,31 @@ def _render_overview_tab(days_int: int):
         st.dataframe(pd.DataFrame(compact_rows), width="stretch", hide_index=True)
     else:
         st.info("No questions in the selected time range.")
-    if st.button("View full Audit Trail →", type="primary", key="overview_to_audit_btn"):
-        st.switch_page("views/admin_analytics.py")
+    # Streamlit's st.tabs widget has no server-side API to change the active
+    # tab and st.switch_page is a no-op on the same page, so we use a small
+    # JS shim served via components.v1.html that clicks the parent window's
+    # Audit Trail tab on link click.
+    st.components.v1.html(
+        """
+        <a href="#" id="goto-audit-link" onclick="
+          (function(){
+            try {
+              var tabs = window.parent.document.querySelectorAll('button[role=tab]');
+              for (var i = 0; i < tabs.length; i++) {
+                if (tabs[i].textContent.trim() === 'Audit Trail') { tabs[i].click(); break; }
+              }
+            } catch (e) { console.error('audit-tab nav failed', e); }
+            return false;
+          })();
+          return false;
+        " style="display:inline-block;padding:0.5rem 1rem;background:#0b5258;
+                 color:white;text-decoration:none;border-radius:0.5rem;
+                 font-weight:600;font-family:inherit;">
+          View full Audit Trail →
+        </a>
+        """,
+        height=60,
+    )
 
     st.divider()
 
