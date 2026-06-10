@@ -9,10 +9,10 @@ Claims branch: broadly inclusive, excludes Inspection (root op J).
 """
 
 from __future__ import annotations
+
 from typing import List, Optional, Tuple
 
 from agent.code_normalizer import variants_for
-
 
 # ICD-10-PCS 3rd-character (root operation) values considered invasive.
 _INVASIVE_ROOT_OPS = (
@@ -161,7 +161,7 @@ def surgeries_sql(
          AND DATE(p.diagnosis_datetime) = DATE(e.datetime)
         WHERE p.source_id = :source_id
           AND p.code_type IN ({pcs_placeholders})
-          AND SUBSTR(p.code, 3, 1) IN ({inv_placeholders})
+          AND SUBSTRING(p.code, 3, 1) IN ({inv_placeholders})
           {icdpcs_filter}
           {text_filter_problems}
           {date_filter_problems}
