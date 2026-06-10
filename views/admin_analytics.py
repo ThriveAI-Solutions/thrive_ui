@@ -352,6 +352,7 @@ def _render_overview_tab(days_int: int):
         height=60,
     )
 
+
 @st.cache_data(ttl=ANALYTICS_CACHE_TTL_SECONDS, show_spinner=False)
 def _cached_audit_filter_options(days_int: int) -> dict:
     from orm.logging_functions import get_question_audit_filter_options
@@ -394,13 +395,9 @@ def _render_audit_trail_tab(days_int: int):
 
     f1, f2, f3 = st.columns([0.30, 0.30, 0.40])
     with f1:
-        usernames_sel = st.multiselect(
-            "User", options=options["usernames"], key="audit_user_filter"
-        )
+        usernames_sel = st.multiselect("User", options=options["usernames"], key="audit_user_filter")
     with f2:
-        orgs_sel = st.multiselect(
-            "Organization", options=options["orgs"], key="audit_org_filter"
-        )
+        orgs_sel = st.multiselect("Organization", options=options["orgs"], key="audit_org_filter")
     with f3:
         search = st.text_input(
             "Search question or SQL",
@@ -783,12 +780,121 @@ def _render_activity_tab(days_int: int):
         st.info("No recent activity found.")
 
 
+def _format_action_target(item: dict) -> str:
+    """Format the target column for the Admin Actions grid.
+
+    Prefers ``target_username`` (the human-readable handle, denormalised on
+    the row so deleted users still render). Falls back to
+    ``target_entity_type:target_entity_id`` when no username is set. Returns
+    empty string when neither is present.
+    """
+    username = item.get("target_username")
+    if username:
+        return str(username)
+    entity_type = item.get("target_entity_type")
+    entity_id = item.get("target_entity_id")
+    if entity_type and entity_id:
+        return f"{entity_type}:{entity_id}"
+    if entity_type:
+        return str(entity_type)
+    if entity_id:
+        return str(entity_id)
+    return ""
+
+
+def _render_admin_action_dialog_body(item: dict) -> None:
+    """Render the body of the Admin Action detail dialog (#156).
+
+    Split out from the ``@st.dialog``-decorated wrapper so tests can call
+    the body directly with a stubbed ``st`` module — mirrors the pattern
+    used by ``_render_audit_question_dialog_body`` (#155).
+    """
+    # Header line: timestamp · admin · action_type
+    created_at = item.get("created_at")
+    if hasattr(created_at, "strftime"):
+        created_str = created_at.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        created_str = str(created_at) if created_at is not None else "(unknown time)"
+    admin = item.get("admin_username") or "Unknown"
+    action_type = item.get("action_type") or "(unknown action)"
+    st.markdown(f"**{created_str}** · {admin} · {action_type}")
+
+    # Success / failure badge
+    success = item.get("success")
+    if success is False:
+        st.markdown(":red[❌ FAILED]")
+    else:
+        st.markdown(":green[✅ SUCCESS]")
+
+    # Description
+    st.markdown("**Description**")
+    st.write(item.get("description") or "_(no description)_")
+
+    # Target line — surface fields the old expander dropped on the floor.
+    target = _format_action_target(item)
+    if target:
+        st.markdown(f"**Target:** {target}")
+
+    # Affected count (bulk operations) — only when non-null.
+    affected = item.get("affected_count")
+    if affected is not None:
+        st.markdown(f"**Affected:** {int(affected)}")
+
+    # Error block — only on failure with a non-empty message.
+    error_msg = item.get("error_message")
+    if success is False and error_msg:
+        st.markdown("**Error**")
+        st.code(str(error_msg), language="text")
+
+    # Side-by-side old/new value diff.
+    old_raw = item.get("old_value")
+    new_raw = item.get("new_value")
+    has_old = old_raw is not None and old_raw != ""
+    has_new = new_raw is not None and new_raw != ""
+    if has_old or has_new:
+        col1, col2 = st.columns(2)
+        if has_old:
+            with col1:
+                st.markdown("**Previous State**")
+                try:
+                    st.json(json.loads(old_raw))
+                except Exception:
+                    st.text(str(old_raw))
+        if has_new:
+            with col2:
+                st.markdown("**New State**")
+                try:
+                    st.json(json.loads(new_raw))
+                except Exception:
+                    st.text(str(new_raw))
+
+    # Trailing metadata caption.
+    st.caption(f"Action ID {item.get('id')}")
+
+
+@st.dialog("Admin Action Detail")
+def _render_admin_action_dialog(item: dict) -> None:
+    """``@st.dialog``-decorated wrapper invoked from ``_render_audit_tab``.
+
+    Uses the same trigger primitive as the Questions tab (#155): a
+    ``st.dataframe(on_select="rerun", selection_mode="single-row")``
+    selection-state change opens this dialog. See Epic #154.
+    """
+    _render_admin_action_dialog_body(item)
+
+
 def _render_audit_tab(days_int: int):
-    """Render the Admin Audit tab."""
+    """Render the Admin Audit tab.
+
+    Grid + row-click dialog (Feature #156). The pre-existing KPI row and
+    Action Distribution pie/table at the top of the tab are unchanged from
+    #144 — only the trailing "Recent Admin Actions" expander block was
+    swapped for the paginated grid + dialog.
+    """
     from orm.logging_functions import (
         get_admin_action_stats,
         get_admin_actions_by_type,
-        get_recent_admin_actions,
+        get_admin_actions_page,
     )
 
     stats = get_admin_action_stats(days=days_int)
@@ -827,39 +933,110 @@ def _render_audit_tab(days_int: int):
 
     st.divider()
 
-    # Recent Actions Log
+    # Recent Admin Actions — paginated grid + row-click dialog (#156).
     st.subheader("Recent Admin Actions")
-    recent = get_recent_admin_actions(days=days_int, limit=50)
-    if recent:
-        for action in recent:
-            status_icon = ":green[SUCCESS]" if action["success"] else ":red[FAILED]"
-            with st.expander(
-                f"{status_icon} **{action['action_type']}** by {action['admin_username']} - {action['created_at'].strftime('%Y-%m-%d %H:%M')}",
-                expanded=False,
-            ):
-                st.markdown(f"**Description:** {action['description']}")
-                if action["target_username"]:
-                    st.markdown(f"**Target User:** {action['target_username']}")
 
-                # Show value changes if present
-                if action["old_value"] or action["new_value"]:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Previous State:**")
-                        try:
-                            old = json.loads(action["old_value"]) if action["old_value"] else {}
-                            st.json(old)
-                        except Exception:
-                            st.text(action["old_value"] or "N/A")
-                    with col2:
-                        st.markdown("**New State:**")
-                        try:
-                            new = json.loads(action["new_value"]) if action["new_value"] else {}
-                            st.json(new)
-                        except Exception:
-                            st.text(action["new_value"] or "N/A")
+    # Reset pagination on time-range change so the page index doesn't
+    # outlive a shrunken result set.
+    if st.session_state.get("audit_actions_days_signature") != int(days_int):
+        st.session_state["audit_actions_days_signature"] = int(days_int)
+        st.session_state["audit_actions_page_num"] = 1
+
+    # Pagination controls (top row) — mirrors _render_audit_trail_tab.
+    if "audit_actions_page_bump" in st.session_state:
+        st.session_state["audit_actions_page_num"] = max(
+            1,
+            int(st.session_state.get("audit_actions_page_num", 1)) + int(st.session_state["audit_actions_page_bump"]),
+        )
+        del st.session_state["audit_actions_page_bump"]
+    if "audit_actions_page_num" not in st.session_state:
+        st.session_state["audit_actions_page_num"] = 1
+
+    pc1, pc2, _spacer = st.columns([1, 1, 6])
+    with pc1:
+        page_size = st.selectbox(
+            "Page size",
+            options=[25, 50, 100, 200],
+            index=1,
+            key="audit_actions_page_size",
+        )
+    with pc2:
+        st.number_input("Page", min_value=1, step=1, key="audit_actions_page_num")
+        page = int(st.session_state["audit_actions_page_num"])
+
+    result = get_admin_actions_page(days=int(days_int), page=page, page_size=int(page_size))
+    items = result.get("items", [])
+    total = int(result.get("total", 0))
+    total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
+
+    if items:
+        table_rows = []
+        for it in items:
+            ts = it.get("created_at")
+            ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, "strftime") else str(ts or "")
+            table_rows.append(
+                {
+                    "Time": ts_str,
+                    "Admin": it.get("admin_username") or "Unknown",
+                    "Action Type": it.get("action_type") or "",
+                    "Target": _format_action_target(it),
+                    "Description": _truncate(it.get("description"), 120),
+                    "Status": "✅ Success" if it.get("success") else "❌ Failed",
+                }
+            )
+
+        event = st.dataframe(
+            pd.DataFrame(table_rows),
+            width="stretch",
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="audit_actions_dataframe",
+        )
+
+        selected_rows = []
+        try:
+            selected_rows = (event.selection or {}).get("rows", []) if event else []
+        except AttributeError:
+            try:
+                selected_rows = (event or {}).get("selection", {}).get("rows", [])
+            except Exception:
+                selected_rows = []
+
+        if selected_rows:
+            row_idx = int(selected_rows[0])
+            if 0 <= row_idx < len(items):
+                selected_item = items[row_idx]
+                open_id = st.session_state.get("audit_actions_dialog_open_id")
+                if open_id != selected_item["id"]:
+                    st.session_state["audit_actions_dialog_open_id"] = selected_item["id"]
+                _render_admin_action_dialog(selected_item)
+        else:
+            # Selection cleared — drop the tracking key so re-selecting the
+            # same row reopens the dialog.
+            if "audit_actions_dialog_open_id" in st.session_state:
+                del st.session_state["audit_actions_dialog_open_id"]
     else:
-        st.info("No recent admin actions found.")
+        st.info("No admin actions in the selected time range.")
+
+    # Pagination caption + Prev/Next.
+    cprev, cinfo, cnext = st.columns([1, 3, 1])
+    with cprev:
+        st.button(
+            "Prev",
+            disabled=int(page) <= 1,
+            key="audit_actions_prev_btn",
+            on_click=lambda: st.session_state.update({"audit_actions_page_bump": -1}),
+        )
+    with cinfo:
+        st.caption(f"Page {int(page)} of {total_pages} • {total} total")
+    with cnext:
+        st.button(
+            "Next",
+            disabled=int(page) >= total_pages,
+            key="audit_actions_next_btn",
+            on_click=lambda: st.session_state.update({"audit_actions_page_bump": 1}),
+        )
 
 
 # ============== Main Entry Point ==============
@@ -884,6 +1061,7 @@ def main():
         if st.button("Refresh Data", help="Clear cached data and reload metrics"):
             _read_metrics.clear()
             from views.errors import _load as _errors_load, _load_aggregates as _errors_load_aggregates
+
             _errors_load.clear()
             _errors_load_aggregates.clear()
             st.rerun()
