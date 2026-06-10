@@ -177,16 +177,11 @@ if st.session_state.messages and len(st.session_state.messages) > max_messages:
     )
 
 
-######### Sidebar settings #########
+######### Settings dialog (#141) #########
 
 
-st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
-
-_render_selected_patient_sidebar()
-_render_reset_agent_sidebar()
-
-# LLM Selection UI
-with st.sidebar.expander("🤖 LLM Selection", expanded=False):
+def _render_llm_section():
+    """LLM provider/model selection + Apply button (was inline sidebar expander)."""
     import json
 
     from utils.llm_registry.registry import get_registry
@@ -197,101 +192,88 @@ with st.sidebar.expander("🤖 LLM Selection", expanded=False):
         "rag_model": dict(st.secrets["rag_model"]),
     }
 
-    # Get available providers
     providers = registry.get_available_providers(secrets)
     enabled_providers = [p for p in providers if p.enabled]
 
     if not enabled_providers:
         st.error("No LLM providers configured. Check secrets.toml")
         st.caption("Configure at least one provider in `.streamlit/secrets.toml`")
+        return
+
+    provider_options = {p.provider_id: p.display_name for p in enabled_providers}
+    current_provider = st.session_state.get("selected_llm_provider")
+
+    provider_index = 0
+    if current_provider and current_provider in provider_options:
+        provider_index = list(provider_options.keys()).index(current_provider)
+
+    selected_provider_id = st.selectbox(
+        "Provider",
+        options=list(provider_options.keys()),
+        format_func=lambda x: provider_options[x],
+        index=provider_index,
+        key="temp_llm_provider",
+    )
+
+    models = registry.get_models_for_provider(selected_provider_id, secrets)
+
+    if not models:
+        st.warning(f"No models available for {provider_options[selected_provider_id]}")
+        st.caption(f"Check your {selected_provider_id} configuration")
+        return
+
+    model_options = {m.model_id: m.display_name for m in models}
+    current_model = st.session_state.get("selected_llm_model")
+
+    default_idx = 0
+    if current_model and current_model in model_options:
+        default_idx = list(model_options.keys()).index(current_model)
     else:
-        # Provider selection
-        provider_options = {p.provider_id: p.display_name for p in enabled_providers}
-        current_provider = st.session_state.get("selected_llm_provider")
+        provider = registry.get_provider(selected_provider_id)
+        if provider:
+            default_model = provider.get_default_model(secrets)
+            if default_model and default_model in model_options:
+                default_idx = list(model_options.keys()).index(default_model)
 
-        # Find index of current provider, default to 0
-        provider_index = 0
-        if current_provider and current_provider in provider_options:
-            provider_index = list(provider_options.keys()).index(current_provider)
+    selected_model_id = st.selectbox(
+        "Model",
+        options=list(model_options.keys()),
+        format_func=lambda x: model_options[x],
+        index=default_idx,
+        key="temp_llm_model",
+    )
 
-        selected_provider_id = st.selectbox(
-            "Provider",
-            options=list(provider_options.keys()),
-            format_func=lambda x: provider_options[x],
-            index=provider_index,
-            key="temp_llm_provider",
-        )
+    if st.button("Apply LLM Selection", type="primary", width="stretch"):
+        st.session_state.selected_llm_provider = selected_provider_id
+        st.session_state.selected_llm_model = selected_model_id
 
-        # Model selection (dynamic based on provider)
-        models = registry.get_models_for_provider(selected_provider_id, secrets)
+        from orm.functions import save_user_settings
 
-        if not models:
-            st.warning(f"No models available for {provider_options[selected_provider_id]}")
-            st.caption(f"Check your {selected_provider_id} configuration")
+        save_user_settings()
+
+        from utils.vanna_calls import VannaService
+
+        user_id = st.session_state.cookies.get("user_id")
+        user_role = st.session_state.get("user_role")
+        if user_id and user_role is not None:
+            user_id = str(json.loads(user_id))
+            VannaService.invalidate_cache_for_user(user_id, user_role)
         else:
-            model_options = {m.model_id: m.display_name for m in models}
-            current_model = st.session_state.get("selected_llm_model")
+            logger.warning(f"Could not invalidate cache: user_id={user_id}, user_role={user_role}")
 
-            # Find default model index
-            default_idx = 0
-            if current_model and current_model in model_options:
-                default_idx = list(model_options.keys()).index(current_model)
-            else:
-                # Use provider's default from secrets if available
-                provider = registry.get_provider(selected_provider_id)
-                if provider:
-                    default_model = provider.get_default_model(secrets)
-                    if default_model and default_model in model_options:
-                        default_idx = list(model_options.keys()).index(default_model)
+        if "_vn_instance" in st.session_state:
+            st.session_state._vn_instance = None
 
-            selected_model_id = st.selectbox(
-                "Model",
-                options=list(model_options.keys()),
-                format_func=lambda x: model_options[x],
-                index=default_idx,
-                key="temp_llm_model",
-            )
+        st.success(f"✅ LLM changed to {model_options[selected_model_id]}")
+        st.rerun()
 
-            # Apply button
-            if st.button("Apply LLM Selection", type="primary", width="stretch"):
-                # Update session state
-                st.session_state.selected_llm_provider = selected_provider_id
-                st.session_state.selected_llm_model = selected_model_id
 
-                # Save to database
-                from orm.functions import save_user_settings
+def _render_display_form():
+    """Display preferences form (was inline sidebar expander).
 
-                save_user_settings()
-
-                # Invalidate VannaService cache
-                from utils.vanna_calls import VannaService
-
-                user_id = st.session_state.cookies.get("user_id")
-                user_role = st.session_state.get("user_role")
-                if user_id and user_role is not None:
-                    user_id = str(json.loads(user_id))
-                    VannaService.invalidate_cache_for_user(user_id, user_role)
-                else:
-                    logger.warning(f"Could not invalidate cache: user_id={user_id}, user_role={user_role}")
-
-                # Clear session state vanna instance
-                if "_vn_instance" in st.session_state:
-                    st.session_state._vn_instance = None
-
-                st.success(f"✅ LLM changed to {model_options[selected_model_id]}")
-                st.rerun()
-
-# Display current LLM (read-only info)
-try:
-    vn_instance = get_vn()
-    if vn_instance:
-        llm_name = vn_instance.get_llm_name()
-        st.sidebar.info(f"**Active LLM:** {llm_name}")
-except Exception:
-    pass
-
-with st.sidebar.expander("Settings"):
-    # Use st.form to group settings and eliminate temp_* state pattern
+    Extends the previous 11 checkboxes with `Show Community Engagement`
+    (default OFF) — the persistence column is added by #142.
+    """
     with st.form("settings_form"):
         form_show_sql = st.checkbox(
             "Show SQL",
@@ -348,10 +330,13 @@ with st.sidebar.expander("Settings"):
             value=st.session_state.get("confirm_magic_commands", True),
             help="When enabled, shows a confirmation popup before executing detected magic commands.",
         )
+        form_show_community_engagement = st.checkbox(
+            "Show Community Engagement",
+            value=st.session_state.get("show_community_engagement", False),
+            help="Reveal the 📊 Community Engagement bulk CSV uploader in the sidebar. Power-user feature.",
+        )
 
-        # Form submit button - updates all settings at once
         if st.form_submit_button("Save", width="stretch"):
-            # Update session state directly from form values
             st.session_state.show_sql = form_show_sql
             st.session_state.show_table = form_show_table
             st.session_state.show_chart = form_show_chart
@@ -363,59 +348,101 @@ with st.sidebar.expander("Settings"):
             st.session_state.show_followup = form_show_followup
             st.session_state.llm_fallback = form_llm_fallback
             st.session_state.confirm_magic_commands = form_confirm_magic
+            st.session_state.show_community_engagement = form_show_community_engagement
 
-            # Save to database
             save_user_settings()
             st.toast("Settings saved!")
 
-agentic_mode_initial = bool(
-    getattr(st.session_state.get("user"), "agentic_mode", True)
-    if st.session_state.get("user")
-    else st.session_state.get("agentic_mode", True)
-)
-agentic_mode = st.sidebar.checkbox(
-    "Agentic mode (beta)",
-    value=agentic_mode_initial,
-    help="Use the new tool-driven agent for clinical questions. Vanna remains for users with this off.",
-    key="agentic_mode_checkbox",
-)
-# Always mirror the checkbox into session_state so consumers (chat_bot_helper,
-# magic_functions) see the live value even if persistence below fails.
-st.session_state.agentic_mode = agentic_mode
-if agentic_mode != agentic_mode_initial:
-    try:
-        import json as _json
 
-        _uid_str = st.session_state.cookies.get("user_id")
-        if _uid_str:
-            _uid = _json.loads(_uid_str)
-            update_user_preferences(user_id=_uid, agentic_mode=agentic_mode)
+def _render_agentic_section():
+    """Agentic mode toggle (was top-level sidebar checkbox)."""
+    agentic_mode_initial = bool(
+        getattr(st.session_state.get("user"), "agentic_mode", True)
+        if st.session_state.get("user")
+        else st.session_state.get("agentic_mode", True)
+    )
+    agentic_mode = st.checkbox(
+        "Agentic mode (beta)",
+        value=agentic_mode_initial,
+        help="Use the new tool-driven agent for clinical questions. Vanna remains for users with this off.",
+        key="agentic_mode_dialog_checkbox",
+    )
+    st.session_state.agentic_mode = agentic_mode
+    if agentic_mode != agentic_mode_initial:
+        try:
+            import json as _json
+
+            _uid_str = st.session_state.cookies.get("user_id")
+            if _uid_str:
+                _uid = _json.loads(_uid_str)
+                update_user_preferences(user_id=_uid, agentic_mode=agentic_mode)
+        except Exception:
+            pass
+
+
+@st.dialog("Settings")
+def settings_dialog():
+    try:
+        vn_instance = get_vn()
+        if vn_instance:
+            st.markdown(f"**Active LLM:** {vn_instance.get_llm_name()}")
     except Exception:
         pass
 
+    st.subheader("LLM")
+    _render_llm_section()
+
+    st.divider()
+
+    st.subheader("Display")
+    _render_display_form()
+
+    st.divider()
+
+    st.subheader("Agentic")
+    _render_agentic_section()
+
+    st.divider()
+    if st.button("Close", key="settings_dialog_close"):
+        st.rerun()
+
+
+######### Sidebar settings #########
+
+
+st.logo(image=get_themed_asset_path("logo.png"), size="large", icon_image="assets/icon.jpg")
+
+_render_selected_patient_sidebar()
+_render_reset_agent_sidebar()
+
+
+if st.sidebar.button("⚙️ Settings…", key="open_settings_dialog", width="stretch"):
+    settings_dialog()
+
 st.sidebar.button("Clear", on_click=lambda: set_question(None), width="stretch", type="primary")
 
-# Community Engagement CSV Upload
-with st.sidebar.popover("📊 Community Engagement", width="stretch"):
-    st.markdown("**Upload a CSV file with questions**")
-    st.caption("CSV should have a 'question' column")
+# Community Engagement CSV Upload — gated behind the new show_community_engagement preference (#142).
+if st.session_state.get("show_community_engagement", False):
+    with st.sidebar.popover("📊 Community Engagement", width="stretch"):
+        st.markdown("**Upload a CSV file with questions**")
+        st.caption("CSV should have a 'question' column")
 
-    uploaded_file = st.file_uploader(
-        "Choose a CSV file",
-        type=["csv"],
-        key="community_csv_uploader",
-        help="Upload a CSV file with a 'question' column",
-    )
+        uploaded_file = st.file_uploader(
+            "Choose a CSV file",
+            type=["csv"],
+            key="community_csv_uploader",
+            help="Upload a CSV file with a 'question' column",
+        )
 
-    if uploaded_file is not None:
-        if st.button("Load Questions", width="stretch", type="primary"):
-            load_community_questions(uploaded_file)
-            st.rerun()
+        if uploaded_file is not None:
+            if st.button("Load Questions", width="stretch", type="primary"):
+                load_community_questions(uploaded_file)
+                st.rerun()
 
-    # Show sample format
-    with st.expander("View Sample Format"):
-        st.code(
-            """question
+        # Show sample format
+        with st.expander("View Sample Format"):
+            st.code(
+                """question
 What is the average patient age?
 How many patients visited last month?
 What are the top diagnoses?""",
@@ -445,45 +472,34 @@ if st.session_state.get("community_questions"):
                 width="stretch",
             )
 
-if st.session_state.get("voice_input", True):
-    with st.sidebar.popover("🎤 Speak Your Question", width="stretch"):
-        if st.button("Listen", width="stretch"):
-            text = listen()
-            if text:
-                st.toast(f"Recognized text: {text}")
-            else:
-                st.error("No input detected.")
-            if text:
-                set_question(text, False)
-
-# Show suggested questions
-if st.session_state.get("show_suggested", True):
-    with st.sidebar.popover("Click to show suggested questions", width="stretch"):
-        questions = get_vn().generate_questions()
-        for i, question in enumerate(questions):
-            st.button(
-                question,
-                on_click=set_question,
-                args=(question, False),
-                key=f"suggested_question_{i}",
-                width="stretch",
-            )
-
-# Display questions history in sidebar
+# Question History accordion — capped at the 10 most recent, with a View all in audit → deep-link
+# into Epic #133's Audit Trail tab (graceful degrade if the tab isn't available).
 if st.session_state.get("show_question_history", True):
-    with st.sidebar:
-        st.title("Question History")
     filtered_messages = get_unique_messages()
-    if len(filtered_messages) > 0:
-        for past_question in filtered_messages:
-            st.sidebar.button(
-                past_question.content,
-                on_click=set_question,
-                args=(past_question.content,),
-                width="stretch",
-            )
-    else:
-        st.sidebar.text("No questions asked yet")
+    total = len(filtered_messages)
+    with st.sidebar.expander(f"Question History ({total})", expanded=False):
+        if total == 0:
+            st.caption("No questions asked yet.")
+        else:
+            for past_question in filtered_messages[:10]:
+                st.button(
+                    past_question.content,
+                    on_click=set_question,
+                    args=(past_question.content,),
+                    key=f"qh_{past_question.id}",
+                    width="stretch",
+                )
+            try:
+                from views.admin_analytics import _render_audit_trail_tab  # noqa: F401
+                if st.button("View all in audit →", key="qh_view_all_in_audit"):
+                    import json as _json
+
+                    _uid_str = st.session_state.cookies.get("user_id")
+                    if _uid_str:
+                        st.session_state["audit_trail_pref_user_id"] = int(_json.loads(_uid_str))
+                    st.switch_page("views/admin_analytics.py")
+            except ImportError:
+                pass
 
 # for debugging
 # st.sidebar.write(st.session_state)
@@ -514,7 +530,31 @@ with messages_container:
 # Footer placeholder that always stays at the end
 tail_placeholder = st.empty()
 
-# Always show chat input
+# Always show chat input — with optional 🎤 and 💡 icon-popovers above it (#143).
+tool_col_voice, tool_col_suggested, _input_col = st.columns([1, 1, 20])
+if st.session_state.get("voice_input", False):
+    with tool_col_voice:
+        with st.popover("🎤", help="Speak your question"):
+            if st.button("Listen", width="stretch", key="voice_listen_btn"):
+                text = listen()
+                if text:
+                    st.toast(f"Recognized text: {text}")
+                    set_question(text, False)
+                else:
+                    st.error("No input detected.")
+if st.session_state.get("show_suggested", False):
+    with tool_col_suggested:
+        with st.popover("💡", help="Show suggested questions"):
+            questions = get_vn().generate_questions()
+            for i, question in enumerate(questions):
+                st.button(
+                    question,
+                    on_click=set_question,
+                    args=(question, False),
+                    key=f"suggested_question_chat_{i}",
+                    width="stretch",
+                )
+
 chat_input = st.chat_input("Ask me a question about your data")
 
 ######### Handle new chat input #########
