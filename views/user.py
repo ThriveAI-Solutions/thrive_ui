@@ -410,9 +410,9 @@ def pop_train(type):
 
 st.title("User Settings")
 
-tabs = ["Change Password"]
+tabs = ["My Account"]
 if st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
-    tabs = ["Change Password", "Training Data", "Manage Users"]
+    tabs = ["My Account", "Training Data", "Manage Users"]
 tab_objects = st.tabs(tabs)
 tab1 = tab_objects[0]
 tab2 = tab_objects[1] if len(tab_objects) > 1 else None
@@ -429,10 +429,10 @@ with tab1:
         except Exception:
             _me = None
         if _me is not None:
-            st.markdown("**My Profile**")
+            st.markdown("**Profile**")
             with st.form("my_profile_form"):
-                my_email = st.text_input("My Email", value=_me.email or "")
-                my_organization = st.text_input("My Organization", value=_me.organization or "")
+                my_email = st.text_input("Email", value=_me.email or "")
+                my_organization = st.text_input("Organization", value=_me.organization or "")
                 if st.form_submit_button("Save Profile", type="primary"):
                     ok = update_user(
                         int(user_id),
@@ -449,11 +449,12 @@ with tab1:
                         )
             st.divider()
 
+    st.markdown("**Change Password**")
     with st.form("change_password_form"):
         current_password = st.text_input("Current Password", type="password")
         new_password = st.text_input("New Password", type="password")
         confirm_new_password = st.text_input("Confirm New Password", type="password")
-        submit_button = st.form_submit_button("Change Password")
+        submit_button = st.form_submit_button("Change Password", type="primary")
 
         if submit_button:
             if new_password != confirm_new_password:
