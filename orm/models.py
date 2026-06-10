@@ -124,6 +124,7 @@ class AdminActionType(enum.Enum):
     TRAINING_DELETE = "training_delete"
     TRAINING_IMPORT = "training_import"
     USER_IMPORT = "user_import"
+    USER_EXPORT = "user_export"
 
 
 class ErrorCategory(enum.Enum):

@@ -356,6 +356,92 @@ def get_all_users():
         return []
 
 
+def _is_admin_db(admin_id: int) -> bool:
+    """Defense-in-depth role check: re-resolve the caller's role from the DB.
+
+    Does not consult ``st.session_state``. Returns True only when the row
+    exists and resolves to ``RoleTypeEnum.ADMIN``.
+    """
+    from orm.models import RoleTypeEnum
+
+    try:
+        with SessionLocal() as session:
+            row = (
+                session.query(User)
+                .options(joinedload(User.role))
+                .filter(User.id == admin_id)
+                .one_or_none()
+            )
+            if row is None or row.role is None:
+                return False
+            return row.role.role == RoleTypeEnum.ADMIN
+    except Exception as e:
+        logger.warning("Failed to verify admin role for user_id=%s: %s", admin_id, e)
+        return False
+
+
+def get_users_for_export(admin_id: int) -> tuple[list[dict], int]:
+    """Return the user roster in Bulk-Import-compatible CSV row shape.
+
+    Columns (in order): ``UserID, First Name, Last Name, Email, Organization, Role``.
+    Excludes ``password``, ``okta_sub``, and all preference fields.
+
+    Enforces an admin-only gate independently of UI state (defense in depth)
+    and writes a single ``thrive_admin_action`` row per call — ``success=True``
+    on the happy path, ``success=False`` with a rejection ``error_message`` when
+    the caller is not an admin.
+    """
+    from orm.logging_functions import log_admin_action
+    from orm.models import AdminActionType
+
+    if not _is_admin_db(admin_id):
+        log_admin_action(
+            admin_id=admin_id,
+            action_type=AdminActionType.USER_EXPORT,
+            description="Non-admin attempted user export",
+            target_entity_type="user",
+            success=False,
+            error_message="caller is not an admin",
+        )
+        return [], 0
+
+    try:
+        with SessionLocal() as session:
+            users = session.query(User).options(joinedload(User.role)).all()
+            rows = [
+                {
+                    "UserID": u.username,
+                    "First Name": u.first_name,
+                    "Last Name": u.last_name,
+                    "Email": u.email,
+                    "Organization": u.organization,
+                    "Role": u.role.role_name if u.role else "No Role",
+                }
+                for u in users
+            ]
+        n = len(rows)
+        log_admin_action(
+            admin_id=admin_id,
+            action_type=AdminActionType.USER_EXPORT,
+            description=f"Exported {n} users to CSV",
+            target_entity_type="user",
+            affected_count=n,
+            success=True,
+        )
+        return rows, n
+    except Exception as e:
+        logger.error("Error exporting users: %s", e)
+        log_admin_action(
+            admin_id=admin_id,
+            action_type=AdminActionType.USER_EXPORT,
+            description="User export failed",
+            target_entity_type="user",
+            success=False,
+            error_message=str(e),
+        )
+        return [], 0
+
+
 def update_user(
     user_id: int,
     username: str = None,

@@ -16,6 +16,7 @@ from orm.functions import (
     get_user_questions_page,
     get_user_recent_questions,
     get_user_stats_for_all_users,
+    get_users_for_export,
     update_user,
     update_user_preferences,
 )
@@ -258,6 +259,45 @@ def export_training_data_to_csv():
     except Exception as e:
         st.error(f"An error occurred during CSV export: {e}")
         logger.error(f"CSV export error: {e}")
+
+
+def export_users_to_csv():
+    try:
+        try:
+            admin_id_raw = st.session_state.cookies.get("user_id")
+        except Exception:
+            admin_id_raw = None
+        if not admin_id_raw:
+            st.error("Could not determine current user.")
+            return
+        admin_id = int(admin_id_raw)
+
+        rows, n = get_users_for_export(admin_id)
+
+        if n == 0:
+            st.warning("No users available to export.")
+            return
+
+        df = DataFrame(rows)
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_data = csv_buffer.getvalue()
+
+        import datetime
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"users_{timestamp}.csv"
+
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv_data,
+            file_name=filename,
+            mime="text/csv",
+            help="Download users as CSV file",
+        )
+    except Exception as e:
+        st.error(f"An error occurred during CSV export: {e}")
+        logger.error(f"User export error: {e}")
 
 
 def import_training_data_from_csv(uploaded_file):
@@ -705,6 +745,15 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
             )
             if st.button("Import Users", type="primary", help="Import users from ./utils/config/user_list.xlsx"):
                 import_users()
+
+            st.divider()
+            st.markdown("**Export Users**")
+            st.info(
+                "📤 Download all users as CSV. Columns match Bulk User Import "
+                "(UserID, First Name, Last Name, Email, Organization, Role). "
+                "Passwords are not included."
+            )
+            export_users_to_csv()
 
         with right:
             st.markdown("**Edit Existing User**")
