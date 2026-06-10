@@ -8,6 +8,9 @@ from sqlalchemy import case, func
 
 from orm.models import Message, RoleTypeEnum, SessionLocal, User
 from utils.enums import MessageType, RoleType
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 # Cache TTL for analytics queries (5 minutes)
 ANALYTICS_CACHE_TTL_SECONDS = 300
@@ -321,9 +324,36 @@ def _render_overview_tab(days_int: int):
 
     st.divider()
 
-    # Latest Questions
+    # Latest Questions — compact preview that links to the canonical Audit Trail tab (#136).
     st.subheader("Latest Questions")
-    limit = st.selectbox("Show last", options=[25, 50, 100, 200], index=0, key="overview_limit")
+    from orm.logging_functions import get_question_audit_page
+
+    preview = get_question_audit_page(
+        {"usernames": [], "orgs": [], "days": days_int, "search": None},
+        page=1,
+        page_size=10,
+    )
+    preview_items = preview.get("items", [])
+    if preview_items:
+        compact_rows = [
+            {
+                "User": it["username"],
+                "Question": _truncate(it["question"], 120),
+                "Asked At": it["asked_at"],
+                "Status": _AUDIT_STATUS_EMOJI.get(it["status"], it["status"]),
+            }
+            for it in preview_items
+        ]
+        st.dataframe(pd.DataFrame(compact_rows), width="stretch", hide_index=True)
+    else:
+        st.info("No questions in the selected time range.")
+    if st.button("View full Audit Trail →", type="primary", key="overview_to_audit_btn"):
+        st.switch_page("views/admin_analytics.py")
+
+    st.divider()
+
+    # All Users Stats
+    st.subheader("All Users Stats")
     chart_types = [
         MessageType.PLOTLY_CHART.value,
         MessageType.ST_LINE_CHART.value,
@@ -331,66 +361,6 @@ def _render_overview_tab(days_int: int):
         MessageType.ST_AREA_CHART.value,
         MessageType.ST_SCATTER_CHART.value,
     ]
-    with SessionLocal() as session:
-        base = (
-            session.query(
-                Message.content.label("question"),
-                Message.created_at.label("asked_at"),
-                User.username.label("username"),
-            )
-            .join(User, User.id == Message.user_id)
-            .filter(Message.role == RoleType.USER.value)
-            .order_by(Message.created_at.desc())
-            .limit(int(limit))
-            .all()
-        )
-        questions = [row.question for row in base]
-        agg = []
-        if questions:
-            agg = (
-                session.query(
-                    Message.question.label("q"),
-                    func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
-                    func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
-                    func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
-                    func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
-                    func.sum(func.coalesce(Message.elapsed_time, 0)).label("elapsed"),
-                )
-                .filter(
-                    Message.role == RoleType.ASSISTANT.value,
-                    Message.question.isnot(None),
-                    Message.question.in_(questions),
-                )
-                .group_by(Message.question)
-                .all()
-            )
-    metrics = {row.q: row for row in agg} if agg else {}
-    latest_rows = []
-    for question, asked_at, username in base:
-        m = metrics.get(question)
-        errors = int(getattr(m, "errors", 0) or 0) if m else 0
-        success = (
-            int(getattr(m, "charts", 0) or 0)
-            + int(getattr(m, "dataframes", 0) or 0)
-            + int(getattr(m, "summaries", 0) or 0)
-        ) > 0 and errors == 0
-        latest_rows.append(
-            {
-                "User": username,
-                "Question": question,
-                "Asked At": asked_at,
-                "Status": "Success" if success else ("Error" if errors > 0 else "Unknown"),
-                "Elapsed (s)": round(float(getattr(m, "elapsed", 0) or 0.0), 3) if m else 0.0,
-            }
-        )
-    if latest_rows:
-        ldf = pd.DataFrame(latest_rows)
-        st.dataframe(ldf, width="stretch", hide_index=True)
-
-    st.divider()
-
-    # All Users Stats
-    st.subheader("All Users Stats")
     with SessionLocal() as session:
         rows = (
             session.query(
@@ -412,6 +382,196 @@ def _render_overview_tab(days_int: int):
             width="stretch",
             hide_index=True,
         )
+
+
+@st.cache_data(ttl=ANALYTICS_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_audit_filter_options(days_int: int) -> dict:
+    from orm.logging_functions import get_question_audit_filter_options
+
+    return get_question_audit_filter_options(days=days_int)
+
+
+_AUDIT_STATUS_EMOJI = {"Success": "✅ Success", "Error": "❌ Error", "Empty": "⚪ Empty"}
+
+
+def _truncate(text, length):
+    if text is None:
+        return ""
+    text = str(text)
+    return text if len(text) <= length else text[: length - 1] + "…"
+
+
+def _render_audit_trail_tab(days_int: int):
+    """Render the Question Audit Trail tab (#135)."""
+    import datetime as _dt
+
+    from orm.logging_functions import (
+        get_question_audit_export,
+        get_question_audit_page,
+    )
+    from orm.functions import get_all_users
+
+    options = _cached_audit_filter_options(days_int)
+
+    # Honour deep-link pre-filter from Manage Users -> Activity
+    pref_user_id = st.session_state.pop("audit_trail_pref_user_id", None)
+    if pref_user_id is not None and "audit_user_filter" not in st.session_state:
+        try:
+            all_users = get_all_users()
+            match = next((u for u in all_users if u["id"] == int(pref_user_id)), None)
+            if match and match["username"] in options["usernames"]:
+                st.session_state["audit_user_filter"] = [match["username"]]
+        except Exception as e:
+            logger.warning("Audit deep-link prefill failed: %s", e)
+
+    f1, f2, f3 = st.columns([0.30, 0.30, 0.40])
+    with f1:
+        usernames_sel = st.multiselect(
+            "User", options=options["usernames"], key="audit_user_filter"
+        )
+    with f2:
+        orgs_sel = st.multiselect(
+            "Organization", options=options["orgs"], key="audit_org_filter"
+        )
+    with f3:
+        search = st.text_input(
+            "Search question or SQL",
+            placeholder="Substring match (case-insensitive)",
+            key="audit_search",
+        )
+
+    filters = {
+        "usernames": usernames_sel,
+        "orgs": orgs_sel,
+        "days": int(days_int),
+        "search": search.strip() if search else None,
+    }
+
+    # Reset pagination on filter change
+    filter_signature = json.dumps({**filters, "_days": days_int}, sort_keys=True, default=str)
+    if st.session_state.get("audit_filter_signature") != filter_signature:
+        st.session_state["audit_filter_signature"] = filter_signature
+        st.session_state["audit_page_num"] = 1
+
+    # Pagination controls (top row)
+    if "audit_page_bump" in st.session_state:
+        st.session_state["audit_page_num"] = max(
+            1, int(st.session_state.get("audit_page_num", 1)) + int(st.session_state["audit_page_bump"])
+        )
+        del st.session_state["audit_page_bump"]
+    if "audit_page_num" not in st.session_state:
+        st.session_state["audit_page_num"] = 1
+
+    pc1, pc2, _spacer = st.columns([1, 1, 6])
+    with pc1:
+        page_size = st.selectbox("Page size", options=[25, 50, 100, 200], index=1, key="audit_page_size")
+    with pc2:
+        st.number_input("Page", min_value=1, step=1, key="audit_page_num")
+        page = int(st.session_state["audit_page_num"])
+
+    result = get_question_audit_page(filters, page=page, page_size=int(page_size))
+    items = result.get("items", [])
+    total = int(result.get("total", 0))
+    total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
+
+    # Table
+    if items:
+        table_rows = []
+        for it in items:
+            table_rows.append(
+                {
+                    "Asked At": it["asked_at"],
+                    "User": it["username"],
+                    "Organization": it.get("organization") or "(no org)",
+                    "Question": _truncate(it["question"], 120),
+                    "SQL": _truncate(it.get("sql_text"), 80),
+                    "Status": _AUDIT_STATUS_EMOJI.get(it["status"], it["status"]),
+                    "Elapsed (s)": round(float(it.get("elapsed_seconds") or 0.0), 3),
+                }
+            )
+        st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
+    else:
+        st.info("No audit rows match the current filters.")
+
+    # Pagination caption + Prev/Next
+    cprev, cinfo, cnext = st.columns([1, 3, 1])
+    with cprev:
+        st.button(
+            "Prev",
+            disabled=int(page) <= 1,
+            key="audit_prev_btn",
+            on_click=lambda: st.session_state.update({"audit_page_bump": -1}),
+        )
+    with cinfo:
+        st.caption(f"Page {int(page)} of {total_pages} • {total} total")
+    with cnext:
+        st.button(
+            "Next",
+            disabled=int(page) >= total_pages,
+            key="audit_next_btn",
+            on_click=lambda: st.session_state.update({"audit_page_bump": 1}),
+        )
+
+    # Row drilldown expanders
+    for it in items:
+        header = f"{it['asked_at']} • {it['username']} • {_truncate(it['question'], 80)}"
+        with st.expander(header):
+            st.markdown("**Question**")
+            st.write(it["question"] or "_(empty)_")
+            st.markdown("**Generated SQL**")
+            st.code(it.get("sql_text") or "(no SQL)", language="sql")
+            st.markdown("**Summary**")
+            summary = it.get("summary_text")
+            st.write(summary if summary else "_(no summary)_")
+            df_preview = it.get("dataframe_preview")
+            if df_preview:
+                st.markdown("**DataFrame preview (first 5 rows)**")
+                try:
+                    df_obj = pd.read_json(df_preview).head(5)
+                    st.dataframe(df_obj, width="stretch", hide_index=True)
+                except Exception:
+                    st.text(str(df_preview)[:1000])
+            err = it.get("error_text")
+            if err:
+                st.markdown("**Error**")
+                st.code(err, language="text")
+            st.caption(
+                f"Asked At {it['asked_at']} · Elapsed "
+                f"{round(float(it.get('elapsed_seconds') or 0.0), 3)}s · Message ID {it.get('user_message_id')}"
+            )
+
+    # Export CSV
+    if st.button("📥 Export filtered audit to CSV", key="audit_export_btn"):
+        try:
+            export_rows = get_question_audit_export(filters)
+            if not export_rows:
+                st.warning("No audit rows to export with current filters.")
+            else:
+                export_df = pd.DataFrame(
+                    [
+                        {
+                            "Asked At": r["asked_at"],
+                            "User": r["username"],
+                            "Organization": r.get("organization") or "(no org)",
+                            "Question": r["question"],
+                            "SQL": r.get("sql_text") or "",
+                            "Status": r["status"],
+                            "Elapsed (s)": round(float(r.get("elapsed_seconds") or 0.0), 3),
+                        }
+                        for r in export_rows
+                    ]
+                )
+                ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                st.download_button(
+                    "Download question_audit_*.csv",
+                    data=export_df.to_csv(index=False).encode("utf-8"),
+                    file_name=f"question_audit_{ts}.csv",
+                    mime="text/csv",
+                    key="audit_export_download",
+                )
+        except Exception as e:
+            st.error(f"Export failed: {e}")
+            logger.error("Audit export failed: %s", e)
 
 
 def _render_llm_tab(days_int: int):
@@ -774,21 +934,24 @@ def main():
     # error visibility.
     from views.errors import render as render_errors_tab
 
-    tabs = st.tabs(["Overview", "LLM Performance", "User Activity", "Errors", "Admin Audit"])
+    tabs = st.tabs(["Audit Trail", "Overview", "LLM Performance", "User Activity", "Errors", "Admin Audit"])
 
     with tabs[0]:
-        _render_overview_tab(days_int)
+        _render_audit_trail_tab(days_int)
 
     with tabs[1]:
-        _render_llm_tab(days_int)
+        _render_overview_tab(days_int)
 
     with tabs[2]:
-        _render_activity_tab(days_int)
+        _render_llm_tab(days_int)
 
     with tabs[3]:
-        render_errors_tab(days_int)
+        _render_activity_tab(days_int)
 
     with tabs[4]:
+        render_errors_tab(days_int)
+
+    with tabs[5]:
         _render_audit_tab(days_int)
 
 
