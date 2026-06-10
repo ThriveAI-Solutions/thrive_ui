@@ -145,6 +145,9 @@ def set_user_preferences_in_session_state():
         st.session_state.show_elapsed_time = user.show_elapsed_time
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.confirm_magic_commands = getattr(user, "confirm_magic_commands", True)
+        st.session_state.show_community_engagement = bool(
+            getattr(user, "show_community_engagement", False) or False
+        )
         agentic_pref = getattr(user, "agentic_mode", True)
         st.session_state.agentic_mode = bool(agentic_pref) if agentic_pref is not None else True
         st.session_state.min_message_id = user.min_message_id
@@ -186,6 +189,7 @@ def save_user_settings():
             setattr(user, "show_elapsed_time", st.session_state.show_elapsed_time)
             setattr(user, "llm_fallback", st.session_state.llm_fallback)
             setattr(user, "confirm_magic_commands", st.session_state.get("confirm_magic_commands", True))
+            setattr(user, "show_community_engagement", st.session_state.get("show_community_engagement", False))
             setattr(user, "min_message_id", st.session_state.min_message_id)
             setattr(user, "selected_llm_provider", st.session_state.get("selected_llm_provider"))
             setattr(user, "selected_llm_model", st.session_state.get("selected_llm_model"))
@@ -682,6 +686,7 @@ def update_user_preferences(user_id: int, **preferences) -> bool:
                 "show_followup",
                 "show_elapsed_time",
                 "llm_fallback",
+                "show_community_engagement",
                 "min_message_id",
                 "selected_llm_provider",
                 "selected_llm_model",

@@ -192,6 +192,7 @@ class User(Base):
     show_elapsed_time = Column(Boolean, default=True)
     llm_fallback = Column(Boolean, default=False)
     confirm_magic_commands = Column(Boolean, default=True)  # True = show popup, False = auto-execute
+    show_community_engagement = Column(Boolean, default=False)
     agentic_mode = Column(Boolean, default=True)
     min_message_id = Column(Integer, default=0)
     theme = Column(String(50), default=ThemeType.THRIVEAI.value)
@@ -223,6 +224,7 @@ class User(Base):
             "show_elapsed_time": self.show_elapsed_time,
             "llm_fallback": self.llm_fallback,
             "confirm_magic_commands": self.confirm_magic_commands,
+            "show_community_engagement": self.show_community_engagement,
             "min_message_id": self.min_message_id,
             "theme": self.theme,
             "selected_llm_provider": self.selected_llm_provider,
