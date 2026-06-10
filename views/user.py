@@ -13,7 +13,6 @@ from orm.functions import (
     get_all_user_roles,
     get_all_users,
     get_user_daily_stats,
-    get_user_questions_page,
     get_user_recent_questions,
     get_user_stats_for_all_users,
     get_users_for_export,
@@ -988,98 +987,13 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                         fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), legend_title_text="")
                         st.plotly_chart(fig, use_container_width=True)
 
-                    with st.expander("Recent Questions"):
-                        if st.session_state.get("q_selected_user_id") != selected["id"]:
-                            st.session_state["q_selected_user_id"] = selected["id"]
-                            st.session_state["q_page_num"] = 1
-                        if "q_page_num" not in st.session_state:
-                            st.session_state["q_page_num"] = 1
-                        if "q_page_bump" in st.session_state:
-                            st.session_state["q_page_num"] = max(
-                                1,
-                                int(st.session_state.get("q_page_num", 1))
-                                + int(st.session_state["q_page_bump"]),
-                            )
-                            del st.session_state["q_page_bump"]
-
-                        colq1, colq2, colq3 = st.columns([1, 1, 6])
-                        with colq1:
-                            page_size = st.selectbox(
-                                "Page size", options=[25, 50, 100], index=1, key="q_page_size"
-                            )
-                        with colq2:
-                            st.number_input("Page", min_value=1, step=1, key="q_page_num")
-                            page = int(st.session_state["q_page_num"])
-
-                        page_data = get_user_questions_page(
-                            selected["id"], page=int(page), page_size=int(page_size)
-                        )
-                        items = page_data.get("items", [])
-                        total = page_data.get("total", 0)
-
-                        if items:
-                            qdf = pd.DataFrame(items)
-                            qdf.rename(
-                                columns={
-                                    "question": "Question",
-                                    "created_at": "Asked At",
-                                    "status": "Status",
-                                    "elapsed_seconds": "Elapsed (s)",
-                                },
-                                inplace=True,
-                            )
-                            st.dataframe(qdf, use_container_width=True, hide_index=True)
-
-                            total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
-                            cprev, cinfo, cnext = st.columns([1, 3, 1])
-                            with cprev:
-                                st.button(
-                                    "Prev",
-                                    disabled=int(page) <= 1,
-                                    on_click=lambda: st.session_state.update({"q_page_bump": -1}),
-                                )
-                            with cinfo:
-                                st.caption(f"Page {int(page)} of {total_pages} • {total} total")
-                            with cnext:
-                                st.button(
-                                    "Next",
-                                    disabled=int(page) >= total_pages,
-                                    on_click=lambda: st.session_state.update({"q_page_bump": 1}),
-                                )
-
-                            all_rows = []
-                            all_page_size = 1000
-                            remaining = total
-                            page_iter = 1
-                            while remaining > 0 and page_iter <= 100:  # safety cap
-                                p = get_user_questions_page(
-                                    selected["id"], page=page_iter, page_size=all_page_size
-                                )
-                                all_rows.extend(p.get("items", []))
-                                if len(p.get("items", [])) < all_page_size:
-                                    break
-                                remaining -= len(p.get("items", []))
-                                page_iter += 1
-                            if all_rows:
-                                all_df = pd.DataFrame(all_rows)
-                                all_df.rename(
-                                    columns={
-                                        "question": "Question",
-                                        "created_at": "Asked At",
-                                        "status": "Status",
-                                        "elapsed_seconds": "Elapsed (s)",
-                                    },
-                                    inplace=True,
-                                )
-                                csv_bytes = all_df.to_csv(index=False).encode("utf-8")
-                                st.download_button(
-                                    label="Download all questions (.csv)",
-                                    data=csv_bytes,
-                                    file_name=f"{selected['username']}_questions.csv",
-                                    mime="text/csv",
-                                )
-                        else:
-                            st.info("No questions found.")
+                    if st.button(
+                        f"View question audit for {selected['username']} →",
+                        type="primary",
+                        key="activity_audit_deeplink_btn",
+                    ):
+                        st.session_state["audit_trail_pref_user_id"] = selected["id"]
+                        st.switch_page("views/admin_analytics.py")
 
                 with danger_tab:
                     if st.button("Delete User", type="primary", key="danger_delete_user_btn"):

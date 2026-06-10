@@ -12,6 +12,8 @@ import traceback
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import func
+
 from orm.models import (
     ActivityType,
     AdminAction,
@@ -374,6 +376,248 @@ def get_admin_actions(
             return query.order_by(AdminAction.created_at.desc()).limit(limit).all()
     except Exception as e:
         logger.warning("Failed to get admin actions: %s", e)
+        return []
+
+
+# ============== Question Audit Trail ==============
+
+MAX_AUDIT_EXPORT_ROWS = 50_000
+_NO_ORG_SENTINEL = "(no org)"
+
+
+def _question_audit_base_query(session, filters: dict):
+    """Build the filtered base query over user-role Message rows joined to User.
+
+    Returns a SQLAlchemy query that selects the rows in reverse-chronological
+    order WITHOUT pagination. Used by both the paginated page helper and the
+    export helper.
+    """
+    from sqlalchemy import or_
+
+    from orm.models import Message, User
+    from utils.enums import MessageType, RoleType
+
+    days = int(filters.get("days") or 30)
+    usernames = filters.get("usernames") or []
+    orgs = filters.get("orgs") or []
+    search = filters.get("search") or None
+
+    since = datetime.utcnow() - timedelta(days=days)
+
+    query = (
+        session.query(
+            Message.id.label("user_message_id"),
+            Message.content.label("question"),
+            Message.created_at.label("asked_at"),
+            User.id.label("user_id"),
+            User.username.label("username"),
+            User.organization.label("organization"),
+        )
+        .join(User, User.id == Message.user_id)
+        .filter(Message.role == RoleType.USER.value, Message.created_at >= since)
+    )
+
+    if usernames:
+        query = query.filter(User.username.in_(usernames))
+
+    if orgs:
+        org_clauses = []
+        concrete = [o for o in orgs if o != _NO_ORG_SENTINEL]
+        if _NO_ORG_SENTINEL in orgs:
+            org_clauses.append(User.organization.is_(None))
+            org_clauses.append(User.organization == "")
+        if concrete:
+            org_clauses.append(User.organization.in_(concrete))
+        if org_clauses:
+            query = query.filter(or_(*org_clauses))
+
+    if search:
+        from sqlalchemy import exists
+        from sqlalchemy.orm import aliased
+
+        s = f"%{search.lower()}%"
+        SqlMsg = aliased(Message)
+        sql_exists = exists().where(
+            (SqlMsg.role == RoleType.ASSISTANT.value)
+            & (SqlMsg.type == MessageType.SQL.value)
+            & (SqlMsg.question == Message.content)
+            & (SqlMsg.user_id == Message.user_id)
+            & (SqlMsg.content.ilike(s))
+        )
+        query = query.filter(or_(Message.content.ilike(s), sql_exists))
+
+    return query.order_by(Message.created_at.desc())
+
+
+def _enrich_with_assistant_aggregates(session, base_rows: list) -> list[dict]:
+    """For each base row, attach sql_text / summary_text / dataframe_preview /
+    error_text (most recent assistant message of each type) and elapsed_seconds
+    (sum of assistant elapsed_time across all assistant rows for the question)."""
+    from orm.models import Message
+    from utils.enums import MessageType, RoleType
+
+    if not base_rows:
+        return []
+
+    user_ids = {r.user_id for r in base_rows}
+    questions = {r.question for r in base_rows}
+
+    assistant_rows = (
+        session.query(
+            Message.user_id.label("user_id"),
+            Message.question.label("question"),
+            Message.type.label("type"),
+            Message.content.label("content"),
+            Message.created_at.label("created_at"),
+            Message.elapsed_time.label("elapsed_time"),
+        )
+        .filter(
+            Message.role == RoleType.ASSISTANT.value,
+            Message.user_id.in_(user_ids),
+            Message.question.in_(questions),
+        )
+        .order_by(Message.created_at.desc())
+        .all()
+    )
+
+    chart_types = {
+        MessageType.PLOTLY_CHART.value,
+        MessageType.ST_LINE_CHART.value,
+        MessageType.ST_BAR_CHART.value,
+        MessageType.ST_AREA_CHART.value,
+        MessageType.ST_SCATTER_CHART.value,
+    }
+
+    by_key: dict[tuple[int, str], dict] = {}
+    for ar in assistant_rows:
+        key = (ar.user_id, ar.question)
+        acc = by_key.setdefault(
+            key,
+            {
+                "sql_text": None,
+                "summary_text": None,
+                "dataframe_preview": None,
+                "error_text": None,
+                "elapsed_seconds": 0.0,
+                "has_chart": False,
+            },
+        )
+        if ar.elapsed_time is not None:
+            try:
+                acc["elapsed_seconds"] += float(ar.elapsed_time)
+            except (TypeError, ValueError):
+                pass
+        # Rows arrive newest-first; keep the first (newest) per type.
+        if ar.type == MessageType.SQL.value and acc["sql_text"] is None:
+            acc["sql_text"] = ar.content
+        elif ar.type == MessageType.SUMMARY.value and acc["summary_text"] is None:
+            acc["summary_text"] = ar.content
+        elif ar.type == MessageType.DATAFRAME.value and acc["dataframe_preview"] is None:
+            acc["dataframe_preview"] = ar.content
+        elif ar.type == MessageType.ERROR.value and acc["error_text"] is None:
+            acc["error_text"] = ar.content
+        elif ar.type in chart_types:
+            acc["has_chart"] = True
+
+    items = []
+    for r in base_rows:
+        key = (r.user_id, r.question)
+        agg = by_key.get(key) or {
+            "sql_text": None,
+            "summary_text": None,
+            "dataframe_preview": None,
+            "error_text": None,
+            "elapsed_seconds": 0.0,
+            "has_chart": False,
+        }
+        has_error = bool(agg["error_text"])
+        has_success_artifact = bool(agg["summary_text"]) or bool(agg["dataframe_preview"]) or agg["has_chart"]
+        if has_error:
+            status = "Error"
+        elif has_success_artifact:
+            status = "Success"
+        else:
+            status = "Empty"
+        items.append(
+            {
+                "asked_at": r.asked_at,
+                "user_id": r.user_id,
+                "username": r.username,
+                "organization": r.organization,
+                "question": r.question,
+                "sql_text": agg["sql_text"],
+                "status": status,
+                "elapsed_seconds": float(agg["elapsed_seconds"]),
+                "summary_text": agg["summary_text"],
+                "dataframe_preview": agg["dataframe_preview"],
+                "error_text": agg["error_text"],
+                "user_message_id": r.user_message_id,
+            }
+        )
+    return items
+
+
+def get_question_audit_page(filters: dict, page: int = 1, page_size: int = 50) -> dict:
+    """Paginated question audit. Returns {"items": [...], "total": int}.
+
+    See Feature #134 spec for filter semantics and item shape.
+    """
+    try:
+        with SessionLocal() as session:
+            base_query = _question_audit_base_query(session, filters)
+            total = base_query.with_entities(func.count()).order_by(None).scalar() or 0
+            offset = max(0, (int(page) - 1) * int(page_size))
+            rows = base_query.offset(offset).limit(int(page_size)).all()
+            items = _enrich_with_assistant_aggregates(session, rows)
+            return {"items": items, "total": int(total)}
+    except Exception as e:
+        logger.warning("get_question_audit_page failed: %s", e)
+        return {"items": [], "total": 0}
+
+
+def get_question_audit_filter_options(days: int = 30) -> dict:
+    """Return distinct {usernames, orgs} for users with at least one
+    user-role Message in the date range. Lists sorted ascending. Includes
+    ``(no org)`` sentinel if any in-range user has NULL/empty organization."""
+    try:
+        from orm.models import Message, User
+        from utils.enums import RoleType
+
+        since = datetime.utcnow() - timedelta(days=int(days))
+        with SessionLocal() as session:
+            rows = (
+                session.query(User.username, User.organization)
+                .join(Message, Message.user_id == User.id)
+                .filter(Message.role == RoleType.USER.value, Message.created_at >= since)
+                .distinct()
+                .all()
+            )
+        usernames = sorted({r[0] for r in rows if r[0]})
+        orgs_raw = {r[1] for r in rows}
+        concrete_orgs = sorted({o for o in orgs_raw if o})
+        has_no_org = any((o is None) or (o == "") for o in orgs_raw)
+        orgs = ([_NO_ORG_SENTINEL] if has_no_org else []) + concrete_orgs
+        return {"usernames": usernames, "orgs": orgs}
+    except Exception as e:
+        logger.warning("get_question_audit_filter_options failed: %s", e)
+        return {"usernames": [], "orgs": []}
+
+
+def get_question_audit_export(filters: dict) -> list[dict]:
+    """Full filtered set with no pagination, capped at MAX_AUDIT_EXPORT_ROWS."""
+    try:
+        with SessionLocal() as session:
+            base_query = _question_audit_base_query(session, filters)
+            rows = base_query.limit(MAX_AUDIT_EXPORT_ROWS + 1).all()
+            if len(rows) > MAX_AUDIT_EXPORT_ROWS:
+                logger.warning(
+                    "get_question_audit_export hit MAX_AUDIT_EXPORT_ROWS=%s; truncating",
+                    MAX_AUDIT_EXPORT_ROWS,
+                )
+                rows = rows[:MAX_AUDIT_EXPORT_ROWS]
+            return _enrich_with_assistant_aggregates(session, rows)
+    except Exception as e:
+        logger.warning("get_question_audit_export failed: %s", e)
         return []
 
 
