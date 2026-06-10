@@ -1078,34 +1078,41 @@ def get_activity_by_type(days: int = 30) -> list[dict]:
         return []
 
 
-def get_recent_activity(days: int = 7, limit: int = 50) -> list[dict]:
-    """Get recent user activity for audit log."""
+def get_user_activity_page(days: int = 7, page: int = 1, page_size: int = 50) -> dict:
+    """Paginated user activity for the audit log. Returns {"items": [...], "total": int}.
+
+    Each item exposes the full UserActivity row (10 fields): ``id``, ``created_at``,
+    ``user_id``, ``username``, ``activity_type``, ``description``, ``old_value``,
+    ``new_value``, ``ip_address``, ``user_agent``. See Feature #157 spec.
+
+    ``user_id`` can be null for failed-login rows where user lookup failed.
+    """
     try:
         since = datetime.now() - timedelta(days=days)
         with SessionLocal() as session:
-            results = (
-                session.query(UserActivity)
-                .filter(UserActivity.created_at >= since)
-                .order_by(UserActivity.created_at.desc())
-                .limit(limit)
-                .all()
-            )
-            return [
+            base_query = session.query(UserActivity).filter(UserActivity.created_at >= since)
+            total = base_query.with_entities(func.count(UserActivity.id)).scalar() or 0
+            offset = max(0, (int(page) - 1) * int(page_size))
+            results = base_query.order_by(UserActivity.created_at.desc()).offset(offset).limit(int(page_size)).all()
+            items = [
                 {
                     "id": r.id,
                     "created_at": r.created_at,
+                    "user_id": r.user_id,
                     "username": r.username,
                     "activity_type": r.activity_type,
                     "description": r.description,
                     "old_value": r.old_value,
                     "new_value": r.new_value,
                     "ip_address": r.ip_address,
+                    "user_agent": r.user_agent,
                 }
                 for r in results
             ]
+            return {"items": items, "total": int(total)}
     except Exception as e:
-        logger.warning("Failed to get recent activity: %s", e)
-        return []
+        logger.warning("get_user_activity_page failed: %s", e)
+        return {"items": [], "total": 0}
 
 
 def get_error_stats(days: int = 7) -> dict:
