@@ -206,10 +206,16 @@ def _render_patient_access_tab(days: int) -> None:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
-def main() -> None:
-    _guard_admin()
-    st.title("🧠 Agentic Analytics")
 
+
+def render(days_int: int | None = None) -> None:
+    """Admin → Analytics → Agentic inner view (Epic #144 / #147).
+
+    Relocated from the former top-level views/agent_analytics.py main()
+    function. Title and admin guard are dropped — the Admin umbrella page
+    owns both. days_int is currently ignored (the Agentic view has its own
+    sub-day selector).
+    """
     cfg = AgentLoggingConfig.from_streamlit()
     if cfg.mode == "full":
         st.warning(
@@ -220,7 +226,7 @@ def main() -> None:
     elif cfg.mode == "disabled":
         st.error("Agentic logging is **disabled** in config — no new runs are being recorded.")
 
-    days = st.selectbox("Time window (days)", [1, 7, 30, 90], index=2)
+    days = st.selectbox("Agentic time window (days)", [1, 7, 30, 90], index=2, key="agentic_days_select")
     tabs = st.tabs(["Runs", "Tools", "Patient Access"])
     with tabs[0]:
         _render_runs_tab(days)
@@ -228,7 +234,3 @@ def main() -> None:
         _render_tools_tab(days)
     with tabs[2]:
         _render_patient_access_tab(days)
-
-
-if __name__ == "__main__":
-    main()

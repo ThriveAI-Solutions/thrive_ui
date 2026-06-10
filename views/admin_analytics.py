@@ -303,27 +303,6 @@ def _render_overview_tab(days_int: int):
 
     st.divider()
 
-    # Top Users by Questions
-    st.subheader("Top Users by Questions")
-    since = dt.datetime.now() - dt.timedelta(days=days_int)
-    with SessionLocal() as session:
-        top_rows = (
-            session.query(User.username, func.count().label("questions"))
-            .join(Message, Message.user_id == User.id)
-            .filter(Message.role == RoleType.USER.value, Message.created_at >= since)
-            .group_by(User.username)
-            .order_by(func.count().desc())
-            .limit(10)
-            .all()
-        )
-    if top_rows:
-        top_df = pd.DataFrame(top_rows, columns=["User", "Questions"])
-        bar = px.bar(top_df, x="Questions", y="User", orientation="h")
-        bar.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(bar, width="stretch")
-
-    st.divider()
-
     # Latest Questions — compact preview that links to the canonical Audit Trail tab (#136).
     st.subheader("Latest Questions")
     from orm.logging_functions import get_question_audit_page
@@ -358,7 +337,7 @@ def _render_overview_tab(days_int: int):
             try {
               var tabs = window.parent.document.querySelectorAll('button[role=tab]');
               for (var i = 0; i < tabs.length; i++) {
-                if (tabs[i].textContent.trim() === 'Audit Trail') { tabs[i].click(); break; }
+                if (tabs[i].textContent.trim() === 'Audit') { tabs[i].click(); break; }
               }
             } catch (e) { console.error('audit-tab nav failed', e); }
             return false;
@@ -372,40 +351,6 @@ def _render_overview_tab(days_int: int):
         """,
         height=60,
     )
-
-    st.divider()
-
-    # All Users Stats
-    st.subheader("All Users Stats")
-    chart_types = [
-        MessageType.PLOTLY_CHART.value,
-        MessageType.ST_LINE_CHART.value,
-        MessageType.ST_BAR_CHART.value,
-        MessageType.ST_AREA_CHART.value,
-        MessageType.ST_SCATTER_CHART.value,
-    ]
-    with SessionLocal() as session:
-        rows = (
-            session.query(
-                User.username,
-                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
-                func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
-                func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
-                func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
-                func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
-            )
-            .join(Message, Message.user_id == User.id, isouter=True)
-            .group_by(User.username)
-            .all()
-        )
-    if rows:
-        audf = pd.DataFrame(rows, columns=["User", "Questions", "DataFrames", "Summaries", "Charts", "Errors"])
-        st.dataframe(
-            audf.sort_values(["Questions", "Errors"], ascending=[False, True]),
-            width="stretch",
-            hide_index=True,
-        )
-
 
 @st.cache_data(ttl=ANALYTICS_CACHE_TTL_SECONDS, show_spinner=False)
 def _cached_audit_filter_options(days_int: int) -> dict:
@@ -787,22 +732,16 @@ def _render_activity_tab(days_int: int):
 
     st.divider()
 
-    # Activity Type Breakdown
+    # Activity Type Breakdown (table only — Epic #144 cut the adjacent pie chart).
     st.subheader("Activity Type Breakdown")
     by_type = get_activity_by_type(days=days_int)
     if by_type:
-        col1, col2 = st.columns(2)
-        with col1:
-            type_df = pd.DataFrame(by_type)
-            fig = px.pie(type_df, values="count", names="activity_type", title="Activity Distribution")
-            fig.update_layout(margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig, width="stretch")
-        with col2:
-            st.dataframe(
-                type_df.rename(columns={"activity_type": "Activity Type", "count": "Count"}),
-                width="stretch",
-                hide_index=True,
-            )
+        type_df = pd.DataFrame(by_type)
+        st.dataframe(
+            type_df.rename(columns={"activity_type": "Activity Type", "count": "Count"}),
+            width="stretch",
+            hide_index=True,
+        )
     else:
         st.info("No activity type data available yet.")
 

@@ -490,14 +490,14 @@ if st.session_state.get("show_question_history", True):
                     width="stretch",
                 )
             try:
-                from views.admin_analytics import _render_audit_trail_tab  # noqa: F401
+                from views import admin_audit  # noqa: F401
                 if st.button("View all in audit →", key="qh_view_all_in_audit"):
                     import json as _json
 
                     _uid_str = st.session_state.cookies.get("user_id")
                     if _uid_str:
                         st.session_state["audit_trail_pref_user_id"] = int(_json.loads(_uid_str))
-                    st.switch_page("views/admin_analytics.py")
+                    st.switch_page("views/admin.py")
             except ImportError:
                 pass
 

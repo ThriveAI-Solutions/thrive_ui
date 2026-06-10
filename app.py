@@ -62,42 +62,29 @@ if not st.session_state.cookies.ready():
     st.stop()
 
 # --- PAGE SETUP ---
+# Epic #144: 3-route IA. Everyone sees Chat + My Account; admins additionally
+# see a single Admin umbrella with 5 sub-tabs (Users · Training · Analytics ·
+# Audit · Feedback). The previous separate Admin Analytics / Feedback Dashboard
+# / Agentic Analytics top-level pages are consolidated under Admin.
 chat_bot_page = st.Page(
     page="views/chat_bot.py",
-    title="Chat Bot",
+    title="Chat",
     icon="🤖",
 )
-
-user_page = st.Page(
-    page="views/user.py",
-    title="User Settings",
+my_account_page = st.Page(
+    page="views/my_account.py",
+    title="My Account",
     icon="👤",
 )
 
-# Conditionally add Admin pages for admins
-pages = [chat_bot_page, user_page]
+pages = [chat_bot_page, my_account_page]
 if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
-    analytics_page = st.Page(
-        page="views/admin_analytics.py",
-        title="Admin Analytics",
-        icon="📈",
+    admin_page = st.Page(
+        page="views/admin.py",
+        title="Admin",
+        icon="🛠️",
     )
-    feedback_page = st.Page(
-        page="views/admin_feedback.py",
-        title="Feedback Dashboard",
-        icon="💬",
-    )
-    agent_analytics_page = st.Page(
-        page="views/agent_analytics.py",
-        title="Agentic Analytics",
-        icon="🧠",
-    )
-    # Errors moved into Admin Analytics as a tab (#106). views/errors.py
-    # is no longer a standalone page; it exports render() consumed by
-    # views.admin_analytics.
-    pages.append(analytics_page)
-    pages.append(feedback_page)
-    pages.append(agent_analytics_page)
+    pages.append(admin_page)
 
 pg = st.navigation(pages=pages)
 
