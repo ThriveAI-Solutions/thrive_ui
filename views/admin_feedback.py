@@ -312,10 +312,14 @@ def _get_status_badge(status: str | None, feedback: str) -> str:
         return ""
 
 
-def main() -> None:
-    _guard_admin()
+def render(days_int: int | None = None) -> None:
+    """Admin → Feedback sub-tab (Epic #144 / #149).
 
-    st.title("Feedback Dashboard")
+    Relocated from the former top-level views/admin_feedback.py:main page.
+    Title dropped — the Admin umbrella's tab label provides the heading.
+    days_int is accepted for signature uniformity but not currently used.
+    """
+    _guard_admin()
     st.caption("Review user feedback and approve non-admin submissions for training")
 
     # Get current user ID for reviewer tracking
@@ -483,4 +487,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    render()

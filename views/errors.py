@@ -270,19 +270,16 @@ def render(days_int: int) -> None:
             st.info("No category data.")
 
     with chart_cols[1]:
+        # Epic #144 cut the severity pie chart. Counts table preserved.
         st.markdown("**Errors by Severity**")
         by_severity = aggregates["by_severity"]
         if by_severity:
             sev_df = pd.DataFrame(by_severity)
-            sev_fig = px.pie(
-                sev_df,
-                values="count",
-                names="severity",
-                color="severity",
-                color_discrete_map=_SEVERITY_COLOR_MAP,
+            st.dataframe(
+                sev_df.rename(columns={"severity": "Severity", "count": "Count"}),
+                width="stretch",
+                hide_index=True,
             )
-            sev_fig.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(sev_fig, width="stretch")
         else:
             st.info("No severity data.")
 
