@@ -2,11 +2,21 @@
 
 Relocated from views/user.py tab3. Post-Epic #129 layout: toolbar dialogs,
 L/R split, 4 inner tabs (Profile / Preferences / Activity / Danger Zone).
-The Activity inner tab's `View question audit for <username> →` button
-navigates to views/admin.py — the Admin Audit tab will pre-filter to the
-target user via the existing audit_trail_pref_user_id contract.
-"""
 
+Deep-link contracts:
+
+- Outbound (this surface → Audit): The Activity inner tab's
+  `View question audit for <username> →` button navigates to views/admin.py;
+  the Admin Audit tab pre-filters to the target user via the existing
+  `audit_trail_pref_user_id` session-state contract.
+
+- Inbound (Audit Questions dialog → this surface, Feature #155): The
+  Questions audit row-click dialog's "View user in Manage Users →" button
+  sets `manage_users_pref_user_id` in session_state, then switches to
+  views/admin.py. On the next render of this sub-tab, the pref is consumed
+  (popped) and used to pre-populate `mu_selected_label` so the left-rail
+  selectbox lands on the target user.
+"""
 
 import pandas as pd
 import streamlit as st
@@ -40,6 +50,22 @@ def render(days_int: int | None = None) -> None:
     st.subheader("Manage Users")
     st.caption("Create, edit, or remove users. View settings and activity stats.")
 
+    # Inbound deep-link from the Questions audit dialog (Feature #155):
+    # consume `manage_users_pref_user_id`, look up the user, and pre-populate
+    # `mu_selected_label` so the left-rail selectbox lands on the target user.
+    # Only honour when the user hasn't already touched the selectbox this
+    # session (mirrors the audit_trail_pref_user_id pattern in admin_analytics).
+    pref_user_id = st.session_state.pop("manage_users_pref_user_id", None)
+    if pref_user_id is not None and "mu_selected_label" not in st.session_state:
+        try:
+            all_users_for_pref = get_all_users()
+            match = next((u for u in all_users_for_pref if u["id"] == int(pref_user_id)), None)
+            if match:
+                pref_label = f"{match['username']} ({match['first_name']} {match['last_name']}) - {match['role_name']}"
+                st.session_state["mu_selected_label"] = pref_label
+        except Exception as e:
+            logger.warning("Manage Users deep-link prefill failed: %s", e)
+
     roles = get_all_user_roles()
     role_id_by_name = {name: rid for rid, name, _ in roles}
     role_names = [name for rid, name, _ in roles]
@@ -67,18 +93,14 @@ def render(days_int: int | None = None) -> None:
         if search:
             s = search.lower()
             users = [
-                u
-                for u in users
-                if s in u["username"].lower() or s in f"{u['first_name']} {u['last_name']}`".lower()
+                u for u in users if s in u["username"].lower() or s in f"{u['first_name']} {u['last_name']}`".lower()
             ]
         selected = None
         if users:
             user_options = {
                 f"{u['username']} ({u['first_name']} {u['last_name']}) - {u['role_name']}": u for u in users
             }
-            selected_label = st.selectbox(
-                "Select a user", options=list(user_options.keys()), key="mu_selected_label"
-            )
+            selected_label = st.selectbox("Select a user", options=list(user_options.keys()), key="mu_selected_label")
             selected = user_options[selected_label]
         else:
             st.info("No users found.")
@@ -191,9 +213,7 @@ def render(days_int: int | None = None) -> None:
                 m4.metric("DataFrames", s["dataframes"])
                 m5.metric("Summaries", s["summaries"])
 
-                range_choice = st.radio(
-                    "Range", options=["7 days", "30 days"], horizontal=True, key="stats_range"
-                )
+                range_choice = st.radio("Range", options=["7 days", "30 days"], horizontal=True, key="stats_range")
                 days = 7 if range_choice.startswith("7") else 30
                 daily = get_user_daily_stats(selected["id"], days=days)
                 if daily:
