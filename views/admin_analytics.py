@@ -808,13 +808,112 @@ def _render_llm_tab(days_int: int):
         st.info("No recent LLM queries found.")
 
 
+def _render_user_activity_dialog_body(item: dict) -> None:
+    """Render the body of the User Activity audit dialog (#157).
+
+    Split out from the ``@st.dialog``-decorated wrapper so tests can call the
+    body directly with a stubbed ``st`` module. The decorated wrapper
+    ``_render_user_activity_dialog`` is what production calls.
+
+    Surfaces ``user_agent`` for the first time (it's on the model but was
+    dropped by the retired ``get_recent_activity`` helper). The
+    "View user in Manage Users →" button is gated on a non-null ``user_id``
+    because failed-login rows can have null ``user_id``.
+    """
+    # Header line: created_at · username · activity_type
+    st.markdown(
+        f"**{item.get('created_at')}** · {item.get('username') or '(unknown user)'} · {item.get('activity_type')}"
+    )
+
+    # Description
+    description = item.get("description")
+    st.write(description if description else "_(no description)_")
+
+    # Request context — surfaces user_agent for the first time
+    st.markdown(f"**IP Address:** {item.get('ip_address') or '_(unknown)_'}")
+    st.markdown(f"**User Agent:** {item.get('user_agent') or '_(unknown)_'}")
+
+    # Old/new JSON diff for settings changes.
+    # Skip the section entirely when both old_value and new_value are null.
+    old_val = item.get("old_value")
+    new_val = item.get("new_value")
+    if old_val or new_val:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Old Value**")
+            if old_val:
+                try:
+                    st.json(json.loads(old_val))
+                except Exception:
+                    st.text(old_val)
+            else:
+                st.caption("_(none)_")
+        with col2:
+            st.markdown("**New Value**")
+            if new_val:
+                try:
+                    st.json(json.loads(new_val))
+                except Exception:
+                    st.text(new_val)
+            else:
+                st.caption("_(none)_")
+
+    # Outbound deep-link to Manage Users — gated on non-null user_id.
+    # Failed-login rows have null user_id and would link to nothing useful.
+    if item.get("user_id") is not None:
+        st.divider()
+        if st.button(
+            "View user in Manage Users →",
+            key=f"user_activity_dialog_goto_users_{item.get('id')}",
+            type="primary",
+        ):
+            st.session_state["manage_users_pref_user_id"] = item["user_id"]
+            # JS tab-selection shim — mirrors views/admin_analytics.py:333-353 but
+            # targets the parent-doc "Users" tab. Streamlit's st.tabs has no
+            # server-side API to change the active tab, and st.switch_page is a
+            # no-op on the same page, so we click the parent doc's "Users" tab
+            # button after the rerun lands. The consumer side of the contract
+            # (`manage_users_pref_user_id` -> pre-populate `mu_selected_label`)
+            # was added in #155 to views/admin_users.py.
+            st.components.v1.html(
+                """
+                <script>
+                  (function(){
+                    try {
+                      var tabs = window.parent.document.querySelectorAll('button[role=tab]');
+                      for (var i = 0; i < tabs.length; i++) {
+                        if (tabs[i].textContent.trim() === 'Users') { tabs[i].click(); break; }
+                      }
+                    } catch (e) { console.error('users-tab nav failed', e); }
+                  })();
+                </script>
+                """,
+                height=0,
+            )
+            st.switch_page("views/admin.py")
+
+    # Metadata caption
+    st.caption(f"Activity ID {item.get('id')}")
+
+
+@st.dialog("User Activity Detail")
+def _render_user_activity_dialog(item: dict) -> None:
+    """``@st.dialog``-decorated wrapper invoked from ``_render_activity_tab``.
+
+    Mirrors the trigger primitive locked in by #155 (Epic #154 Architecture
+    Considerations): ``st.dataframe(on_select="rerun",
+    selection_mode="single-row")`` opens this dialog when a row is selected.
+    """
+    _render_user_activity_dialog_body(item)
+
+
 def _render_activity_tab(days_int: int):
     """Render the User Activity tab."""
     from orm.logging_functions import (
         get_activity_by_type,
         get_activity_over_time,
         get_activity_stats,
-        get_recent_activity,
+        get_user_activity_page,
     )
 
     stats = get_activity_stats(days=days_int)
@@ -867,40 +966,102 @@ def _render_activity_tab(days_int: int):
 
     st.divider()
 
-    # Recent Activity Log
+    # Recent Activity Log — paginated grid with single-row selection trigger
+    # (mirrors the Questions tab primitive locked in by #155). No role gate
+    # and no agent_logging.mode interaction: UserActivity rows don't carry
+    # PHI or generated SQL, so the existing _guard_admin() is sufficient.
     st.subheader("Recent Activity Log")
-    recent = get_recent_activity(days=days_int, limit=50)
-    if recent:
-        activity_df = pd.DataFrame(recent)
-        # Format for display
-        display_df = activity_df[["created_at", "username", "activity_type", "description", "ip_address"]].copy()
-        display_df.columns = ["Timestamp", "User", "Type", "Description", "IP Address"]
-        st.dataframe(display_df, width="stretch", hide_index=True)
 
-        # Show details for settings changes
-        settings_changes = [a for a in recent if a["old_value"] or a["new_value"]]
-        if settings_changes:
-            with st.expander("Settings Change Details", expanded=False):
-                for change in settings_changes[:10]:
-                    st.markdown(f"**{change['username']}** - {change['description']}")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown("**Old Value:**")
-                        try:
-                            old = json.loads(change["old_value"]) if change["old_value"] else {}
-                            st.json(old)
-                        except Exception:
-                            st.text(change["old_value"])
-                    with col2:
-                        st.markdown("**New Value:**")
-                        try:
-                            new = json.loads(change["new_value"]) if change["new_value"] else {}
-                            st.json(new)
-                        except Exception:
-                            st.text(change["new_value"])
-                    st.divider()
+    # Pagination controls (mirror the Questions tab shape)
+    if "audit_activity_page_bump" in st.session_state:
+        st.session_state["audit_activity_page_num"] = max(
+            1,
+            int(st.session_state.get("audit_activity_page_num", 1)) + int(st.session_state["audit_activity_page_bump"]),
+        )
+        del st.session_state["audit_activity_page_bump"]
+    if "audit_activity_page_num" not in st.session_state:
+        st.session_state["audit_activity_page_num"] = 1
+
+    pc1, pc2, _spacer = st.columns([1, 1, 6])
+    with pc1:
+        page_size = st.selectbox(
+            "Page size",
+            options=[25, 50, 100, 200],
+            index=1,
+            key="audit_activity_page_size",
+        )
+    with pc2:
+        st.number_input("Page", min_value=1, step=1, key="audit_activity_page_num")
+        page = int(st.session_state["audit_activity_page_num"])
+
+    result = get_user_activity_page(days=days_int, page=page, page_size=int(page_size))
+    items = result.get("items", [])
+    total = int(result.get("total", 0))
+    total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
+
+    if items:
+        table_rows = [
+            {
+                "Timestamp": it["created_at"],
+                "User": it.get("username") or "(unknown)",
+                "Type": it.get("activity_type"),
+                "Description": it.get("description"),
+                "IP Address": it.get("ip_address"),
+            }
+            for it in items
+        ]
+        event = st.dataframe(
+            pd.DataFrame(table_rows),
+            width="stretch",
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="audit_activity_dataframe",
+        )
+        selected_rows = []
+        try:
+            selected_rows = (event.selection or {}).get("rows", []) if event else []
+        except AttributeError:
+            # Some versions return a dict-like; fall back gracefully.
+            try:
+                selected_rows = (event or {}).get("selection", {}).get("rows", [])
+            except Exception:
+                selected_rows = []
+
+        if selected_rows:
+            row_idx = int(selected_rows[0])
+            if 0 <= row_idx < len(items):
+                selected_item = items[row_idx]
+                open_id = st.session_state.get("audit_activity_dialog_open_id")
+                if open_id != selected_item["id"]:
+                    st.session_state["audit_activity_dialog_open_id"] = selected_item["id"]
+                _render_user_activity_dialog(selected_item)
+        else:
+            # Selection cleared — reset tracking key so re-selecting the same
+            # row reopens the dialog.
+            if "audit_activity_dialog_open_id" in st.session_state:
+                del st.session_state["audit_activity_dialog_open_id"]
     else:
         st.info("No recent activity found.")
+
+    # Pagination caption + Prev/Next
+    cprev, cinfo, cnext = st.columns([1, 3, 1])
+    with cprev:
+        st.button(
+            "Prev",
+            disabled=int(page) <= 1,
+            key="audit_activity_prev_btn",
+            on_click=lambda: st.session_state.update({"audit_activity_page_bump": -1}),
+        )
+    with cinfo:
+        st.caption(f"Page {int(page)} of {total_pages} • {total} total")
+    with cnext:
+        st.button(
+            "Next",
+            disabled=int(page) >= total_pages,
+            key="audit_activity_next_btn",
+            on_click=lambda: st.session_state.update({"audit_activity_page_bump": 1}),
+        )
 
 
 def _render_audit_tab(days_int: int):
