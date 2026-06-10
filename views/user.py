@@ -408,6 +408,26 @@ def pop_train(type):
         logger.error(f"An error occurred: {e}")
 
 
+@st.dialog("Confirm destructive action")
+def confirm_destructive(body_md: str, token: str, on_confirm, *, button_label: str = "Confirm"):
+    st.markdown(body_md)
+    st.warning("This action cannot be undone.")
+    typed = st.text_input(f"Type `{token}` to confirm:", key=f"_confirm_typed_{button_label}")
+    cols = st.columns(2)
+    with cols[0]:
+        if st.button("Cancel", key=f"_confirm_cancel_{button_label}"):
+            st.rerun()
+    with cols[1]:
+        if st.button(
+            button_label,
+            type="primary",
+            disabled=(typed != token),
+            key=f"_confirm_go_{button_label}",
+        ):
+            on_confirm()
+            st.rerun()
+
+
 st.title("User Settings")
 
 tabs = ["My Account"]
@@ -467,25 +487,141 @@ with tab1:
 
 if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
     with tab2:
-        # Training pipeline actions
-        train_col1, train_col2, spacer = st.columns((0.20, 0.20, 0.60))
-        with train_col1:
-            st.button(
-                "Train All",
-                type="primary",
-                on_click=train_all,
-                help="Full pipeline: DDL, Schema Plan, Auto-Enhance, AI Docs",
-            )
-        with train_col2:
-            st.button(
-                "Refresh Stats",
-                on_click=refresh_stats,
-                help="Re-run column statistics only (use when data changed but schema is the same)",
-            )
+        # Section 1 — Training Data Library
+        st.subheader("Training Data Library")
+        df = get_vn().get_training_data()
+        if isinstance(df, DataFrame) and not df.empty:
+            display_df = df[["id", "training_data_type", "question", "content"]].copy()
+            display_df.columns = ["ID", "Type", "Question", "Content"]
 
-        # Auto-generate SQL training pairs
+            filter_col1, filter_col2 = st.columns([0.6, 0.4])
+            with filter_col1:
+                search_query = st.text_input(
+                    "Search training data",
+                    placeholder="Search by question or content...",
+                    key="training_search",
+                )
+            with filter_col2:
+                available_types = sorted(display_df["Type"].dropna().unique().tolist())
+                type_filter = st.multiselect("Filter by type", options=available_types, key="training_type_filter")
+
+            if search_query:
+                mask = display_df["Question"].astype(str).str.contains(search_query, case=False, na=False) | display_df[
+                    "Content"
+                ].astype(str).str.contains(search_query, case=False, na=False)
+                display_df = display_df[mask]
+            if type_filter:
+                display_df = display_df[display_df["Type"].isin(type_filter)]
+
+            if st.session_state.cookies.get("role_name") == "Admin":
+                display_df.insert(0, "Select", False)
+
+                edited_df = st.data_editor(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Delete?",
+                            help="Select rows to delete",
+                            default=False,
+                            width="small",
+                        ),
+                        "ID": st.column_config.TextColumn(
+                            "ID",
+                            width="small",
+                            disabled=True,
+                        ),
+                        "Type": st.column_config.TextColumn(
+                            "Type",
+                            width="small",
+                            disabled=True,
+                        ),
+                        "Question": st.column_config.TextColumn(
+                            "Question",
+                            width="medium",
+                            disabled=True,
+                        ),
+                        "Content": st.column_config.TextColumn(
+                            "Content",
+                            width="large",
+                            disabled=True,
+                        ),
+                    },
+                    num_rows="fixed",
+                    key="training_data_grid",
+                )
+
+                selected_rows = edited_df[edited_df["Select"]]
+                if not selected_rows.empty:
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        if st.button(
+                            f"🗑️ Delete {len(selected_rows)} Selected",
+                            type="primary",
+                            help="Delete all selected training data entries",
+                        ):
+                            vn = get_vn()
+                            for _, row in selected_rows.iterrows():
+                                vn.remove_from_training(row["ID"])
+                            st.toast(f"Deleted {len(selected_rows)} training data entries!")
+                            st.rerun()
+                    with col2:
+                        st.caption(f"Selected {len(selected_rows)} of {len(display_df)} entries for deletion")
+            else:
+                st.dataframe(
+                    display_df[["ID", "Type", "Question", "Content"]],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "ID": st.column_config.TextColumn("ID", width="small"),
+                        "Type": st.column_config.TextColumn("Type", width="small"),
+                        "Question": st.column_config.TextColumn("Question", width="medium"),
+                        "Content": st.column_config.TextColumn("Content", width="large"),
+                    },
+                )
+
+            st.caption(f"Total: {len(df)} training data entries")
+        else:
+            st.info("No training data available.")
+
+        # Section 2 — Add Training Data
         st.divider()
-        st.subheader("Auto-Generate SQL Pairs")
+        st.subheader("Add Training Data")
+        add_col1, add_col2 = st.columns(2)
+        with add_col1:
+            if st.button("Add SQL", key="add_sql_btn"):
+                pop_train("sql")
+        with add_col2:
+            if st.button("Add Documentation", key="add_doc_btn"):
+                pop_train("documentation")
+
+        # Section 3 — Bulk Operations
+        st.divider()
+        st.subheader("Bulk Operations")
+
+        st.markdown("**Import CSV**")
+        uploaded_file = st.file_uploader(
+            "Choose a CSV file to upload training data",
+            type=["csv"],
+            help="Upload a CSV file with columns: training_data_type, question, content",
+        )
+        if uploaded_file is not None:
+            st.info(f"📁 File: {uploaded_file.name} ({uploaded_file.size} bytes)")
+            imp_col1, imp_col2 = st.columns(2)
+            with imp_col1:
+                if st.button("📤 Import Training Data", type="primary"):
+                    with st.spinner("Importing training data..."):
+                        import_training_data_from_csv(uploaded_file)
+            with imp_col2:
+                if st.button("❌ Cancel"):
+                    st.rerun()
+
+        st.markdown("**Export CSV**")
+        if st.button("Export CSV", key="export_csv_btn"):
+            export_training_data_to_csv()
+
+        st.markdown("**Auto-Generate SQL Pairs**")
         st.caption("Use the connected LLM to generate, validate, and train SQL question-answer pairs automatically.")
         gen_col1, gen_col2, gen_spacer = st.columns((0.20, 0.20, 0.60))
         with gen_col1:
@@ -525,162 +661,54 @@ if tab2 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                                 state="error",
                             )
                             st.warning("No valid pairs were generated. Check LLM connectivity and training data.")
-                    # Show details for failed pairs
                     failed_details = [d for d in gen_results.get("details", []) if d["status"] == "failed"]
                     if failed_details:
                         with st.expander(f"Failed pairs ({len(failed_details)})"):
                             for d in failed_details:
                                 st.text(f"Pair {d['index']}: {d.get('reason', 'Unknown')}")
 
+        # Section 4 — Training Pipeline
         st.divider()
-        # Data management actions
-        st.caption("Data Management")
-        mgmt_cols = st.columns((0.15, 0.25, 0.15, 0.15, 0.30))
-        with mgmt_cols[0]:
-            if st.button("Add Sql"):
-                pop_train("sql")
-        with mgmt_cols[1]:
-            if st.button("Add Documentation"):
-                pop_train("documentation")
-        with mgmt_cols[2]:
-            st.button("Remove All", on_click=delete_all_training)
-        with mgmt_cols[3]:
-            if st.button("Export CSV"):
-                export_training_data_to_csv()
+        st.subheader("Training Pipeline")
+        train_col1, train_col2, _train_spacer = st.columns((0.20, 0.20, 0.60))
+        with train_col1:
+            st.button(
+                "Train All",
+                type="primary",
+                on_click=train_all,
+                help="Full pipeline: DDL, Schema Plan, Auto-Enhance, AI Docs",
+            )
+        with train_col2:
+            st.button(
+                "Refresh Stats",
+                on_click=refresh_stats,
+                help="Re-run column statistics only (use when data changed but schema is the same)",
+            )
 
-        # (Moved Bulk User Import to Manage Users tab)
-
-        # Add CSV import functionality
+        # Section 5 — Danger Zone
         st.divider()
-        st.subheader("Import Training Data from CSV")
-        uploaded_file = st.file_uploader(
-            "Choose a CSV file to upload training data",
-            type=["csv"],
-            help="Upload a CSV file with columns: training_data_type, question, content",
-        )
-
-        if uploaded_file is not None:
-            # Show file details
-            st.info(f"📁 File: {uploaded_file.name} ({uploaded_file.size} bytes)")
-
-            # Add confirmation button
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("📤 Import Training Data", type="primary"):
-                    with st.spinner("Importing training data..."):
-                        import_training_data_from_csv(uploaded_file)
-            with col2:
-                if st.button("❌ Cancel"):
-                    st.rerun()
-
-        # Get training data with current user's role-based filtering
-        df = get_vn().get_training_data()
-
-        if isinstance(df, DataFrame) and not df.empty:
-            st.divider()
-            st.subheader("Training Data")
-
-            # Prepare display dataframe with renamed columns for clarity
-            display_df = df[["id", "training_data_type", "question", "content"]].copy()
-            display_df.columns = ["ID", "Type", "Question", "Content"]
-
-            # Search and filter controls
-            filter_col1, filter_col2 = st.columns([0.6, 0.4])
-            with filter_col1:
-                search_query = st.text_input(
-                    "Search training data",
-                    placeholder="Search by question or content...",
-                    key="training_search",
-                )
-            with filter_col2:
-                available_types = sorted(display_df["Type"].dropna().unique().tolist())
-                type_filter = st.multiselect("Filter by type", options=available_types, key="training_type_filter")
-
-            # Apply filters
-            if search_query:
-                mask = display_df["Question"].astype(str).str.contains(search_query, case=False, na=False) | display_df[
-                    "Content"
-                ].astype(str).str.contains(search_query, case=False, na=False)
-                display_df = display_df[mask]
-            if type_filter:
-                display_df = display_df[display_df["Type"].isin(type_filter)]
-
-            # Use data_editor for interactive grid with selection for deletion
-            if st.session_state.cookies.get("role_name") == "Admin":
-                # Add selection column for bulk delete
-                display_df.insert(0, "Select", False)
-
-                edited_df = st.data_editor(
-                    display_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Select": st.column_config.CheckboxColumn(
-                            "Delete?",
-                            help="Select rows to delete",
-                            default=False,
-                            width="small",
-                        ),
-                        "ID": st.column_config.TextColumn(
-                            "ID",
-                            width="small",
-                            disabled=True,
-                        ),
-                        "Type": st.column_config.TextColumn(
-                            "Type",
-                            width="small",
-                            disabled=True,
-                        ),
-                        "Question": st.column_config.TextColumn(
-                            "Question",
-                            width="medium",
-                            disabled=True,
-                        ),
-                        "Content": st.column_config.TextColumn(
-                            "Content",
-                            width="large",
-                            disabled=True,
-                        ),
-                    },
-                    num_rows="fixed",
-                    key="training_data_grid",
-                )
-
-                # Delete selected rows
-                selected_rows = edited_df[edited_df["Select"]]
-                if not selected_rows.empty:
-                    col1, col2 = st.columns([1, 4])
-                    with col1:
-                        if st.button(
-                            f"🗑️ Delete {len(selected_rows)} Selected",
-                            type="primary",
-                            help="Delete all selected training data entries",
-                        ):
-                            vn = get_vn()
-                            for _, row in selected_rows.iterrows():
-                                vn.remove_from_training(row["ID"])
-                            st.toast(f"Deleted {len(selected_rows)} training data entries!")
-                            st.rerun()
-                    with col2:
-                        st.caption(f"Selected {len(selected_rows)} of {len(display_df)} entries for deletion")
-            else:
-                # Non-admin view: read-only dataframe
-                st.dataframe(
-                    display_df[["ID", "Type", "Question", "Content"]],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "ID": st.column_config.TextColumn("ID", width="small"),
-                        "Type": st.column_config.TextColumn("Type", width="small"),
-                        "Question": st.column_config.TextColumn("Question", width="medium"),
-                        "Content": st.column_config.TextColumn("Content", width="large"),
-                    },
-                )
-
-            # Show record count
-            st.caption(f"Total: {len(df)} training data entries")
-        else:
-            st.info("No training data available.")
+        st.subheader("Danger Zone")
+        if st.button("Remove All Training Data", key="danger_remove_all_btn"):
+            confirm_destructive(
+                body_md=(
+                    "Permanently removes every training-data row visible to you "
+                    "(role-filtered). Schema embeddings will need to be "
+                    "regenerated via **Train All**."
+                ),
+                token="DELETE",
+                on_confirm=delete_all_training,
+                button_label="Remove All Training Data",
+            )
+        if st.button("Delete My Chat History", key="danger_delete_chat_btn"):
+            confirm_destructive(
+                body_md=(
+                    "Permanently removes **your** chat history from this account. "
+                    "Other users' messages are not affected."
+                ),
+                token="DELETE",
+                on_confirm=delete_all_messages,
+                button_label="Delete My Chat History",
+            )
 
 if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
     with tab3:
@@ -1010,5 +1038,3 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                                 st.error("Failed to delete user.")
             else:
                 st.info("No users found.")
-
-    st.sidebar.button("Delete all message data", on_click=delete_all_messages, use_container_width=True, type="primary")
