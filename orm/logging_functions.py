@@ -1238,35 +1238,52 @@ def get_admin_actions_by_type(days: int = 30) -> list[dict]:
         return []
 
 
-def get_recent_admin_actions(days: int = 30, limit: int = 50) -> list[dict]:
-    """Get recent admin actions for audit log."""
+def get_admin_actions_page(days: int = 30, page: int = 1, page_size: int = 50) -> dict:
+    """Paginated admin actions audit. Returns ``{"items": [...], "total": int}``.
+
+    Mirrors the shape of :func:`get_question_audit_page` (Feature #134) so the
+    Admin Actions tab in ``views/admin_analytics.py`` can reuse the same
+    grid + dialog primitive (Feature #156, Epic #154). Unlike the Questions
+    tab, AdminAction rows have no filters today, so the signature takes
+    ``days`` directly instead of a filters dict.
+
+    Each item exposes the full ``AdminAction`` row plus the joined
+    ``admin_username`` so the UI can render without re-querying.
+    """
     try:
-        since = datetime.now() - timedelta(days=days)
+        since = datetime.now() - timedelta(days=int(days))
         with SessionLocal() as session:
             from orm.models import User
 
-            results = (
+            base_query = (
                 session.query(AdminAction, User.username.label("admin_username"))
                 .outerjoin(User, User.id == AdminAction.admin_id)
                 .filter(AdminAction.created_at >= since)
                 .order_by(AdminAction.created_at.desc())
-                .limit(limit)
-                .all()
             )
-            return [
+            total = session.query(func.count(AdminAction.id)).filter(AdminAction.created_at >= since).scalar() or 0
+            offset = max(0, (int(page) - 1) * int(page_size))
+            rows = base_query.offset(offset).limit(int(page_size)).all()
+            items = [
                 {
                     "id": r.AdminAction.id,
                     "created_at": r.AdminAction.created_at,
                     "admin_username": r.admin_username or "Unknown",
                     "action_type": r.AdminAction.action_type,
+                    "target_user_id": r.AdminAction.target_user_id,
                     "target_username": r.AdminAction.target_username,
+                    "target_entity_type": r.AdminAction.target_entity_type,
+                    "target_entity_id": r.AdminAction.target_entity_id,
                     "description": r.AdminAction.description,
-                    "success": r.AdminAction.success,
                     "old_value": r.AdminAction.old_value,
                     "new_value": r.AdminAction.new_value,
+                    "affected_count": r.AdminAction.affected_count,
+                    "success": bool(r.AdminAction.success) if r.AdminAction.success is not None else None,
+                    "error_message": r.AdminAction.error_message,
                 }
-                for r in results
+                for r in rows
             ]
+            return {"items": items, "total": int(total)}
     except Exception as e:
-        logger.warning("Failed to get recent admin actions: %s", e)
-        return []
+        logger.warning("get_admin_actions_page failed: %s", e)
+        return {"items": [], "total": 0}
