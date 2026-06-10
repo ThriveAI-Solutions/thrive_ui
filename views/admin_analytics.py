@@ -352,6 +352,7 @@ def _render_overview_tab(days_int: int):
         height=60,
     )
 
+
 @st.cache_data(ttl=ANALYTICS_CACHE_TTL_SECONDS, show_spinner=False)
 def _cached_audit_filter_options(days_int: int) -> dict:
     from orm.logging_functions import get_question_audit_filter_options
@@ -369,6 +370,105 @@ def _truncate(text, length):
     return text if len(text) <= length else text[: length - 1] + "…"
 
 
+def _render_audit_question_dialog_body(item: dict) -> None:
+    """Render the body of the Questions audit dialog (#155).
+
+    Split out from the `@st.dialog`-decorated wrapper so tests can call the
+    body directly with a stubbed `st` module. The decorated wrapper
+    `_render_audit_question_dialog` is what production calls.
+    """
+    from io import StringIO
+
+    from agent.observability_gate import role_can_see_query_details
+
+    current_role = st.session_state.get("user_role")
+    can_see_query_details = role_can_see_query_details(current_role)
+
+    # Header line
+    org = item.get("organization") or "(no org)"
+    st.markdown(f"**{item['asked_at']}** · {item['username']} · {org}")
+
+    # Full question
+    st.markdown("**Question**")
+    st.write(item.get("question") or "_(empty)_")
+
+    # Role-gated: Generated SQL with built-in copy-to-clipboard
+    if can_see_query_details:
+        st.markdown("**Generated SQL**")
+        st.code(item.get("sql_text") or "(no SQL)", language="sql")
+
+    # Summary
+    st.markdown("**Summary**")
+    summary = item.get("summary_text")
+    st.write(summary if summary else "_(no summary)_")
+
+    # Role-gated: full DataFrame (no .head(5) — dataframe_preview holds the full JSON)
+    df_preview = item.get("dataframe_preview")
+    if df_preview and can_see_query_details:
+        st.markdown("**Result DataFrame**")
+        try:
+            df_obj = pd.read_json(StringIO(df_preview))
+            st.dataframe(df_obj, width="stretch", hide_index=True)
+        except Exception:
+            try:
+                df_obj = pd.read_json(df_preview)
+                st.dataframe(df_obj, width="stretch", hide_index=True)
+            except Exception:
+                st.text(str(df_preview)[:1000])
+
+    # Error block when present
+    err = item.get("error_text")
+    if err:
+        st.markdown("**Error**")
+        st.code(err, language="text")
+
+    # Metadata caption
+    st.caption(
+        f"Message ID {item.get('user_message_id')} · Elapsed {round(float(item.get('elapsed_seconds') or 0.0), 3)}s"
+    )
+
+    # Outbound deep-link to Manage Users
+    st.divider()
+    if st.button(
+        "View user in Manage Users →",
+        key=f"audit_dialog_goto_users_{item.get('user_message_id')}",
+        type="primary",
+    ):
+        st.session_state["manage_users_pref_user_id"] = item["user_id"]
+        # JS tab-selection shim — mirrors the Audit-tab shim above but targets "Users".
+        # Streamlit's st.tabs has no server-side API to change the active tab and
+        # st.switch_page is a no-op on the same page, so we click the parent doc's
+        # "Users" tab button after the rerun lands.
+        st.components.v1.html(
+            """
+            <script>
+              (function(){
+                try {
+                  var tabs = window.parent.document.querySelectorAll('button[role=tab]');
+                  for (var i = 0; i < tabs.length; i++) {
+                    if (tabs[i].textContent.trim() === 'Users') { tabs[i].click(); break; }
+                  }
+                } catch (e) { console.error('users-tab nav failed', e); }
+              })();
+            </script>
+            """,
+            height=0,
+        )
+        st.switch_page("views/admin.py")
+
+
+@st.dialog("Question Audit Detail")
+def _render_audit_question_dialog(item: dict) -> None:
+    """`@st.dialog`-decorated wrapper invoked from `_render_audit_trail_tab`.
+
+    Subsystems #156 and #157 must adopt the same trigger primitive
+    (`st.dataframe(on_select="rerun", selection_mode="single-row")` + dialog
+    body invoked on selection state change). See Epic #154 Architecture
+    Considerations.
+    """
+    _render_audit_question_dialog_body(item)
+
+
 def _render_audit_trail_tab(days_int: int):
     """Render the Question Audit Trail tab (#135)."""
     import datetime as _dt
@@ -378,6 +478,15 @@ def _render_audit_trail_tab(days_int: int):
         get_question_audit_page,
     )
     from orm.functions import get_all_users
+
+    # [agent_logging].mode = "disabled" defense-in-depth.
+    # Under "disabled" mode no audit rows are written, but we belt-and-suspenders
+    # the trigger primitive so it cannot open the dialog.
+    try:
+        logging_mode = st.secrets.get("agent_logging", {}).get("mode", "full")
+    except Exception:
+        logging_mode = "full"
+    selection_enabled = logging_mode != "disabled"
 
     options = _cached_audit_filter_options(days_int)
 
@@ -394,13 +503,9 @@ def _render_audit_trail_tab(days_int: int):
 
     f1, f2, f3 = st.columns([0.30, 0.30, 0.40])
     with f1:
-        usernames_sel = st.multiselect(
-            "User", options=options["usernames"], key="audit_user_filter"
-        )
+        usernames_sel = st.multiselect("User", options=options["usernames"], key="audit_user_filter")
     with f2:
-        orgs_sel = st.multiselect(
-            "Organization", options=options["orgs"], key="audit_org_filter"
-        )
+        orgs_sel = st.multiselect("Organization", options=options["orgs"], key="audit_org_filter")
     with f3:
         search = st.text_input(
             "Search question or SQL",
@@ -442,7 +547,9 @@ def _render_audit_trail_tab(days_int: int):
     total = int(result.get("total", 0))
     total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
 
-    # Table
+    # Table — single-row selection trigger replaces the per-row expander list
+    # (Epic #154 architecture: selection state is one widget read at page_size=200,
+    # vs. 200 button widgets per refresh; load-bearing for #156/#157).
     if items:
         table_rows = []
         for it in items:
@@ -457,7 +564,48 @@ def _render_audit_trail_tab(days_int: int):
                     "Elapsed (s)": round(float(it.get("elapsed_seconds") or 0.0), 3),
                 }
             )
-        st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
+
+        if selection_enabled:
+            event = st.dataframe(
+                pd.DataFrame(table_rows),
+                width="stretch",
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="audit_dataframe",
+            )
+            selected_rows = []
+            try:
+                selected_rows = (event.selection or {}).get("rows", []) if event else []
+            except AttributeError:
+                # Some versions return a dict-like; fall back gracefully.
+                try:
+                    selected_rows = (event or {}).get("selection", {}).get("rows", [])
+                except Exception:
+                    selected_rows = []
+
+            if selected_rows:
+                row_idx = int(selected_rows[0])
+                if 0 <= row_idx < len(items):
+                    selected_item = items[row_idx]
+                    open_id = st.session_state.get("audit_dialog_open_user_message_id")
+                    if open_id != selected_item["user_message_id"]:
+                        st.session_state["audit_dialog_open_user_message_id"] = selected_item["user_message_id"]
+                    _render_audit_question_dialog(selected_item)
+            else:
+                # Dataframe selection cleared (e.g. clicking the row again) — reset our
+                # tracking key so re-selecting the same row reopens the dialog.
+                if "audit_dialog_open_user_message_id" in st.session_state:
+                    del st.session_state["audit_dialog_open_user_message_id"]
+        else:
+            # agent_logging.mode == "disabled": render the table read-only;
+            # selection trigger and dialog branch are short-circuited.
+            st.dataframe(
+                pd.DataFrame(table_rows),
+                width="stretch",
+                hide_index=True,
+                key="audit_dataframe",
+            )
     else:
         st.info("No audit rows match the current filters.")
 
@@ -479,34 +627,6 @@ def _render_audit_trail_tab(days_int: int):
             key="audit_next_btn",
             on_click=lambda: st.session_state.update({"audit_page_bump": 1}),
         )
-
-    # Row drilldown expanders
-    for it in items:
-        header = f"{it['asked_at']} • {it['username']} • {_truncate(it['question'], 80)}"
-        with st.expander(header):
-            st.markdown("**Question**")
-            st.write(it["question"] or "_(empty)_")
-            st.markdown("**Generated SQL**")
-            st.code(it.get("sql_text") or "(no SQL)", language="sql")
-            st.markdown("**Summary**")
-            summary = it.get("summary_text")
-            st.write(summary if summary else "_(no summary)_")
-            df_preview = it.get("dataframe_preview")
-            if df_preview:
-                st.markdown("**DataFrame preview (first 5 rows)**")
-                try:
-                    df_obj = pd.read_json(df_preview).head(5)
-                    st.dataframe(df_obj, width="stretch", hide_index=True)
-                except Exception:
-                    st.text(str(df_preview)[:1000])
-            err = it.get("error_text")
-            if err:
-                st.markdown("**Error**")
-                st.code(err, language="text")
-            st.caption(
-                f"Asked At {it['asked_at']} · Elapsed "
-                f"{round(float(it.get('elapsed_seconds') or 0.0), 3)}s · Message ID {it.get('user_message_id')}"
-            )
 
     # Export CSV
     if st.button("📥 Export filtered audit to CSV", key="audit_export_btn"):
@@ -884,6 +1004,7 @@ def main():
         if st.button("Refresh Data", help="Clear cached data and reload metrics"):
             _read_metrics.clear()
             from views.errors import _load as _errors_load, _load_aggregates as _errors_load_aggregates
+
             _errors_load.clear()
             _errors_load_aggregates.clear()
             st.rerun()
