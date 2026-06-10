@@ -428,6 +428,108 @@ def confirm_destructive(body_md: str, token: str, on_confirm, *, button_label: s
             st.rerun()
 
 
+@st.dialog("Create User")
+def create_user_dialog():
+    roles = get_all_user_roles()
+    role_id_by_name = {name: rid for rid, name, _ in roles}
+    role_names = [name for rid, name, _ in roles]
+    theme_options = user_selectable_themes()
+    with st.form("create_user_dialog_form", clear_on_submit=True):
+        cu_username = st.text_input("Username")
+        cu_password = st.text_input("Temporary Password", type="password")
+        cu_first = st.text_input("First Name")
+        cu_last = st.text_input("Last Name")
+        cu_email = st.text_input("Email")
+        cu_organization = st.text_input("Organization")
+        cu_role_name = st.selectbox(
+            "Role", options=role_names, index=role_names.index("Patient") if "Patient" in role_names else 0
+        )
+        cu_theme = st.selectbox("Theme", options=theme_options, index=0)
+        submitted = st.form_submit_button("Create User", type="primary")
+        if submitted:
+            if (
+                not cu_username
+                or not cu_password
+                or not cu_first
+                or not cu_email.strip()
+                or not cu_organization.strip()
+            ):
+                st.error("Please provide username, password, first name, email, and organization.")
+            else:
+                ok = create_user(
+                    cu_username,
+                    cu_password,
+                    cu_first,
+                    cu_last,
+                    role_id_by_name.get(cu_role_name),
+                    email=cu_email,
+                    organization=cu_organization,
+                    theme=cu_theme,
+                )
+                if ok:
+                    st.success("User created.")
+                    st.rerun()
+                else:
+                    st.error(
+                        "Failed to create user. Possible causes: username or email already exists, "
+                        "email format is invalid."
+                    )
+
+
+@st.dialog("Bulk Import Users")
+def bulk_import_dialog():
+    st.info(
+        "📁 Import users from Excel file: `./utils/config/user_list.xlsx`. "
+        "Required columns: UserID, start_password, First Name, Last Name, Email, Organization."
+    )
+    bi_col1, bi_col2 = st.columns(2)
+    with bi_col1:
+        if st.button("Import Users", type="primary", key="bulk_import_dialog_run"):
+            import_users()
+    with bi_col2:
+        if st.button("Close", key="bulk_import_dialog_close"):
+            st.rerun()
+
+
+@st.dialog("Export Users")
+def export_users_dialog():
+    st.info(
+        "📤 Download all users as CSV. Columns match Bulk User Import "
+        "(UserID, First Name, Last Name, Email, Organization, Role). "
+        "Passwords are not included."
+    )
+    export_users_to_csv()
+    if st.button("Close", key="export_users_dialog_close"):
+        st.rerun()
+
+
+@st.dialog("Set Password")
+def set_password_dialog(selected: dict):
+    st.markdown(f"Set a new password for **{selected['username']}**.")
+    new_pw = st.text_input("New Password", type="password", key="set_pw_dialog_pw")
+    sp_col1, sp_col2 = st.columns(2)
+    with sp_col1:
+        if st.button("Set Password", type="primary", key="set_pw_dialog_submit"):
+            if not new_pw:
+                st.error("Enter a new password.")
+            elif admin_change_password(selected["id"], new_pw):
+                st.success("Password updated.")
+                st.rerun()
+            else:
+                st.error("Failed to update password.")
+    with sp_col2:
+        if st.button("Cancel", key="set_pw_dialog_cancel"):
+            st.rerun()
+
+
+def _delete_and_rerun(user_id: int):
+    if delete_user(user_id):
+        st.toast("User deleted.")
+        st.rerun()
+    else:
+        st.error("Failed to delete user.")
+
+
 st.title("User Settings")
 
 tabs = ["My Account"]
@@ -721,73 +823,24 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
 
         stats_map = get_user_stats_for_all_users()
 
+        # Toolbar — admin-action dialogs
+        tb1, tb2, tb3_col, _spacer = st.columns([0.18, 0.18, 0.18, 0.46])
+        with tb1:
+            if st.button("+ Create User", type="primary", key="tb_create_user"):
+                create_user_dialog()
+        with tb2:
+            if st.button("Import Users…", key="tb_import_users"):
+                bulk_import_dialog()
+        with tb3_col:
+            if st.button("Export Users…", key="tb_export_users"):
+                export_users_dialog()
+
+        st.divider()
+
         left, right = st.columns([1, 2])
         with left:
-            st.markdown("**Create New User**")
-            with st.form("create_user_form", clear_on_submit=True):
-                cu_username = st.text_input("Username")
-                cu_password = st.text_input("Temporary Password", type="password")
-                cu_first = st.text_input("First Name")
-                cu_last = st.text_input("Last Name")
-                cu_email = st.text_input("Email")
-                cu_organization = st.text_input("Organization")
-                cu_role_name = st.selectbox(
-                    "Role", options=role_names, index=role_names.index("Patient") if "Patient" in role_names else 0
-                )
-                theme_options = user_selectable_themes()
-                cu_theme = st.selectbox("Theme", options=theme_options, index=0)
-                submitted = st.form_submit_button("Create User", type="primary")
-                if submitted:
-                    if (
-                        not cu_username
-                        or not cu_password
-                        or not cu_first
-                        or not cu_email.strip()
-                        or not cu_organization.strip()
-                    ):
-                        st.error("Please provide username, password, first name, email, and organization.")
-                    else:
-                        ok = create_user(
-                            cu_username,
-                            cu_password,
-                            cu_first,
-                            cu_last,
-                            role_id_by_name.get(cu_role_name),
-                            email=cu_email,
-                            organization=cu_organization,
-                            theme=cu_theme,
-                        )
-                        if ok:
-                            st.success("User created.")
-                            st.rerun()
-                        else:
-                            st.error(
-                                "Failed to create user. Possible causes: username or email already exists, "
-                                "email format is invalid."
-                            )
-
-            st.divider()
-            st.markdown("**Bulk User Import**")
-            st.info(
-                "📁 Import users from Excel file: `./utils/config/user_list.xlsx`. "
-                "Required columns: UserID, start_password, First Name, Last Name, Email, Organization."
-            )
-            if st.button("Import Users", type="primary", help="Import users from ./utils/config/user_list.xlsx"):
-                import_users()
-
-            st.divider()
-            st.markdown("**Export Users**")
-            st.info(
-                "📤 Download all users as CSV. Columns match Bulk User Import "
-                "(UserID, First Name, Last Name, Email, Organization, Role). "
-                "Passwords are not included."
-            )
-            export_users_to_csv()
-
-        with right:
-            st.markdown("**Edit Existing User**")
             users = get_all_users()
-            search = st.text_input("Search users", placeholder="Filter by username or name…")
+            search = st.text_input("Search users", placeholder="Filter by username or name…", key="mu_search")
             if search:
                 s = search.lower()
                 users = [
@@ -795,132 +848,33 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                     for u in users
                     if s in u["username"].lower() or s in f"{u['first_name']} {u['last_name']}`".lower()
                 ]
-
+            selected = None
             if users:
                 user_options = {
                     f"{u['username']} ({u['first_name']} {u['last_name']}) - {u['role_name']}": u for u in users
                 }
-                selected_label = st.selectbox("Select a user", options=list(user_options.keys()))
+                selected_label = st.selectbox(
+                    "Select a user", options=list(user_options.keys()), key="mu_selected_label"
+                )
                 selected = user_options[selected_label]
+            else:
+                st.info("No users found.")
 
-                # Load full user for preferences
+        with right:
+            if selected is None:
+                st.info("Select a user from the left to view details.")
+            else:
+                st.markdown(
+                    f"**{selected['username']}** — {selected['first_name']} {selected['last_name']} "
+                    f"· {selected['role_name']}"
+                )
                 with SessionLocal() as session:
                     db_user = session.query(User).filter(User.id == selected["id"]).first()
+                prof_tab, prefs_tab, activity_tab, danger_tab = st.tabs(
+                    ["Profile", "Preferences", "Activity", "Danger Zone"]
+                )
 
-                st.divider()
-                # Time series chart spanning the full right pane width
-                range_choice = st.radio("Range", options=["7 days", "30 days"], horizontal=True, key="stats_range")
-                days = 7 if range_choice.startswith("7") else 30
-                daily = get_user_daily_stats(selected["id"], days=days)
-                if daily:
-                    import plotly.express as px
-
-                    chart_df = pd.DataFrame(daily)
-                    chart_df["date"] = pd.to_datetime(chart_df["date"])
-                    melted = chart_df.melt(
-                        id_vars=["date"],
-                        value_vars=["questions", "charts", "errors", "dataframes", "summaries"],
-                        var_name="metric",
-                        value_name="count",
-                    )
-                    fig = px.line(melted, x="date", y="count", color="metric", markers=True)
-                    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), legend_title_text="")
-                    st.plotly_chart(fig, use_container_width=True)
-
-                # Questions table and download (full width under chart)
-                with st.expander("Recent Questions"):
-                    # Initialize and apply pending navigation before rendering widgets
-                    # Reset pagination when switching selected user
-                    if st.session_state.get("q_selected_user_id") != selected["id"]:
-                        st.session_state["q_selected_user_id"] = selected["id"]
-                        st.session_state["q_page_num"] = 1
-                    if "q_page_num" not in st.session_state:
-                        st.session_state["q_page_num"] = 1
-                    if "q_page_bump" in st.session_state:
-                        st.session_state["q_page_num"] = max(
-                            1, int(st.session_state.get("q_page_num", 1)) + int(st.session_state["q_page_bump"])
-                        )
-                        del st.session_state["q_page_bump"]
-
-                    colq1, colq2, colq3 = st.columns([1, 1, 6])
-                    with colq1:
-                        page_size = st.selectbox("Page size", options=[25, 50, 100], index=1, key="q_page_size")
-                    with colq2:
-                        st.number_input("Page", min_value=1, step=1, key="q_page_num")
-                        page = int(st.session_state["q_page_num"])
-
-                    page_data = get_user_questions_page(selected["id"], page=int(page), page_size=int(page_size))
-                    items = page_data.get("items", [])
-                    total = page_data.get("total", 0)
-
-                    if items:
-                        qdf = pd.DataFrame(items)
-                        qdf.rename(
-                            columns={
-                                "question": "Question",
-                                "created_at": "Asked At",
-                                "status": "Status",
-                                "elapsed_seconds": "Elapsed (s)",
-                            },
-                            inplace=True,
-                        )
-                        st.dataframe(qdf, use_container_width=True, hide_index=True)
-
-                        # Pagination controls
-                        total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
-                        cprev, cinfo, cnext = st.columns([1, 3, 1])
-                        with cprev:
-                            st.button(
-                                "Prev",
-                                disabled=int(page) <= 1,
-                                on_click=lambda: st.session_state.update({"q_page_bump": -1}),
-                            )
-                        with cinfo:
-                            st.caption(f"Page {int(page)} of {total_pages} • {total} total")
-                        with cnext:
-                            st.button(
-                                "Next",
-                                disabled=int(page) >= total_pages,
-                                on_click=lambda: st.session_state.update({"q_page_bump": 1}),
-                            )
-
-                        # Download all recent questions as CSV including status/elapsed when available
-                        all_rows = []
-                        # Fetch in chunks if needed
-                        all_page_size = 1000
-                        remaining = total
-                        page_iter = 1
-                        while remaining > 0 and page_iter <= 100:  # safety cap
-                            p = get_user_questions_page(selected["id"], page=page_iter, page_size=all_page_size)
-                            all_rows.extend(p.get("items", []))
-                            if len(p.get("items", [])) < all_page_size:
-                                break
-                            remaining -= len(p.get("items", []))
-                            page_iter += 1
-                        if all_rows:
-                            all_df = pd.DataFrame(all_rows)
-                            all_df.rename(
-                                columns={
-                                    "question": "Question",
-                                    "created_at": "Asked At",
-                                    "status": "Status",
-                                    "elapsed_seconds": "Elapsed (s)",
-                                },
-                                inplace=True,
-                            )
-                            csv_bytes = all_df.to_csv(index=False).encode("utf-8")
-                            st.download_button(
-                                label="Download all questions (.csv)",
-                                data=csv_bytes,
-                                file_name=f"{selected['username']}_questions.csv",
-                                mime="text/csv",
-                            )
-                    else:
-                        st.info("No questions found.")
-
-                c1, c2 = st.columns([2, 1])
-                with c1:
-                    st.markdown("**Profile**")
+                with prof_tab:
                     nu_username = st.text_input("Username", value=selected["username"])
                     nu_first = st.text_input("First Name", value=selected["first_name"])
                     nu_last = st.text_input("Last Name", value=selected["last_name"])
@@ -938,8 +892,8 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                         options=theme_options,
                         index=theme_options.index(current_theme) if current_theme in theme_options else 0,
                     )
-                    cols = st.columns(2)
-                    with cols[0]:
+                    prof_btn_cols = st.columns(2)
+                    with prof_btn_cols[0]:
                         if st.button("Save Profile", key="save_profile", type="primary"):
                             ok = update_user(
                                 selected["id"],
@@ -956,85 +910,186 @@ if tab3 and st.session_state.get("user_role") == RoleTypeEnum.ADMIN.value:
                                 st.rerun()
                             else:
                                 st.error("Failed to update profile.")
-                    with cols[1]:
-                        new_pw = st.text_input("Set New Password", type="password", key="admin_pw")
-                        if st.button("Update Password", key="update_pw"):
-                            if not new_pw:
-                                st.error("Enter a new password.")
-                            else:
-                                if admin_change_password(selected["id"], new_pw):
-                                    st.success("Password updated.")
-                                else:
-                                    st.error("Failed to update password.")
+                    with prof_btn_cols[1]:
+                        if st.button("Set Password…", key="set_password_btn"):
+                            set_password_dialog(selected)
 
-                with c2:
-                    st.markdown("**Stats**")
+                with prefs_tab:
+                    if db_user:
+                        pref_cols = st.columns(3)
+                        with pref_cols[0]:
+                            p_show_sql = st.checkbox("Show SQL", value=db_user.show_sql)
+                            p_show_table = st.checkbox("Show Table", value=db_user.show_table)
+                            p_plotly = st.checkbox("Show Plotly Code", value=db_user.show_plotly_code)
+                            p_chart = st.checkbox("Show Chart", value=db_user.show_chart)
+                        with pref_cols[1]:
+                            p_history = st.checkbox("Show Question History", value=db_user.show_question_history)
+                            p_summary = st.checkbox("Show Summary", value=db_user.show_summary)
+                            p_voice = st.checkbox("Voice Input", value=db_user.voice_input)
+                            p_speak = st.checkbox("Speak Summary", value=db_user.speak_summary)
+                        with pref_cols[2]:
+                            p_suggested = st.checkbox("Show Suggested", value=db_user.show_suggested)
+                            p_followup = st.checkbox("Show Follow-up", value=db_user.show_followup)
+                            p_elapsed = st.checkbox("Show Elapsed Time", value=db_user.show_elapsed_time)
+                            p_llm = st.checkbox("LLM Fallback", value=db_user.llm_fallback)
+
+                        if st.button("Save Preferences", key="save_prefs", type="primary"):
+                            ok = update_user_preferences(
+                                selected["id"],
+                                show_sql=p_show_sql,
+                                show_table=p_show_table,
+                                show_plotly_code=p_plotly,
+                                show_chart=p_chart,
+                                show_question_history=p_history,
+                                show_summary=p_summary,
+                                voice_input=p_voice,
+                                speak_summary=p_speak,
+                                show_suggested=p_suggested,
+                                show_followup=p_followup,
+                                show_elapsed_time=p_elapsed,
+                                llm_fallback=p_llm,
+                            )
+                            if ok:
+                                st.success("Preferences saved.")
+                            else:
+                                st.error("Failed to save preferences.")
+                    else:
+                        st.info("Preferences unavailable.")
+
+                with activity_tab:
                     s = stats_map.get(
-                        selected["id"], {"questions": 0, "charts": 0, "errors": 0, "dataframes": 0, "summaries": 0}
+                        selected["id"],
+                        {"questions": 0, "charts": 0, "errors": 0, "dataframes": 0, "summaries": 0},
                     )
-                    m1, m2, m3 = st.columns(3)
+                    m1, m2, m3, m4, m5 = st.columns(5)
                     m1.metric("Questions", s["questions"])
                     m2.metric("Charts", s["charts"])
                     m3.metric("Errors", s["errors"])
-                    m4, m5 = st.columns(2)
                     m4.metric("DataFrames", s["dataframes"])
                     m5.metric("Summaries", s["summaries"])
 
-                st.divider()
-                st.markdown("**Preferences**")
-                if db_user:
-                    pref_cols = st.columns(3)
-                    with pref_cols[0]:
-                        p_show_sql = st.checkbox("Show SQL", value=db_user.show_sql)
-                        p_show_table = st.checkbox("Show Table", value=db_user.show_table)
-                        p_plotly = st.checkbox("Show Plotly Code", value=db_user.show_plotly_code)
-                        p_chart = st.checkbox("Show Chart", value=db_user.show_chart)
-                    with pref_cols[1]:
-                        p_history = st.checkbox("Show Question History", value=db_user.show_question_history)
-                        p_summary = st.checkbox("Show Summary", value=db_user.show_summary)
-                        p_voice = st.checkbox("Voice Input", value=db_user.voice_input)
-                        p_speak = st.checkbox("Speak Summary", value=db_user.speak_summary)
-                    with pref_cols[2]:
-                        p_suggested = st.checkbox("Show Suggested", value=db_user.show_suggested)
-                        p_followup = st.checkbox("Show Follow-up", value=db_user.show_followup)
-                        p_elapsed = st.checkbox("Show Elapsed Time", value=db_user.show_elapsed_time)
-                        p_llm = st.checkbox("LLM Fallback", value=db_user.llm_fallback)
+                    range_choice = st.radio(
+                        "Range", options=["7 days", "30 days"], horizontal=True, key="stats_range"
+                    )
+                    days = 7 if range_choice.startswith("7") else 30
+                    daily = get_user_daily_stats(selected["id"], days=days)
+                    if daily:
+                        import plotly.express as px
 
-                    if st.button("Save Preferences", key="save_prefs", type="primary"):
-                        ok = update_user_preferences(
-                            selected["id"],
-                            show_sql=p_show_sql,
-                            show_table=p_show_table,
-                            show_plotly_code=p_plotly,
-                            show_chart=p_chart,
-                            show_question_history=p_history,
-                            show_summary=p_summary,
-                            voice_input=p_voice,
-                            speak_summary=p_speak,
-                            show_suggested=p_suggested,
-                            show_followup=p_followup,
-                            show_elapsed_time=p_elapsed,
-                            llm_fallback=p_llm,
+                        chart_df = pd.DataFrame(daily)
+                        chart_df["date"] = pd.to_datetime(chart_df["date"])
+                        melted = chart_df.melt(
+                            id_vars=["date"],
+                            value_vars=["questions", "charts", "errors", "dataframes", "summaries"],
+                            var_name="metric",
+                            value_name="count",
                         )
-                        if ok:
-                            st.success("Preferences saved.")
-                        else:
-                            st.error("Failed to save preferences.")
+                        fig = px.line(melted, x="date", y="count", color="metric", markers=True)
+                        fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), legend_title_text="")
+                        st.plotly_chart(fig, use_container_width=True)
 
-                st.divider()
-                st.markdown("**Danger Zone**")
-                colz = st.columns([1, 2])
-                with colz[0]:
-                    confirm = st.text_input("Type username to confirm delete", key="confirm_del")
-                with colz[1]:
-                    if st.button("Delete User", type="primary"):
-                        if confirm != selected["username"]:
-                            st.error("Confirmation does not match username.")
+                    with st.expander("Recent Questions"):
+                        if st.session_state.get("q_selected_user_id") != selected["id"]:
+                            st.session_state["q_selected_user_id"] = selected["id"]
+                            st.session_state["q_page_num"] = 1
+                        if "q_page_num" not in st.session_state:
+                            st.session_state["q_page_num"] = 1
+                        if "q_page_bump" in st.session_state:
+                            st.session_state["q_page_num"] = max(
+                                1,
+                                int(st.session_state.get("q_page_num", 1))
+                                + int(st.session_state["q_page_bump"]),
+                            )
+                            del st.session_state["q_page_bump"]
+
+                        colq1, colq2, colq3 = st.columns([1, 1, 6])
+                        with colq1:
+                            page_size = st.selectbox(
+                                "Page size", options=[25, 50, 100], index=1, key="q_page_size"
+                            )
+                        with colq2:
+                            st.number_input("Page", min_value=1, step=1, key="q_page_num")
+                            page = int(st.session_state["q_page_num"])
+
+                        page_data = get_user_questions_page(
+                            selected["id"], page=int(page), page_size=int(page_size)
+                        )
+                        items = page_data.get("items", [])
+                        total = page_data.get("total", 0)
+
+                        if items:
+                            qdf = pd.DataFrame(items)
+                            qdf.rename(
+                                columns={
+                                    "question": "Question",
+                                    "created_at": "Asked At",
+                                    "status": "Status",
+                                    "elapsed_seconds": "Elapsed (s)",
+                                },
+                                inplace=True,
+                            )
+                            st.dataframe(qdf, use_container_width=True, hide_index=True)
+
+                            total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
+                            cprev, cinfo, cnext = st.columns([1, 3, 1])
+                            with cprev:
+                                st.button(
+                                    "Prev",
+                                    disabled=int(page) <= 1,
+                                    on_click=lambda: st.session_state.update({"q_page_bump": -1}),
+                                )
+                            with cinfo:
+                                st.caption(f"Page {int(page)} of {total_pages} • {total} total")
+                            with cnext:
+                                st.button(
+                                    "Next",
+                                    disabled=int(page) >= total_pages,
+                                    on_click=lambda: st.session_state.update({"q_page_bump": 1}),
+                                )
+
+                            all_rows = []
+                            all_page_size = 1000
+                            remaining = total
+                            page_iter = 1
+                            while remaining > 0 and page_iter <= 100:  # safety cap
+                                p = get_user_questions_page(
+                                    selected["id"], page=page_iter, page_size=all_page_size
+                                )
+                                all_rows.extend(p.get("items", []))
+                                if len(p.get("items", [])) < all_page_size:
+                                    break
+                                remaining -= len(p.get("items", []))
+                                page_iter += 1
+                            if all_rows:
+                                all_df = pd.DataFrame(all_rows)
+                                all_df.rename(
+                                    columns={
+                                        "question": "Question",
+                                        "created_at": "Asked At",
+                                        "status": "Status",
+                                        "elapsed_seconds": "Elapsed (s)",
+                                    },
+                                    inplace=True,
+                                )
+                                csv_bytes = all_df.to_csv(index=False).encode("utf-8")
+                                st.download_button(
+                                    label="Download all questions (.csv)",
+                                    data=csv_bytes,
+                                    file_name=f"{selected['username']}_questions.csv",
+                                    mime="text/csv",
+                                )
                         else:
-                            if delete_user(selected["id"]):
-                                st.success("User deleted.")
-                                st.rerun()
-                            else:
-                                st.error("Failed to delete user.")
-            else:
-                st.info("No users found.")
+                            st.info("No questions found.")
+
+                with danger_tab:
+                    if st.button("Delete User", type="primary", key="danger_delete_user_btn"):
+                        confirm_destructive(
+                            body_md=(
+                                f"Permanently deletes user **{selected['username']}** "
+                                f"({selected['first_name']} {selected['last_name']}, {selected['role_name']}). "
+                                "Their account, preferences, and message history will be removed."
+                            ),
+                            token="DELETE",
+                            on_confirm=lambda: _delete_and_rerun(selected["id"]),
+                            button_label="Delete User",
+                        )
