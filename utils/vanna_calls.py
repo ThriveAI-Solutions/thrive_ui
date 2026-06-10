@@ -22,6 +22,7 @@ from vanna.legacy.vannadb import VannaDB_VectorStore
 
 from utils.chromadb_vector import ThriveAI_ChromaDB
 from utils.milvus_vector import ThriveAI_Milvus
+from utils.thriveai_base import dialect_cheatsheet
 from utils.quick_logger import calculate_process_performance, get_logger, pvlog, set_start_time
 from utils.thriveai_ollama import ThriveAI_Ollama
 
@@ -221,6 +222,8 @@ class MyVannaAnthropicChromaDB(ThriveAI_ChromaDB, Anthropic_Chat):
                     "model": st.secrets["ai_keys"]["anthropic_model"],
                 },
             )
+            self.schema = st.secrets["postgres"].get("schema_name", "public")
+            self.dialect = st.secrets["postgres"].get("dialect", "postgresql")
         except Exception as e:
             logger.exception("Error Configuring MyVannaAnthropicChromaDB: %s", e)
             raise
@@ -302,6 +305,9 @@ class MyVannaOllamaChromaDB(ThriveAI_ChromaDB, ThriveAI_Ollama):
             except Exception as ollama_init_err:
                 # In production we rely on ThriveAI_Ollama; silently ignore base call issues
                 logger.debug("Skipping base Ollama init: %s", ollama_init_err)
+            # Make dialect authoritative on the outer class so downstream code
+            # doesn't depend on which __init__ ran last.
+            self.dialect = st.secrets["postgres"].get("dialect", "postgresql")
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllamaChromaDB: %s", e)
             raise
@@ -345,6 +351,9 @@ class MyVannaGeminiChromaDB(ThriveAI_ChromaDB, GoogleGeminiChat):
 
             logger.info(f"🎉 Fixed GoogleGeminiChat to use: {self.configured_model}")
 
+            self.schema = st.secrets["postgres"].get("schema_name", "public")
+            self.dialect = st.secrets["postgres"].get("dialect", "postgresql")
+
         except Exception as e:
             logger.exception("Error Configuring MyVannaGeminiChromaDB: %s", e)
             raise
@@ -373,6 +382,9 @@ class MyVannaGeminiMilvus(ThriveAI_Milvus, GoogleGeminiChat):
             genai.configure(api_key=self.configured_api_key)
             self.chat_model = genai.GenerativeModel(self.configured_model)
             self.model = self.configured_model
+
+            self.schema = st.secrets["postgres"].get("schema_name", "public")
+            self.dialect = st.secrets["postgres"].get("dialect", "postgresql")
         except Exception as e:
             logger.exception("Error Configuring MyVannaGeminiMilvus: %s", e)
             raise
@@ -411,6 +423,9 @@ class MyVannaOllamaMilvus(ThriveAI_Milvus, ThriveAI_Ollama):
                 self.static_documentation = ""
             if not hasattr(self, "language"):
                 self.language = None
+            # Authoritative dialect on the outer class (ThriveAI_Ollama already
+            # reads it from config, but other code paths look it up here).
+            self.dialect = st.secrets["postgres"].get("dialect", "postgresql")
         except Exception as e:
             logger.exception("Error Configuring MyVannaOllamaMilvus: %s", e)
             raise
@@ -477,6 +492,8 @@ class MyVannaOllamaMilvus(ThriveAI_Milvus, ThriveAI_Ollama):
             f"6. Ensure that the output SQL is {self.dialect}-compliant and executable, and free of syntax errors. \n"
         )
 
+        initial_prompt += dialect_cheatsheet(getattr(self, "dialect", None))
+
         initial_prompt += "===Similar Question and SQL Examples \n"
 
         message_log = [self.system_message(initial_prompt)]
@@ -515,6 +532,7 @@ class MyVannaOpenAIMilvus(ThriveAI_Milvus, OpenAI_Chat):
                 self.static_documentation = ""
             if not hasattr(self, "language"):
                 self.language = None
+            self.dialect = st.secrets["postgres"].get("dialect", "postgresql")
         except Exception as e:
             logger.exception("Error Configuring MyVannaOpenAIMilvus: %s", e)
             raise
@@ -580,6 +598,8 @@ class MyVannaOpenAIMilvus(ThriveAI_Milvus, OpenAI_Chat):
             "5. If the question has been asked and answered before, please repeat the answer exactly as it was given before. \n"
             f"6. Ensure that the output SQL is {self.dialect}-compliant and executable, and free of syntax errors. \n"
         )
+
+        initial_prompt += dialect_cheatsheet(getattr(self, "dialect", None))
 
         initial_prompt += "===Similar Question and SQL Examples \n"
 
@@ -1711,7 +1731,48 @@ class VannaService:
         return query
 
     def _build_index_query(self, schema_name: str, forbidden_tables_str: str) -> str:
-        """Build PostgreSQL query to discover index definitions."""
+        """Build a query to discover index definitions.
+
+        Branches on ``self.dialect`` because the column-list aggregation differs:
+        PostgreSQL uses ``STRING_AGG(... ORDER BY array_position(...))`` against
+        ``pg_index``/``pg_attribute``, while Redshift exposes index-like
+        information through ``SVV_REDSHIFT_COLUMNS``/``information_schema`` and
+        needs ``LISTAGG(...) WITHIN GROUP (ORDER BY ...)``.
+        """
+        dialect = (getattr(self, "dialect", "postgresql") or "postgresql").lower()
+        if dialect == "redshift":
+            # Redshift doesn't store true indexes the way Postgres does, but it
+            # surfaces sort/dist/primary-key column metadata through
+            # information_schema.table_constraints + key_column_usage. We approximate
+            # the Postgres result shape (one row per constraint, comma-joined column
+            # list) so downstream consumers don't need to care which warehouse we hit.
+            query = f"""
+                SELECT
+                    kcu.table_name AS table_name,
+                    tc.constraint_name AS index_name,
+                    CASE WHEN tc.constraint_type = 'UNIQUE' OR tc.constraint_type = 'PRIMARY KEY'
+                         THEN 'UNIQUE' ELSE 'NONUNIQUE' END AS index_type,
+                    CASE WHEN tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+                         THEN TRUE ELSE FALSE END AS is_unique,
+                    CASE WHEN tc.constraint_type = 'PRIMARY KEY'
+                         THEN TRUE ELSE FALSE END AS is_primary_key,
+                    LISTAGG(kcu.column_name, ', ') WITHIN GROUP (ORDER BY kcu.ordinal_position) AS columns
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    AND tc.table_schema = kcu.table_schema
+                WHERE tc.table_schema = '{schema_name}'
+                  AND tc.constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+            """
+            if forbidden_tables_str:
+                query += f" AND kcu.table_name NOT IN ({forbidden_tables_str})"
+            query += (
+                " GROUP BY kcu.table_name, tc.constraint_name, tc.constraint_type"
+                " ORDER BY kcu.table_name, tc.constraint_name"
+            )
+            return query
+
+        # Default: PostgreSQL
         query = f"""
             SELECT
                 t.relname AS table_name,
@@ -3792,9 +3853,7 @@ def _parse_markdown_table(text: str) -> str | None:
 
     def _is_separator(line: str) -> bool:
         return "|" in line and all(
-            part.strip().replace("-", "").replace(":", "") == ""
-            for part in line.split("|")
-            if part.strip()
+            part.strip().replace("-", "").replace(":", "") == "" for part in line.split("|") if part.strip()
         )
 
     # Slide through lines looking for: pipe-line, separator, pipe-line (header + sep + data)

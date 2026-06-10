@@ -111,6 +111,11 @@ user = "postgres"
 password = "postgres"
 schema_name = "public"
 object_type = "tables"   # or "views"
+# dialect = "postgresql" # "postgresql" (default) or "redshift" — controls the
+                         # SQL dialect the LLM is prompted to emit. When set to
+                         # "redshift" the system prompt includes a cheat-sheet
+                         # (LISTAGG vs STRING_AGG, no CORR, etc.) and the
+                         # hardcoded index-introspection query branches.
 
 [analytics_db]
 # Read-only warehouse the agent's clinical-data tools query against.

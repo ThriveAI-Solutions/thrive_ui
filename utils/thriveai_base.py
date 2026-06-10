@@ -5,6 +5,30 @@ from utils.quick_logger import get_logger
 logger = get_logger(__name__)
 
 
+_REDSHIFT_CHEATSHEET = (
+    "===Dialect Notes (Redshift) \n"
+    "Redshift differs from PostgreSQL in several places. When you emit SQL:\n"
+    " - Use LISTAGG(col, ', ') WITHIN GROUP (ORDER BY ...) instead of STRING_AGG(... ORDER BY ...).\n"
+    " - Redshift has no CORR() aggregate; compute correlation manually with AVG/STDDEV if needed.\n"
+    " - Do not use array_position(), array_agg(), or other Postgres array helpers.\n"
+    " - SUBSTRING(col FROM x FOR y) is portable; prefer it over SUBSTR variants.\n"
+    " - EXTRACT(YEAR FROM col), DATE_TRUNC, and CAST are all supported.\n"
+    " - Identifier quoting uses double quotes; string literals use single quotes.\n"
+)
+
+
+def dialect_cheatsheet(dialect: str | None) -> str:
+    """Return dialect-specific guidance for the system prompt.
+
+    Empty string when the active dialect doesn't need extra rules
+    (e.g. the default PostgreSQL path, which matches the bulk of our
+    training examples).
+    """
+    if (dialect or "").lower() == "redshift":
+        return _REDSHIFT_CHEATSHEET
+    return ""
+
+
 class ThriveAI_Base(VannaBase):
     """Base class for ThriveAI"""
 
@@ -12,6 +36,7 @@ class ThriveAI_Base(VannaBase):
         super().__init__(*args, **kwargs)
 
         self.schema = self.config.get("schema", "public")
+        self.dialect = self.config.get("dialect", getattr(self, "dialect", "postgresql"))
 
     def log(self, message: str, title: str = "Info"):
         """Override the deault log method, which is print, to use the logger."""
@@ -73,6 +98,8 @@ class ThriveAI_Base(VannaBase):
             f"6. Ensure that the output SQL is {self.dialect}-compliant and executable, and free of syntax errors. \n"
             f"7. Make sure to fully qualify table names with the schema name {self.schema}, even if not specified in the ddl. Eg. SELECT * FROM dw.customers;\n"
         )
+
+        initial_prompt += dialect_cheatsheet(self.dialect)
 
         initial_prompt += "=== Example Question/SQL Pairs \n"
 
