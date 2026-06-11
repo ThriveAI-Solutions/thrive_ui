@@ -568,6 +568,9 @@ class AgentRun(Base):
         Index("ix_thrive_agent_run_selected_patient", "selected_patient_source_id"),
         Index("ix_thrive_agent_run_status", "status"),
         Index("ix_thrive_agent_run_review_status", "review_status"),
+        # Backs the LEFT JOIN added by the Question Audit Scope filter
+        # (Epic #166 / Feature #167). Matching migration: 188ab391e291.
+        Index("ix_thrive_agent_run_user_message_id", "user_message_id"),
     )
 
     id = Column(Integer, primary_key=True)
