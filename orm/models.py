@@ -163,7 +163,11 @@ class UserRole(Base):
 class User(Base):
     __tablename__ = "thrive_user"
     id = Column(Integer, primary_key=True)
-    user_role_id = Column(Integer, ForeignKey("thrive_user_role.id"))
+    # Required per Epic #179 — every user must resolve to a UserRole so the
+    # audit-trail / role-restricted RAG paths never see NULL role rows. The
+    # Alembic revision require_user_email_org_role (rev 7b3a1f0c92d4) backfills
+    # existing NULL rows with the PATIENT role before applying NOT NULL.
+    user_role_id = Column(Integer, ForeignKey("thrive_user_role.id"), nullable=False)
     # 320 aligns with email max length for OIDC JIT users (username defaults to email or sub).
     username = Column(String(320), nullable=False, unique=True)
     first_name = Column(String(50), nullable=False)
@@ -171,12 +175,17 @@ class User(Base):
     # OIDC-only users store a reserved non-hash sentinel here so legacy SQLite
     # databases with NOT NULL password constraints can JIT-provision them.
     password = Column(String(255), nullable=False)
-    # OIDC fields (NULL for local-only users; populated for users who
-    # authenticate via Okta SSO). See
+    # OIDC fields. `okta_sub` is NULL for local-only users; populated for users
+    # who authenticate via Okta SSO. See
     # docs/superpowers/specs/2026-05-01-okta-oidc-integration-design.md §5.
     okta_sub = Column(String(255), nullable=True, unique=True)
-    email = Column(String(320, collation="NOCASE"), nullable=True, unique=True)
-    organization = Column(String(120), nullable=True)
+    # `email` and `organization` are required per Epic #179 — the audit trail
+    # organization filter and role-restricted RAG retrieval both depend on them
+    # being populated. OIDC JIT provisioning enforces a hard error if the IdP
+    # omits `email`, and derives `organization` from the email domain when the
+    # claim is missing (logged at WARN). See utils/okta_auth.sync_okta_user_to_db.
+    email = Column(String(320, collation="NOCASE"), nullable=False, unique=True)
+    organization = Column(String(120), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
     show_sql = Column(Boolean, default=True)
@@ -733,12 +742,18 @@ def seed_initial_data(session):
 
     session.commit()  # Commit roles before users to ensure role IDs are available
 
-    # Seed Users
+    # Seed Users. Per Epic #179 email + organization are required (NOT NULL);
+    # the seed values use the canonical thriveai.com domain and "ThriveAI"
+    # organization so a fresh DB satisfies the constraint without admin
+    # intervention. Existing dev DBs are migrated separately by the
+    # require_user_email_org_role revision.
     users_to_seed = [
         {
             "username": "thriveai-kr",
             "first_name": "Kyle",
             "last_name": "Root",
+            "email": "thriveai-kr@thriveai.com",
+            "organization": "ThriveAI",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
             "role_name": "Admin",
@@ -747,6 +762,8 @@ def seed_initial_data(session):
             "username": "thriveai-je",
             "first_name": "Joseph",
             "last_name": "Eberle",
+            "email": "thriveai-je@thriveai.com",
+            "organization": "ThriveAI",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
             "role_name": "Admin",
@@ -755,6 +772,8 @@ def seed_initial_data(session):
             "username": "thriveai-as",
             "first_name": "Al",
             "last_name": "Seoud",
+            "email": "thriveai-as@thriveai.com",
+            "organization": "ThriveAI",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
             "role_name": "Admin",
@@ -763,6 +782,8 @@ def seed_initial_data(session):
             "username": "thriveai-fm",
             "first_name": "Frank",
             "last_name": "Metty",
+            "email": "thriveai-fm@thriveai.com",
+            "organization": "ThriveAI",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
             "role_name": "Admin",
@@ -771,6 +792,8 @@ def seed_initial_data(session):
             "username": "thriveai-dr",
             "first_name": "Dr.",
             "last_name": "Smith",
+            "email": "thriveai-dr@thriveai.com",
+            "organization": "ThriveAI",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
             "role_name": "Doctor",
@@ -779,6 +802,8 @@ def seed_initial_data(session):
             "username": "thriveai-re",
             "first_name": "Rob",
             "last_name": "Enderle",
+            "email": "thriveai-re@thriveai.com",
+            "organization": "ThriveAI",
             "show_summary": True,
             "password": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
             "role_name": "Admin",
