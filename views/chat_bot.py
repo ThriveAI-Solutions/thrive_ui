@@ -107,30 +107,6 @@ def _render_selected_patient_sidebar() -> None:
 _RESET_CONFIRM_WINDOW_SECONDS = 5.0
 
 
-def _agentic_mode_is_on() -> bool:
-    """Live ``agentic_mode`` state for sidebar gating.
-
-    Reads the dialog checkbox's widget state first (key
-    ``agentic_mode_dialog_checkbox``) so toggling the checkbox in an
-    open Settings dialog reflects in the sidebar on the SAME rerun.
-    Streamlit writes widget state before the rerun body executes, so
-    the sidebar — which renders earlier in the script than the dialog
-    body — sees the new value immediately.
-
-    Falls back to ``st.session_state["agentic_mode"]`` (populated by
-    :func:`orm.functions.set_user_preferences_in_session_state` from the
-    persisted user preference) when the checkbox hasn't been rendered
-    yet this session.
-
-    Default ``True`` — admins / fresh sessions with no preference see
-    the agentic surfaces by default.
-    """
-    widget_state = st.session_state.get("agentic_mode_dialog_checkbox")
-    if widget_state is not None:
-        return bool(widget_state)
-    return bool(st.session_state.get("agentic_mode", True))
-
-
 def _render_reset_agent_sidebar() -> None:
     """Sidebar container that clears all agent-side conversation state.
 
@@ -138,9 +114,17 @@ def _render_reset_agent_sidebar() -> None:
     is only rendered when the user has agentic mode enabled. Legacy
     Vanna users see nothing here — clearing agent state doesn't affect
     the Vanna pipeline, so showing the button would imply an
-    interaction that has no effect. The gate uses
-    :func:`_agentic_mode_is_on` so toggling the dialog checkbox updates
-    the sidebar live without needing a page refresh.
+    interaction that has no effect.
+
+    The gate reads ``st.session_state["agentic_mode"]`` directly. This is
+    populated from the persisted user preference by
+    :func:`orm.functions.set_user_preferences_in_session_state`, which
+    runs at the top of every script rerun. Commit-on-close semantics:
+    toggling the dialog checkbox writes to session_state inside the
+    dialog body, but the sidebar already rendered higher in the script
+    on the toggle's rerun, so the sidebar does NOT update live while
+    the dialog is open. When the dialog closes, the next rerun re-reads
+    the (now-saved) DB value and the sidebar updates.
 
     Two-state UX:
       - Idle: a single "Reset agent" button. Clicking it arms the
@@ -151,7 +135,9 @@ def _render_reset_agent_sidebar() -> None:
     The arming flag is checked lazily on each render and on click — no
     background timers. Expired arming silently returns to Idle.
     """
-    if not _agentic_mode_is_on():
+    # Default to True so admins / fresh sessions with no persisted
+    # preference still see the button.
+    if not st.session_state.get("agentic_mode", True):
         return
 
     armed_at = st.session_state.get("_pending_agent_reset_at")

@@ -13,7 +13,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 
-def _make_st_stub(*, agentic_mode=None, checkbox_state=None):
+def _make_st_stub(*, agentic_mode):
     """MagicMock-based stub for ``views.chat_bot.st``.
 
     ``session_state`` is a real dict (so ``get`` / ``setdefault`` work),
@@ -22,18 +22,15 @@ def _make_st_stub(*, agentic_mode=None, checkbox_state=None):
     spy we can introspect later.
 
     ``agentic_mode`` seeds the persisted-preference key
-    (``st.session_state["agentic_mode"]``). ``checkbox_state`` seeds the
-    dialog checkbox widget-state key
-    (``st.session_state["agentic_mode_dialog_checkbox"]``) which the
-    sidebar gate prefers when present.
+    (``st.session_state["agentic_mode"]``) which the sidebar gate reads
+    directly. Commit-on-close semantics: the gate only reads this key
+    (NOT the dialog checkbox's widget-state key), so the sidebar
+    doesn't update live while the dialog is open — it picks up the
+    new value on the next rerun (which fires when the dialog closes
+    and ``set_user_preferences_in_session_state`` re-reads from DB).
     """
     stub = MagicMock()
-    session = {}
-    if agentic_mode is not None:
-        session["agentic_mode"] = agentic_mode
-    if checkbox_state is not None:
-        session["agentic_mode_dialog_checkbox"] = checkbox_state
-    stub.session_state = session
+    stub.session_state = {} if agentic_mode is None else {"agentic_mode": agentic_mode}
     # Make ``with st.sidebar.container():`` work as a context manager.
     stub.sidebar.container.return_value.__enter__ = MagicMock(return_value=MagicMock())
     stub.sidebar.container.return_value.__exit__ = MagicMock(return_value=False)
@@ -91,52 +88,36 @@ def test_reset_agent_visible_when_agentic_mode_absent():
 
 
 # ---------------------------------------------------------------------------
-# Live-update tests — the sidebar reads the dialog checkbox's widget
-# state so toggling reflects on the same rerun (no page refresh needed).
+# Commit-on-close guarantee — the sidebar ignores the dialog checkbox's
+# widget-state key. It reads only ``agentic_mode``, which gets refreshed
+# from the DB on the next rerun (which fires when the dialog closes).
 # ---------------------------------------------------------------------------
 
 
-def test_sidebar_prefers_checkbox_widget_state_when_set():
-    """Even if ``agentic_mode`` persists as True, an unchecked dialog
-    checkbox (``agentic_mode_dialog_checkbox = False``) must hide the
-    sidebar on the same rerun. This is the bug fix: toggling the
-    checkbox in an open dialog updates the sidebar live."""
+def test_sidebar_does_not_read_dialog_checkbox_widget_state():
+    """If the dialog checkbox's widget state disagrees with the
+    persisted ``agentic_mode`` (e.g., user toggled checkbox in an open
+    dialog but the rerun hasn't yet propagated through DB), the
+    sidebar must reflect the PERSISTED value, not the in-flight
+    checkbox state. This enforces commit-on-close: sidebar updates
+    only after the dialog closes and ``set_user_preferences_in_session_state``
+    refreshes ``agentic_mode`` from the DB."""
     from views import chat_bot
 
-    stub = _make_st_stub(agentic_mode=True, checkbox_state=False)
-    with patch.object(chat_bot, "st", stub):
-        chat_bot._render_reset_agent_sidebar()
-
-    stub.sidebar.container.assert_not_called()
-
-
-def test_sidebar_prefers_checkbox_widget_state_when_on():
-    """``agentic_mode_dialog_checkbox = True`` shows the sidebar even
-    when ``agentic_mode`` mirror hasn't been refreshed yet (e.g., the
-    DB hasn't been re-read this rerun)."""
-    from views import chat_bot
-
-    stub = _make_st_stub(agentic_mode=False, checkbox_state=True)
+    # Persisted preference says True (sidebar should be visible). The
+    # in-flight checkbox state says False (user toggled but hasn't
+    # closed the dialog yet).
+    stub = _make_st_stub(agentic_mode=True)
+    stub.session_state["agentic_mode_dialog_checkbox"] = False
     with (
         patch.object(chat_bot, "st", stub),
         patch.object(chat_bot.time, "time", return_value=1000.0),
     ):
         chat_bot._render_reset_agent_sidebar()
 
+    # Sidebar still renders because the persisted value is True, even
+    # though the in-flight checkbox state disagrees.
     stub.sidebar.container.assert_called_once()
-
-
-def test_sidebar_falls_back_to_agentic_mode_when_checkbox_absent():
-    """Before the Settings dialog has been opened in this session, the
-    checkbox widget key doesn't exist. Fall back to the persisted
-    ``agentic_mode`` value."""
-    from views import chat_bot
-
-    stub = _make_st_stub(agentic_mode=False, checkbox_state=None)
-    with patch.object(chat_bot, "st", stub):
-        chat_bot._render_reset_agent_sidebar()
-
-    stub.sidebar.container.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
