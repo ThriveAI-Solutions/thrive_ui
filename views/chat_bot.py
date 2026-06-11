@@ -432,7 +432,14 @@ def _settings_dialog_body():
         st.rerun()
 
 
-@st.dialog("Settings")
+# ``on_dismiss="rerun"`` is load-bearing for sidebar refresh: by default
+# Streamlit's ``@st.dialog`` decorator uses ``on_dismiss="ignore"``, so
+# when the user clicks off / X's out of the dialog NO rerun fires and the
+# sidebar (which reads ``st.session_state["agentic_mode"]`` from the
+# top-of-script ``set_user_preferences_in_session_state`` call) stays
+# stale. The explicit Close button below already calls ``st.rerun()``,
+# but dismissal-by-click-off needs this opt-in. Epic #171 / Feature #172.
+@st.dialog("Settings", on_dismiss="rerun")
 def settings_dialog():
     _settings_dialog_body()
 
