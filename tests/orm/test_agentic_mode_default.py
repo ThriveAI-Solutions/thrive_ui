@@ -50,6 +50,18 @@ def test_migration_turns_on_agentic_mode_for_existing_users(tmp_path):
 
     engine = create_engine(url)
     with engine.begin() as conn:
+        # Seed a minimal UserRole row so the Epic #179 migration's
+        # ``user_role_id`` backfill (head revision 7b3a1f0c92d4) has a
+        # valid FK target to point at. Production goes through
+        # ``orm.models.seed_initial_data`` between alembic.upgrade()
+        # calls, but this test exercises migrations against a raw
+        # SQLite file so we have to seed roles by hand.
+        conn.execute(
+            text(
+                "INSERT INTO thrive_user_role (id, role_name, description, role) "
+                "VALUES (4, 'Patient', 'Patient access', 'PATIENT')"
+            )
+        )
         conn.execute(
             text(
                 "INSERT INTO thrive_user (username, first_name, last_name, password, agentic_mode) "

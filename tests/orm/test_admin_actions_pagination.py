@@ -68,6 +68,7 @@ def _seed_admin(session, *, user_id=1, username="alice_admin"):
             last_name="X",
             password="hash:abc",
             email=f"{username}@x.io",
+            organization="TestOrg",  # required per Epic #179
         )
     )
     session.commit()

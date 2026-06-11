@@ -27,6 +27,87 @@ def _is_valid_email(value: str | None) -> bool:
 logger = get_logger(__name__)
 
 
+# ── Required-field validation (Epic #179) ─────────────────────────────────
+#
+# Server-authoritative validation for the three columns that became NOT NULL
+# in Alembic revision 7b3a1f0c92d4: ``email``, ``organization``,
+# ``user_role_id``. Both ``create_user`` and ``update_user`` raise
+# :class:`UserValidationError` *before* opening a DB session when any of these
+# fields are missing/empty/malformed. Other failure modes (duplicate
+# username, duplicate email, DB error) still return ``False`` so existing
+# callers that only branch on the boolean don't need a try/except.
+#
+# Field names in ``missing_fields`` use the public API names callers see in
+# the dialog forms — ``email``, ``organization``, ``role`` — so the UI can
+# map each entry directly to the offending input. ``user_role_id`` is
+# reported as ``"role"`` since that's the label on the dialog.
+
+
+class UserValidationError(ValueError):
+    """Raised when create_user / update_user receive missing or invalid required fields.
+
+    ``missing_fields`` is the ordered list of field names that failed
+    validation (e.g. ``["email", "organization", "role"]``). The UI maps
+    each entry to a per-field error message.
+    """
+
+    def __init__(self, missing_fields: list[str], message: str | None = None) -> None:
+        self.missing_fields = list(missing_fields)
+        if message is None:
+            message = f"User validation failed: missing or invalid {', '.join(self.missing_fields)}"
+        super().__init__(message)
+
+
+def _validate_required_user_fields(
+    *,
+    email: str | None,
+    organization: str | None,
+    role_id: int | None,
+    require_role_exists: bool = True,
+) -> None:
+    """Raise UserValidationError when any required field is missing/invalid.
+
+    ``email``  — must be non-empty after strip and match the lightweight regex.
+    ``organization`` — must be non-empty after strip.
+    ``role_id`` — must be a positive int and (when ``require_role_exists``)
+                  point to an existing ``thrive_user_role`` row.
+
+    Called by ``create_user`` (with all three values required) and by
+    ``update_user`` (only checks values the caller is actually changing —
+    None means "don't touch").
+    """
+    missing: list[str] = []
+
+    # Email
+    if not _is_valid_email(email):
+        missing.append("email")
+
+    # Organization
+    if organization is None or not organization.strip():
+        missing.append("organization")
+
+    # Role
+    if role_id is None or not isinstance(role_id, int) or isinstance(role_id, bool) or role_id <= 0:
+        missing.append("role")
+    elif require_role_exists:
+        # Cheap FK check — keeps a bad role_id from getting through and
+        # cascading into a less actionable IntegrityError downstream.
+        try:
+            with SessionLocal() as session:
+                exists = session.query(UserRole.id).filter(UserRole.id == role_id).first()
+            if exists is None:
+                missing.append("role")
+        except Exception as exc:
+            # If the role table is unreachable we can't verify the FK; log
+            # and treat it as a missing role so the caller sees the error
+            # rather than a downstream IntegrityError.
+            logger.warning("Could not verify role_id=%s exists: %s", role_id, exc)
+            missing.append("role")
+
+    if missing:
+        raise UserValidationError(missing)
+
+
 def _get_current_user_id() -> int | None:
     """Get the current user ID from session state cookies."""
     try:
@@ -145,9 +226,7 @@ def set_user_preferences_in_session_state():
         st.session_state.show_elapsed_time = user.show_elapsed_time
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.confirm_magic_commands = getattr(user, "confirm_magic_commands", True)
-        st.session_state.show_community_engagement = bool(
-            getattr(user, "show_community_engagement", False) or False
-        )
+        st.session_state.show_community_engagement = bool(getattr(user, "show_community_engagement", False) or False)
         agentic_pref = getattr(user, "agentic_mode", True)
         st.session_state.agentic_mode = bool(agentic_pref) if agentic_pref is not None else True
         st.session_state.min_message_id = user.min_message_id
@@ -234,25 +313,32 @@ def create_user(
         theme: Optional theme preference.
 
     Returns:
-        bool: True if user was created successfully, False otherwise
+        bool: True if the user was created. ``False`` for non-validation
+        failures (duplicate username, duplicate email, DB error) so
+        existing callers that branch on bool don't need a try/except.
+
+    Raises:
+        UserValidationError: When ``email``, ``organization``, or
+        ``role_id`` are missing/empty/malformed. Carries the list of
+        offending field names via ``missing_fields`` so the UI can render
+        per-field error messages. Epic #179.
     """
+    # Trim surrounding whitespace so a stray space (e.g. typed into the
+    # admin create-user form) can't silently break login — credential
+    # checks match on the exact stored username. Password is intentionally
+    # left untouched.
+    username = (username or "").strip()
+    first_name = (first_name or "").strip()
+    last_name = (last_name or "").strip()
+    email = (email or "").strip()
+    organization = (organization or "").strip()
+
+    # Server-authoritative required-field validation (Epic #179) — runs
+    # *before* opening a session. UserValidationError carries the list of
+    # missing fields so UI callers can render per-field error messages.
+    _validate_required_user_fields(email=email, organization=organization, role_id=role_id)
+
     try:
-        # Trim surrounding whitespace so a stray space (e.g. typed into the
-        # admin create-user form) can't silently break login — credential
-        # checks match on the exact stored username. Password is intentionally
-        # left untouched.
-        username = (username or "").strip()
-        first_name = (first_name or "").strip()
-        last_name = (last_name or "").strip()
-        email = (email or "").strip()
-        organization = (organization or "").strip()
-
-        # Validate email format and organization presence before opening a session.
-        if not _is_valid_email(email):
-            return False
-        if not organization:
-            return False
-
         with SessionLocal() as session:
             # Check if username already exists
             existing_user = session.query(User).filter(func.lower(User.username) == username.lower()).first()
@@ -370,12 +456,7 @@ def _is_admin_db(admin_id: int) -> bool:
 
     try:
         with SessionLocal() as session:
-            row = (
-                session.query(User)
-                .options(joinedload(User.role))
-                .filter(User.id == admin_id)
-                .one_or_none()
-            )
+            row = session.query(User).options(joinedload(User.role)).filter(User.id == admin_id).one_or_none()
             if row is None or row.role is None:
                 return False
             return row.role.role == RoleTypeEnum.ADMIN
@@ -459,25 +540,65 @@ def update_user(
 ) -> bool:
     """Update user details.
 
-    ``email`` and ``organization`` are keyword-only optional updates. When
-    non-None, they are stripped and validated using the same gate as
-    ``create_user``: email format via :func:`_is_valid_email` and
-    case-insensitive uniqueness against ``thrive_user``; organization
-    must be non-empty after strip. Returns ``False`` on any validation
-    failure, leaving the row unchanged.
-    """
-    try:
-        # Strip + validate the optional new fields before opening a session
-        # so a bad input doesn't even touch the DB.
-        if email is not None:
-            email = email.strip()
-            if not _is_valid_email(email):
-                return False
-        if organization is not None:
-            organization = organization.strip()
-            if not organization:
-                return False
+    Only fields with non-None kwargs are touched (legacy semantics
+    preserved). When a caller *does* pass a value for one of the three
+    required fields (``email``, ``organization``, ``role_id``), it must
+    pass validation — clearing one of them to an empty/invalid value
+    raises :class:`UserValidationError` instead of writing NULL/garbage.
 
+    Returns:
+        ``True`` on success, ``False`` for non-validation failures
+        (user not found, duplicate username/email collision, DB error).
+
+    Raises:
+        UserValidationError: When the caller passes an empty/invalid
+        value for one of the required fields. ``missing_fields`` carries
+        the offending field name(s). Epic #179.
+    """
+    # Strip the optional new fields up front so the validator and the
+    # downstream DB writes see the same canonical values.
+    if email is not None:
+        email = email.strip()
+    if organization is not None:
+        organization = organization.strip()
+
+    # Validate any required field the caller is actually trying to
+    # update. None means "don't touch" — only validate explicit values.
+    fields_to_check = {}
+    if email is not None:
+        fields_to_check["email"] = email
+    if organization is not None:
+        fields_to_check["organization"] = organization
+    if role_id is not None:
+        fields_to_check["role_id"] = role_id
+
+    if fields_to_check:
+        # Only check fields the caller passed; missing-from-update fields
+        # are explicitly not validated (legacy "None means don't touch").
+        # We do the per-field check inline rather than calling the shared
+        # validator because the shared validator requires all three.
+        missing: list[str] = []
+        if "email" in fields_to_check and not _is_valid_email(fields_to_check["email"]):
+            missing.append("email")
+        if "organization" in fields_to_check and not fields_to_check["organization"]:
+            missing.append("organization")
+        if "role_id" in fields_to_check:
+            rid = fields_to_check["role_id"]
+            if not isinstance(rid, int) or isinstance(rid, bool) or rid <= 0:
+                missing.append("role")
+            else:
+                try:
+                    with SessionLocal() as session:
+                        exists = session.query(UserRole.id).filter(UserRole.id == rid).first()
+                    if exists is None:
+                        missing.append("role")
+                except Exception as exc:
+                    logger.warning("Could not verify role_id=%s exists: %s", rid, exc)
+                    missing.append("role")
+        if missing:
+            raise UserValidationError(missing)
+
+    try:
         with SessionLocal() as session:
             user = session.query(User).filter(User.id == user_id).first()
             if not user:

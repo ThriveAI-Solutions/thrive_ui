@@ -13,6 +13,7 @@ import streamlit as st
 from pandas import DataFrame
 
 from orm.functions import (
+    UserValidationError,
     admin_change_password,
     create_user,
     delete_user,
@@ -127,22 +128,30 @@ def import_users():
                     role_id = _patient_fallback_role_id
                     logger.warning(f"Role '{role_name}' not found for user {username}, defaulting to Patient")
 
-                ok = create_user(
-                    username,
-                    password,
-                    first_name if first_name else username,
-                    last_name if last_name else "",
-                    role_id,
-                    email=email,
-                    organization=organization,
-                )
+                try:
+                    ok = create_user(
+                        username,
+                        password,
+                        first_name if first_name else username,
+                        last_name if last_name else "",
+                        role_id,
+                        email=email,
+                        organization=organization,
+                    )
+                except UserValidationError as ve:
+                    # Required-field validation per Epic #179. Surface the
+                    # specific missing fields rather than the generic "rejected"
+                    # message so the admin can fix the CSV row directly.
+                    failed_count += 1
+                    failed_users.append(
+                        f"{username}: missing or invalid required field(s) — {', '.join(ve.missing_fields)}"
+                    )
+                    continue
                 if ok:
                     success_count += 1
                 else:
                     failed_count += 1
-                    failed_users.append(
-                        f"{username}: create_user rejected (duplicate username/email, bad email format, or invalid input)"
-                    )
+                    failed_users.append(f"{username}: create_user rejected (duplicate username/email)")
 
             except Exception as e:
                 failed_count += 1
@@ -363,34 +372,72 @@ def confirm_destructive(body_md: str, token: str, on_confirm, *, button_label: s
             st.rerun()
 
 
-@st.dialog("Create User")
-def create_user_dialog():
+def _create_user_dialog_body() -> None:
+    """Body of the Create User dialog — extracted into a plain function
+    so it can be unit-tested directly without going through ``st.dialog``
+    (which requires a live Streamlit runtime). See
+    ``tests/views/test_admin_users_validation.py``.
+
+    Epic #179 enforces per-field inline error messaging for the three
+    required fields (email, organization, role). Other failure modes
+    (duplicate username/email, generic DB failure) keep the generic
+    banner since the user has no per-field action.
+    """
     roles = get_all_user_roles()
     role_id_by_name = {name: rid for rid, name, _ in roles}
     role_names = [name for rid, name, _ in roles]
     theme_options = user_selectable_themes()
-    with st.form("create_user_dialog_form", clear_on_submit=True):
+
+    # Field errors from the previous submit attempt — keyed by field name
+    # ("email", "organization", "role"). Rendered inline directly below
+    # each input on the next render. We use session_state so the messages
+    # survive the rerun that the form submit triggers; we clear stale
+    # entries at the top of every render so an old error doesn't linger
+    # on subsequent successful renders.
+    errors_key = "create_user_dialog_field_errors"
+    field_errors: dict[str, str] = st.session_state.get(errors_key, {})
+
+    with st.form("create_user_dialog_form", clear_on_submit=False):
         cu_username = st.text_input("Username")
         cu_password = st.text_input("Temporary Password", type="password")
         cu_first = st.text_input("First Name")
         cu_last = st.text_input("Last Name")
         cu_email = st.text_input("Email")
+        if "email" in field_errors:
+            st.error(field_errors["email"])
         cu_organization = st.text_input("Organization")
+        if "organization" in field_errors:
+            st.error(field_errors["organization"])
         cu_role_name = st.selectbox(
             "Role", options=role_names, index=role_names.index("Patient") if "Patient" in role_names else 0
         )
+        if "role" in field_errors:
+            st.error(field_errors["role"])
         cu_theme = st.selectbox("Theme", options=theme_options, index=0)
         submitted = st.form_submit_button("Create User", type="primary")
         if submitted:
-            if (
-                not cu_username
-                or not cu_password
-                or not cu_first
-                or not cu_email.strip()
-                or not cu_organization.strip()
-            ):
-                st.error("Please provide username, password, first name, email, and organization.")
-            else:
+            # Pre-validate the non-Epic-179 fields (username, password,
+            # first_name). The server-side validator only covers the
+            # three required-by-#179 columns; username/password are still
+            # required by other DB constraints, so block at the UI for a
+            # better message.
+            local_errors: dict[str, str] = {}
+            if not cu_username.strip():
+                local_errors["username"] = "Username is required."
+            if not cu_password:
+                local_errors["password"] = "Temporary password is required."
+            if not cu_first.strip():
+                local_errors["first_name"] = "First name is required."
+            if local_errors:
+                # Render these inline too via a banner since they're not
+                # the per-field-error contract from #179 — keep the
+                # interruption visible.
+                for msg in local_errors.values():
+                    st.error(msg)
+                st.session_state[errors_key] = {}
+                return
+
+            try:
                 ok = create_user(
                     cu_username,
                     cu_password,
@@ -401,14 +448,36 @@ def create_user_dialog():
                     organization=cu_organization,
                     theme=cu_theme,
                 )
-                if ok:
-                    st.success("User created.")
-                    st.rerun()
-                else:
-                    st.error(
-                        "Failed to create user. Possible causes: username or email already exists, "
-                        "email format is invalid."
-                    )
+            except UserValidationError as ve:
+                # Map each missing field to an inline per-field message.
+                # Keys here MUST match the field-error rendering points
+                # above ("email", "organization", "role"). See Epic #179
+                # AC: "Form shows inline, per-field error messages for
+                # missing values — not a generic save-failed banner."
+                msgs: dict[str, str] = {}
+                for field in ve.missing_fields:
+                    if field == "email":
+                        msgs["email"] = "A valid email address is required."
+                    elif field == "organization":
+                        msgs["organization"] = "Organization is required."
+                    elif field == "role":
+                        msgs["role"] = "A role must be selected."
+                st.session_state[errors_key] = msgs
+                st.rerun()
+                return
+
+            if ok:
+                st.session_state[errors_key] = {}
+                st.success("User created.")
+                st.rerun()
+            else:
+                st.session_state[errors_key] = {}
+                st.error("Failed to create user — username or email already exists.")
+
+
+@st.dialog("Create User")
+def create_user_dialog():
+    _create_user_dialog_body()
 
 
 @st.dialog("Bulk Import Users")

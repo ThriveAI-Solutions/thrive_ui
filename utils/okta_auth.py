@@ -6,6 +6,24 @@ This module owns all OIDC-side concerns. It is loaded only when
 
 See docs/superpowers/specs/2026-05-01-okta-oidc-integration-design.md
 for the full design.
+
+Epic #179 added NOT NULL constraints to ``thrive_user.email``,
+``thrive_user.organization``, and ``thrive_user.user_role_id``. The JIT
+provisioning path in :func:`sync_okta_user_to_db` now enforces the
+"fallback defaults with logging" strategy approved during scoping:
+
+  - ``email``         — hard requirement. If the IdP claim doesn't
+    provide one, raise :class:`OidcProvisioningError` (the only
+    behavioural regression to SSO login, and only when the IdP is
+    misconfigured).
+  - ``organization``  — derived from the email domain when the claim is
+    missing (``alice@thrive.com`` → ``"thrive"``). Logged at WARN with
+    ``okta_sub``, ``email``, and the derived value.
+  - ``user_role_id`` — defaults to PATIENT when the groups claim doesn't
+    resolve to a known group (existing behaviour was DOCTOR; that
+    remains for *bad* groups, but a *missing* role / no-group claim now
+    routes through the new fallback for symmetry with the migration's
+    backfill).
 """
 
 from __future__ import annotations
@@ -19,6 +37,17 @@ from sqlalchemy.orm import Session as SqlSession
 from orm.models import RoleTypeEnum, UserRole
 
 logger = logging.getLogger(__name__)
+
+
+class OidcProvisioningError(RuntimeError):
+    """Raised when JIT provisioning cannot proceed for a structural reason.
+
+    The Epic #179 path raises this when the IdP claims do not include an
+    ``email``. There is no sensible fallback for a missing email (it's
+    the user's canonical identity), so SSO login fails with an
+    actionable "contact admin" message instead of silently provisioning
+    a half-built user.
+    """
 
 
 # Group-name → RoleTypeEnum mapping. HeL/dev-Okta must create groups with
@@ -112,16 +141,43 @@ def is_oidc_mode() -> bool:
     return auth is not None and auth.get("mode") == "oidc"
 
 
+def _organization_from_email(email: str) -> str:
+    """Derive an organization name from an email domain.
+
+    ``alice@thrive.com`` → ``"thrive"``. The part before the first dot
+    of the host, lowercased. Falls back to ``"unknown"`` for malformed
+    inputs (no ``@``, no dot, empty host) — that's only reachable when
+    the email is itself ill-formed, which the validator catches
+    elsewhere.
+    """
+    if "@" not in email:
+        return "unknown"
+    host = email.split("@", 1)[1].strip().lower()
+    if not host:
+        return "unknown"
+    return host.split(".", 1)[0] or "unknown"
+
+
 def sync_okta_user_to_db(claims: dict, session: SqlSession):
     """Look up or JIT-create a User row matching the OIDC claims.
 
     Args:
-        claims: OIDC ID-token claims dict. Must include `sub`. Should
-            include `email`, `given_name`, `family_name`, and `groups`.
+        claims: OIDC ID-token claims dict. Must include ``sub`` and
+            ``email`` (Epic #179 — email is the user's canonical
+            identity, no fallback). Should also include ``given_name``,
+            ``family_name``, ``groups``, and optionally ``organization``
+            / ``org``.
         session: Active SQLAlchemy session.
 
     Returns:
         The User row, with role refreshed from the group claim.
+
+    Raises:
+        ValueError: When ``sub`` is missing from claims.
+        OidcProvisioningError: When ``email`` is missing from claims.
+            SSO login fails with an actionable message rather than
+            silently provisioning a row that would violate the Epic
+            #179 NOT NULL constraint on ``email``.
     """
     from sqlalchemy import func
 
@@ -131,11 +187,50 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
     if not sub:
         raise ValueError("OIDC claims missing required 'sub' field")
     email = (claims.get("email") or "").strip()
+    if not email:
+        # Hard error per Epic #179 — email is the canonical identity and
+        # there is no defensible default. SSO login should surface this
+        # to the user with an actionable "contact admin" message.
+        raise OidcProvisioningError("OIDC IdP did not provide an `email` claim — contact your administrator.")
     given_name = claims.get("given_name") or ""
     family_name = claims.get("family_name") or ""
     groups = normalize_groups_claim(claims.get("groups"))
 
-    target_role_id = role_id_from_groups(groups, session)
+    # Role resolution — existing behaviour kept (role_id_from_groups picks
+    # the highest-privilege matching group, or DOCTOR if no match).
+    # Per Epic #179 the JIT fallback for *missing* groups is PATIENT;
+    # apply it only when the claim is empty / absent, so misconfigured
+    # group strings still get the existing DOCTOR default behaviour.
+    raw_groups_claim = claims.get("groups")
+    if raw_groups_claim in (None, "", [], (), set()):
+        target_role = session.query(UserRole).filter(UserRole.role == RoleTypeEnum.PATIENT).one_or_none()
+        if target_role is None:
+            # No PATIENT row — fall back to whatever role_id_from_groups
+            # gives us (which itself will pick a default).
+            target_role_id = role_id_from_groups(groups, session)
+        else:
+            target_role_id = target_role.id
+        logger.warning(
+            "OIDC JIT fallback: role defaulted to PATIENT (no groups claim). okta_sub=%s email=%s",
+            sub,
+            email,
+        )
+    else:
+        target_role_id = role_id_from_groups(groups, session)
+
+    # Organization resolution — derive from email domain when the claim
+    # doesn't provide one. Log at WARN with okta_sub + email so admins
+    # can audit. Accept either ``organization`` or ``org`` as the claim
+    # name for forwards compatibility with HeL's eventual mapping.
+    organization = (claims.get("organization") or claims.get("org") or "").strip()
+    if not organization:
+        organization = _organization_from_email(email)
+        logger.warning(
+            "OIDC JIT fallback: organization derived from email domain. okta_sub=%s email=%s fallback_organization=%s",
+            sub,
+            email,
+            organization,
+        )
 
     # 1. Match by okta_sub (canonical).
     user = session.query(User).filter(User.okta_sub == sub).one_or_none()
@@ -151,23 +246,34 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
         user = User(
             username=email or sub,  # admin can rename later
             password=OIDC_PASSWORD_SENTINEL,
-            email=email or None,
+            email=email,
+            organization=organization,
             okta_sub=sub,
             first_name=given_name,
             last_name=family_name,
             user_role_id=target_role_id,
         )
         session.add(user)
-        logger.info("JIT-created OIDC user sub=%s email=%s", sub, email)
+        logger.info("JIT-created OIDC user sub=%s email=%s organization=%s", sub, email, organization)
     else:
         # Existing user: refresh attributes from claims. Per spec §6,
         # Okta is source of truth for OIDC users — role gets overwritten.
+        # Organization is *not* refreshed from the fallback (an admin
+        # may have set a real value); only refreshed if the claim
+        # actually carried a non-empty organization.
         if email and user.email != email:
             user.email = email
         if given_name and user.first_name != given_name:
             user.first_name = given_name
         if family_name and user.last_name != family_name:
             user.last_name = family_name
+        if not user.organization:
+            # Existing row has no organization (e.g. pre-#179 legacy
+            # row not yet backfilled in this session). Fill it now.
+            user.organization = organization
+        elif claims.get("organization") or claims.get("org"):
+            # The IdP supplied a real value — accept it as source of truth.
+            user.organization = organization
         user.user_role_id = target_role_id
 
     from sqlalchemy.exc import IntegrityError
@@ -193,6 +299,12 @@ def sync_okta_user_to_db(claims: dict, session: SqlSession):
             user.last_name = family_name
         if not user.okta_sub:
             user.okta_sub = sub
+        if not user.organization:
+            # Same backfill rule as the non-race path: if the winner
+            # left organization blank, fill it from the derived value.
+            user.organization = organization
+        elif claims.get("organization") or claims.get("org"):
+            user.organization = organization
         user.user_role_id = target_role_id
         session.commit()
 

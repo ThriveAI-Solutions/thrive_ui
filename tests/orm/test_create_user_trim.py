@@ -10,7 +10,7 @@ and their validation gates.
 
 import pytest
 
-from orm.functions import create_user
+from orm.functions import UserValidationError, create_user
 from orm.models import User, UserRole
 
 # Default keyword args every test that doesn't care about email / org passes
@@ -93,17 +93,19 @@ def test_email_and_organization_persist_after_create(in_memory_orm_session):
     ["foo", "@bar.com", "foo@", "foo@bar", "", "   "],
 )
 def test_email_format_invalid_rejected(in_memory_orm_session, bad_email):
+    """Epic #179: bad emails raise UserValidationError with `email` in missing_fields."""
     role_id = _doctor_role_id(in_memory_orm_session)
-    ok = create_user(
-        "alice",
-        "pw",
-        "Alice",
-        "Smith",
-        role_id,
-        email=bad_email,
-        organization="Acme",
-    )
-    assert ok is False
+    with pytest.raises(UserValidationError) as exc_info:
+        create_user(
+            "alice",
+            "pw",
+            "Alice",
+            "Smith",
+            role_id,
+            email=bad_email,
+            organization="Acme",
+        )
+    assert "email" in exc_info.value.missing_fields
 
     with in_memory_orm_session() as session:
         assert session.query(User).filter(User.username == "alice").first() is None
@@ -143,17 +145,19 @@ def test_email_duplicate_rejected_case_insensitive(in_memory_orm_session):
 
 
 def test_organization_empty_after_strip_rejected(in_memory_orm_session):
+    """Epic #179: whitespace-only org raises UserValidationError."""
     role_id = _doctor_role_id(in_memory_orm_session)
-    ok = create_user(
-        "alice",
-        "pw",
-        "Alice",
-        "Smith",
-        role_id,
-        email="alice@example.com",
-        organization="   ",
-    )
-    assert ok is False
+    with pytest.raises(UserValidationError) as exc_info:
+        create_user(
+            "alice",
+            "pw",
+            "Alice",
+            "Smith",
+            role_id,
+            email="alice@example.com",
+            organization="   ",
+        )
+    assert "organization" in exc_info.value.missing_fields
 
     with in_memory_orm_session() as session:
         assert session.query(User).filter(User.username == "alice").first() is None
