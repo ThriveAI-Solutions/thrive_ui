@@ -731,3 +731,166 @@ def test_handle_oidc_logout_tolerates_scalar_auth_section(in_memory_orm_session)
         from utils.okta_auth import handle_oidc_logout
 
         handle_oidc_logout()
+
+
+# ── Epic #179: JIT fallback for missing organization / role / email ──────
+
+
+def test_sync_okta_user_to_db_missing_email_raises_oidc_provisioning_error(in_memory_orm_session):
+    """Epic #179: email is canonical identity. Missing → hard error, not silent JIT."""
+    import pytest
+
+    from orm.models import User
+    from utils.okta_auth import OidcProvisioningError, sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        with pytest.raises(OidcProvisioningError) as exc:
+            sync_okta_user_to_db(_claims(email=""), session)
+        # Message is the actionable one — "contact your administrator."
+        assert "contact your administrator" in str(exc.value).lower() or "administrator" in str(exc.value).lower()
+
+        # No row got created — JIT halted before insert.
+        assert session.query(User).count() == 0
+
+
+def test_sync_okta_user_to_db_missing_email_field_completely_raises(in_memory_orm_session):
+    """Same hard-error path when the claim dict has no ``email`` key at all."""
+    import pytest
+
+    from utils.okta_auth import OidcProvisioningError, sync_okta_user_to_db
+
+    claims = {
+        "sub": "okta-sub-1",
+        "given_name": "Alice",
+        "family_name": "Anderson",
+        "groups": ["thriveai-doctor"],
+        # No "email" key.
+    }
+    with in_memory_orm_session() as session, pytest.raises(OidcProvisioningError):
+        sync_okta_user_to_db(claims, session)
+
+
+def test_sync_okta_user_to_db_missing_organization_derives_from_email_domain(in_memory_orm_session, caplog):
+    """Epic #179 fallback: alice@thrive.com → organization = "thrive", logged WARN."""
+    import logging
+
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session, caplog.at_level(logging.WARNING, logger="utils.okta_auth"):
+        user = sync_okta_user_to_db(_claims(email="alice@thrive.com"), session)
+
+    assert user.organization == "thrive"
+    # WARN log mentions the okta_sub, the email, and the fallback value.
+    fallback_logs = [r for r in caplog.records if "organization derived" in r.getMessage()]
+    assert fallback_logs, "expected WARN log for the organization fallback"
+    log_msg = fallback_logs[0].getMessage()
+    assert "okta-sub-1" in log_msg
+    assert "alice@thrive.com" in log_msg
+    assert "thrive" in log_msg
+
+
+def test_sync_okta_user_to_db_organization_claim_accepted_when_present(in_memory_orm_session, caplog):
+    """When the IdP supplies ``organization``, no fallback fires and no WARN logs."""
+    import logging
+
+    from utils.okta_auth import sync_okta_user_to_db
+
+    claims = _claims(email="alice@thrive.com")
+    claims["organization"] = "RealCorp"
+
+    with in_memory_orm_session() as session, caplog.at_level(logging.WARNING, logger="utils.okta_auth"):
+        user = sync_okta_user_to_db(claims, session)
+
+    assert user.organization == "RealCorp"
+    assert not any("organization derived" in r.getMessage() for r in caplog.records)
+
+
+def test_sync_okta_user_to_db_org_claim_alias_accepted(in_memory_orm_session):
+    """``org`` is accepted as an alias for ``organization`` for forwards compat."""
+    from utils.okta_auth import sync_okta_user_to_db
+
+    claims = _claims(email="alice@thrive.com")
+    claims["org"] = "RealCorp"
+
+    with in_memory_orm_session() as session:
+        user = sync_okta_user_to_db(claims, session)
+
+    assert user.organization == "RealCorp"
+
+
+def test_sync_okta_user_to_db_empty_groups_claim_defaults_to_patient(in_memory_orm_session, caplog):
+    """Epic #179 fallback: empty/missing groups → PATIENT role, logged WARN."""
+    import logging
+
+    from orm.models import RoleTypeEnum
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session, caplog.at_level(logging.WARNING, logger="utils.okta_auth"):
+        user = sync_okta_user_to_db(_claims(groups=[]), session)
+
+    assert user.role.role == RoleTypeEnum.PATIENT
+    fallback_logs = [r for r in caplog.records if "role defaulted to PATIENT" in r.getMessage()]
+    assert fallback_logs, "expected WARN log for the role fallback"
+    assert "okta-sub-1" in fallback_logs[0].getMessage()
+
+
+def test_sync_okta_user_to_db_no_groups_key_defaults_to_patient(in_memory_orm_session, caplog):
+    """The claim dict literally has no ``groups`` key → PATIENT fallback."""
+    import logging
+
+    from orm.models import RoleTypeEnum
+    from utils.okta_auth import sync_okta_user_to_db
+
+    claims = {
+        "sub": "okta-sub-1",
+        "email": "alice@example.com",
+        "given_name": "Alice",
+        "family_name": "Anderson",
+        # No "groups" key at all.
+    }
+
+    with in_memory_orm_session() as session, caplog.at_level(logging.WARNING, logger="utils.okta_auth"):
+        user = sync_okta_user_to_db(claims, session)
+
+    assert user.role.role == RoleTypeEnum.PATIENT
+    assert any("role defaulted to PATIENT" in r.getMessage() for r in caplog.records)
+
+
+def test_sync_okta_user_to_db_unmatched_groups_keeps_doctor_default(in_memory_orm_session):
+    """Existing behaviour preserved: non-empty but unmatched groups → DOCTOR."""
+    from orm.models import RoleTypeEnum
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session:
+        user = sync_okta_user_to_db(_claims(groups=["unrelated-group"]), session)
+
+    # No regression — existing fallback to DOCTOR for unmatched groups.
+    assert user.role.role == RoleTypeEnum.DOCTOR
+
+
+def test_sync_okta_user_to_db_both_org_and_role_missing_logs_both_fallbacks(in_memory_orm_session, caplog):
+    """Both fallbacks fire and both emit their own WARN log."""
+    import logging
+
+    from utils.okta_auth import sync_okta_user_to_db
+
+    with in_memory_orm_session() as session, caplog.at_level(logging.WARNING, logger="utils.okta_auth"):
+        user = sync_okta_user_to_db(_claims(email="bob@globex.com", groups=[]), session)
+
+    assert user.organization == "globex"  # derived from email domain
+    org_logs = [r for r in caplog.records if "organization derived" in r.getMessage()]
+    role_logs = [r for r in caplog.records if "role defaulted to PATIENT" in r.getMessage()]
+    assert org_logs, "expected the organization fallback log"
+    assert role_logs, "expected the role fallback log"
+
+
+def test_organization_from_email_helper_handles_subdomain():
+    """Helper takes the first dotted segment of the host, lowercased."""
+    from utils.okta_auth import _organization_from_email
+
+    assert _organization_from_email("alice@thrive.com") == "thrive"
+    assert _organization_from_email("alice@Sub.Thrive.Com") == "sub"
+    assert _organization_from_email("alice@THRIVE.com") == "thrive"
+    # Malformed cases fall back to "unknown" — defensive, not user-facing.
+    assert _organization_from_email("no-at-symbol") == "unknown"
+    assert _organization_from_email("foo@") == "unknown"

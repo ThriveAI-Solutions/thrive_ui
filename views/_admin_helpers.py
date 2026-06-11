@@ -372,12 +372,16 @@ def confirm_destructive(body_md: str, token: str, on_confirm, *, button_label: s
             st.rerun()
 
 
-@st.dialog("Create User")
-def create_user_dialog():
-    """Create User dialog — Epic #179 enforces per-field inline error
-    messaging for the three required fields (email, organization, role).
-    Other failure modes (duplicate username/email, generic DB failure)
-    keep the generic banner since the user has no per-field action.
+def _create_user_dialog_body() -> None:
+    """Body of the Create User dialog — extracted into a plain function
+    so it can be unit-tested directly without going through ``st.dialog``
+    (which requires a live Streamlit runtime). See
+    ``tests/views/test_admin_users_validation.py``.
+
+    Epic #179 enforces per-field inline error messaging for the three
+    required fields (email, organization, role). Other failure modes
+    (duplicate username/email, generic DB failure) keep the generic
+    banner since the user has no per-field action.
     """
     roles = get_all_user_roles()
     role_id_by_name = {name: rid for rid, name, _ in roles}
@@ -469,6 +473,11 @@ def create_user_dialog():
             else:
                 st.session_state[errors_key] = {}
                 st.error("Failed to create user — username or email already exists.")
+
+
+@st.dialog("Create User")
+def create_user_dialog():
+    _create_user_dialog_body()
 
 
 @st.dialog("Bulk Import Users")
