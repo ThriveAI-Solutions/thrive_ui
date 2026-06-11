@@ -384,6 +384,26 @@ def get_admin_actions(
 MAX_AUDIT_EXPORT_ROWS = 50_000
 _NO_ORG_SENTINEL = "(no org)"
 
+# Scope classification buckets (Epic #166 / Feature #167). Order matters: the
+# CASE expression is evaluated top-to-bottom.
+SCOPE_PATIENT = "Patient"
+SCOPE_POP_HEALTH = "Pop Health"
+SCOPE_OTHER = "Other"
+SCOPE_LEGACY = "Legacy/Unknown"
+
+ALL_SCOPES: tuple[str, ...] = (SCOPE_PATIENT, SCOPE_POP_HEALTH, SCOPE_OTHER, SCOPE_LEGACY)
+
+# Tool families that imply the agent acted on a single patient. Patient
+# *intent* counts even when the slot was never filled, so a run that only
+# called ``find_patient`` (without picking a candidate) still classifies as
+# Patient.
+_PATIENT_INTENT_TOOLS: tuple[str, ...] = (
+    "find_patient",
+    "get_patient_clinical_data",
+    "list_patient_documents",
+)
+_POP_HEALTH_TOOLS: tuple[str, ...] = ("search_patients_by_criteria",)
+
 
 def _question_audit_base_query(session, filters: dict):
     """Build the filtered base query over user-role Message rows joined to User.
@@ -391,18 +411,55 @@ def _question_audit_base_query(session, filters: dict):
     Returns a SQLAlchemy query that selects the rows in reverse-chronological
     order WITHOUT pagination. Used by both the paginated page helper and the
     export helper.
-    """
-    from sqlalchemy import or_
 
-    from orm.models import Message, User
+    A ``scope`` label is derived per row via a SQL ``CASE`` expression that
+    LEFT JOINs ``AgentRun`` (on ``user_message_id``) and an aggregated
+    ``ToolCall`` subquery (on ``run_id``). Classifying in SQL keeps
+    ``COUNT(*)`` and ``OFFSET/LIMIT`` honest under the scope filter — see
+    Epic #166 Architecture Considerations.
+    """
+    from sqlalchemy import case, or_
+
+    from orm.models import AgentRun, Message, ToolCall, User
     from utils.enums import MessageType, RoleType
 
     days = int(filters.get("days") or 30)
     usernames = filters.get("usernames") or []
     orgs = filters.get("orgs") or []
     search = filters.get("search") or None
+    scopes = filters.get("scopes") or None
 
     since = datetime.utcnow() - timedelta(days=days)
+
+    # Aggregated tool-call presence per run. One row per run_id with flags
+    # for the Patient-intent and Pop-Health tool families. ``MAX(CASE ...)``
+    # gives O(1) presence checks per audit row.
+    tool_agg_sq = (
+        session.query(
+            ToolCall.run_id.label("run_id"),
+            func.max(case((ToolCall.tool_name.in_(_PATIENT_INTENT_TOOLS), 1), else_=0)).label("has_patient_tool"),
+            func.max(case((ToolCall.tool_name.in_(_POP_HEALTH_TOOLS), 1), else_=0)).label("has_pop_tool"),
+        )
+        .filter(ToolCall.run_id.isnot(None))
+        .group_by(ToolCall.run_id)
+        .subquery()
+    )
+
+    # Order matters: Patient wins over Pop Health when both tool families
+    # fired in the same run; Legacy/Unknown only when there is no AgentRun
+    # at all for the message.
+    scope_case = case(
+        (AgentRun.id.is_(None), SCOPE_LEGACY),
+        (
+            or_(
+                AgentRun.selected_patient_source_id.isnot(None),
+                tool_agg_sq.c.has_patient_tool == 1,
+            ),
+            SCOPE_PATIENT,
+        ),
+        (tool_agg_sq.c.has_pop_tool == 1, SCOPE_POP_HEALTH),
+        else_=SCOPE_OTHER,
+    )
 
     query = (
         session.query(
@@ -412,8 +469,11 @@ def _question_audit_base_query(session, filters: dict):
             User.id.label("user_id"),
             User.username.label("username"),
             User.organization.label("organization"),
+            scope_case.label("scope"),
         )
         .join(User, User.id == Message.user_id)
+        .outerjoin(AgentRun, AgentRun.user_message_id == Message.id)
+        .outerjoin(tool_agg_sq, tool_agg_sq.c.run_id == AgentRun.run_id)
         .filter(Message.role == RoleType.USER.value, Message.created_at >= since)
     )
 
@@ -445,6 +505,13 @@ def _question_audit_base_query(session, filters: dict):
             & (SqlMsg.content.ilike(s))
         )
         query = query.filter(or_(Message.content.ilike(s), sql_exists))
+
+    # Scope filter is applied via the CASE expression so it participates in
+    # COUNT(*) and OFFSET/LIMIT — pagination correctness is load-bearing.
+    if scopes:
+        wanted = {s for s in scopes if s in ALL_SCOPES}
+        if wanted:
+            query = query.filter(scope_case.in_(wanted))
 
     return query.order_by(Message.created_at.desc())
 
@@ -552,6 +619,11 @@ def _enrich_with_assistant_aggregates(session, base_rows: list) -> list[dict]:
                 "dataframe_preview": agg["dataframe_preview"],
                 "error_text": agg["error_text"],
                 "user_message_id": r.user_message_id,
+                # Scope label derived in SQL via _question_audit_base_query's
+                # CASE expression (Epic #166 / Feature #167). Defensive
+                # ``getattr`` so callers that synthesise their own row
+                # objects in tests don't crash if they omit it.
+                "scope": getattr(r, "scope", None) or SCOPE_LEGACY,
             }
         )
     return items

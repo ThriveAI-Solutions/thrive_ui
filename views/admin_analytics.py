@@ -541,12 +541,26 @@ def _render_audit_trail_tab(days_int: int):
         except Exception as e:
             logger.warning("Audit deep-link prefill failed: %s", e)
 
-    f1, f2, f3 = st.columns([0.30, 0.30, 0.40])
+    # Scope options are sourced from the backend so the chip and the SQL
+    # CASE stay in sync. Importing inside the function mirrors the existing
+    # local-import convention in this module.
+    from orm.logging_functions import ALL_SCOPES as _AUDIT_SCOPE_OPTIONS
+
+    f1, f2, f3, f4 = st.columns([0.24, 0.24, 0.22, 0.30])
     with f1:
         usernames_sel = st.multiselect("User", options=options["usernames"], key="audit_user_filter")
     with f2:
         orgs_sel = st.multiselect("Organization", options=options["orgs"], key="audit_org_filter")
     with f3:
+        scopes_sel = st.multiselect(
+            "Scope",
+            options=list(_AUDIT_SCOPE_OPTIONS),
+            key="audit_scope_filter",
+            help="Patient = single-patient questions (PHI access). "
+            "Pop Health = cohort searches. Other = codes / KB / pure SQL. "
+            "Legacy/Unknown = pre-agentic-replatform rows.",
+        )
+    with f4:
         search = st.text_input(
             "Search question or SQL",
             placeholder="Substring match (case-insensitive)",
@@ -558,6 +572,8 @@ def _render_audit_trail_tab(days_int: int):
         "orgs": orgs_sel,
         "days": int(days_int),
         "search": search.strip() if search else None,
+        # ``set`` is JSON-unfriendly; backend accepts any iterable.
+        "scopes": sorted(scopes_sel) if scopes_sel else None,
     }
 
     # Reset pagination on filter change
@@ -601,6 +617,9 @@ def _render_audit_trail_tab(days_int: int):
                     "Question": _truncate(it["question"], 120),
                     "SQL": _truncate(it.get("sql_text"), 80),
                     "Status": _AUDIT_STATUS_EMOJI.get(it["status"], it["status"]),
+                    # Epic #166 / Feature #167: derived scope label —
+                    # Patient / Pop Health / Other / Legacy/Unknown.
+                    "Scope": it.get("scope") or "Legacy/Unknown",
                     "Elapsed (s)": round(float(it.get("elapsed_seconds") or 0.0), 3),
                 }
             )
@@ -692,6 +711,11 @@ def _render_audit_trail_tab(days_int: int):
                             "Question": r["question"],
                             "SQL": r.get("sql_text") or "",
                             "Status": r["status"],
+                            # Epic #166 / Feature #167: same derived label
+                            # the grid surfaces. CSV must obey the Scope
+                            # filter (transparent — same filters dict) AND
+                            # carry the classification through to the file.
+                            "Scope": r.get("scope") or "Legacy/Unknown",
                             "Elapsed (s)": round(float(r.get("elapsed_seconds") or 0.0), 3),
                         }
                         for r in export_rows
