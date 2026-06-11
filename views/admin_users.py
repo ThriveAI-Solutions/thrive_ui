@@ -22,6 +22,7 @@ import pandas as pd
 import streamlit as st
 
 from orm.functions import (
+    UserValidationError,
     get_all_user_roles,
     get_all_users,
     get_user_daily_stats,
@@ -120,16 +121,30 @@ def render(days_int: int | None = None) -> None:
             )
 
             with prof_tab:
+                # Per Epic #179 the Profile form must show per-field inline
+                # error messages for missing email / organization / role.
+                # Use a session-state-keyed error dict so messages survive
+                # the rerun triggered by Save and render directly below
+                # each input on the next render.
+                edit_errors_key = f"edit_profile_field_errors_{selected['id']}"
+                edit_errors: dict[str, str] = st.session_state.get(edit_errors_key, {})
+
                 nu_username = st.text_input("Username", value=selected["username"])
                 nu_first = st.text_input("First Name", value=selected["first_name"])
                 nu_last = st.text_input("Last Name", value=selected["last_name"])
                 nu_email = st.text_input("Email", value=selected.get("email") or "")
+                if "email" in edit_errors:
+                    st.error(edit_errors["email"])
                 nu_organization = st.text_input("Organization", value=selected.get("organization") or "")
+                if "organization" in edit_errors:
+                    st.error(edit_errors["organization"])
                 nu_role_name = st.selectbox(
                     "Role",
                     options=role_names,
                     index=role_names.index(selected["role_name"]) if selected["role_name"] in role_names else 0,
                 )
+                if "role" in edit_errors:
+                    st.error(edit_errors["role"])
                 theme_options = user_selectable_themes()
                 current_theme = selected.get("theme", ThemeType.HEALTHELINK.value)
                 nu_theme = st.selectbox(
@@ -140,20 +155,45 @@ def render(days_int: int | None = None) -> None:
                 prof_btn_cols = st.columns(2)
                 with prof_btn_cols[0]:
                     if st.button("Save Profile", key="save_profile", type="primary"):
-                        ok = update_user(
-                            selected["id"],
-                            nu_username,
-                            nu_first,
-                            nu_last,
-                            role_id_by_name.get(nu_role_name),
-                            nu_theme,
-                            email=nu_email.strip() or None,
-                            organization=nu_organization.strip() or None,
-                        )
+                        # Pre-Epic-179 behaviour passed ``email`` / ``organization``
+                        # as ``None`` when the field was blank, which let the
+                        # legacy update_user skip the column entirely. Post-179
+                        # those columns are NOT NULL, so we explicitly pass the
+                        # stripped value (even an empty string) so the validator
+                        # catches it and the UI can surface the per-field error
+                        # rather than silently leaving the row alone.
+                        email_to_send = nu_email.strip()
+                        org_to_send = nu_organization.strip()
+                        try:
+                            ok = update_user(
+                                selected["id"],
+                                nu_username,
+                                nu_first,
+                                nu_last,
+                                role_id_by_name.get(nu_role_name),
+                                nu_theme,
+                                email=email_to_send,
+                                organization=org_to_send,
+                            )
+                        except UserValidationError as ve:
+                            msgs: dict[str, str] = {}
+                            for field in ve.missing_fields:
+                                if field == "email":
+                                    msgs["email"] = "A valid email address is required."
+                                elif field == "organization":
+                                    msgs["organization"] = "Organization is required."
+                                elif field == "role":
+                                    msgs["role"] = "A role must be selected."
+                            st.session_state[edit_errors_key] = msgs
+                            st.rerun()
+                            return
+
                         if ok:
+                            st.session_state[edit_errors_key] = {}
                             st.success("Profile updated.")
                             st.rerun()
                         else:
+                            st.session_state[edit_errors_key] = {}
                             st.error("Failed to update profile.")
                 with prof_btn_cols[1]:
                     if st.button("Set Password…", key="set_password_btn"):

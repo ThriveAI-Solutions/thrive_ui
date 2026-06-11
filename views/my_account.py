@@ -11,7 +11,7 @@ by the sidebar ⚙️ Settings dialog introduced by Epic #140.
 
 import streamlit as st
 
-from orm.functions import change_password, update_user
+from orm.functions import UserValidationError, change_password, update_user
 from orm.models import RoleTypeEnum, SessionLocal, User
 from utils.quick_logger import get_logger
 
@@ -39,23 +39,44 @@ if user_id:
         _me = None
     if _me is not None:
         st.markdown("**Profile**")
+        # Per Epic #179 the My Account profile form must surface per-field
+        # inline errors for missing/invalid email or organization rather
+        # than a generic "save failed" banner.
+        my_errors_key = f"my_account_field_errors_{user_id}"
+        my_errors: dict[str, str] = st.session_state.get(my_errors_key, {})
         with st.form("my_profile_form"):
             my_email = st.text_input("Email", value=_me.email or "")
+            if "email" in my_errors:
+                st.error(my_errors["email"])
             my_organization = st.text_input("Organization", value=_me.organization or "")
+            if "organization" in my_errors:
+                st.error(my_errors["organization"])
             if st.form_submit_button("Save Profile", type="primary"):
-                ok = update_user(
-                    int(user_id),
-                    email=my_email.strip() or None,
-                    organization=my_organization.strip() or None,
-                )
-                if ok:
-                    st.success("Profile updated.")
+                email_to_send = my_email.strip()
+                org_to_send = my_organization.strip()
+                try:
+                    ok = update_user(
+                        int(user_id),
+                        email=email_to_send,
+                        organization=org_to_send,
+                    )
+                except UserValidationError as ve:
+                    msgs: dict[str, str] = {}
+                    for field in ve.missing_fields:
+                        if field == "email":
+                            msgs["email"] = "A valid email address is required."
+                        elif field == "organization":
+                            msgs["organization"] = "Organization is required."
+                    st.session_state[my_errors_key] = msgs
                     st.rerun()
                 else:
-                    st.error(
-                        "Failed to update profile. Possible causes: email already "
-                        "in use, email format is invalid, or organization is empty."
-                    )
+                    if ok:
+                        st.session_state[my_errors_key] = {}
+                        st.success("Profile updated.")
+                        st.rerun()
+                    else:
+                        st.session_state[my_errors_key] = {}
+                        st.error("Failed to update profile — email may already be in use.")
         st.divider()
 
 st.markdown("**Change Password**")
