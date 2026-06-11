@@ -100,6 +100,69 @@ def _kpi_card(
             st.caption(help_text)
 
 
+# Canonical display labels for the Sources-row additivity equation.
+# Order matches the three Source KPI cards rendered below.
+_SOURCE_DISPLAY_LABELS: tuple[tuple[str, str], ...] = (
+    (ErrorSource.ERROR_LOG.value, "Error Log"),
+    (ErrorSource.AGENT_RUN.value, "Agent Runs"),
+    (ErrorSource.FALLBACK_SINK.value, "Fallback File"),
+)
+
+
+def _sources_equation_markdown(
+    counts: dict[str, int],
+    selected_source_values: list[str],
+) -> str:
+    """Compose the Sources-row additivity equation as a markdown string.
+
+    Pure-format helper (no Streamlit) so unit tests can assert on the
+    output without a Streamlit script context. The thin wrapper
+    :func:`_render_sources_equation` calls ``st.markdown`` with the
+    return value.
+
+    The equation renders as::
+
+        Total: 47 = Error Log (32) + Agent Runs (12) + Fallback File (3)
+
+    Filter state is signaled by striking through any deselected term
+    (markdown ``~~term~~``) while the Total remains the unfiltered
+    cross-source sum. This preserves the Epic #161 invariant:
+    *Sources equation Total == Analytics Total Errors* regardless of
+    Source chip state. Recalculating Total based on selection would
+    reintroduce the exact drift this Epic is built to fix.
+
+    Edge cases:
+
+    - Missing keys in ``counts`` default to 0 via ``dict.get``.
+    - Empty ``selected_source_values`` renders all three terms struck
+      through; Total still shows the unfiltered sum.
+    """
+    selected = set(selected_source_values or [])
+    terms: list[str] = []
+    total = 0
+    for src_value, display_label in _SOURCE_DISPLAY_LABELS:
+        n = counts.get(src_value, 0)
+        total += n
+        term = f"{display_label} ({n})"
+        if src_value not in selected:
+            term = f"~~{term}~~"
+        terms.append(term)
+    return f"Total: {total} = " + " + ".join(terms)
+
+
+def _render_sources_equation(
+    counts: dict[str, int],
+    selected_source_values: list[str],
+) -> None:
+    """Render the Sources-row additivity equation under the 3 Source KPIs.
+
+    Thin wrapper around the pure-format helper
+    :func:`_sources_equation_markdown` so unit tests can assert on the
+    rendered markdown string without a Streamlit script context.
+    """
+    st.markdown(_sources_equation_markdown(counts, selected_source_values))
+
+
 @st.cache_data(ttl=ERRORS_CACHE_TTL_SECONDS, show_spinner="Loading errors...")
 def _load(
     days: int,
@@ -235,6 +298,13 @@ def render(days_int: int) -> None:
             help_text=kpi_help_text,
             dim=ErrorSource.FALLBACK_SINK.value not in selected_source_values,
         )
+
+    # Additivity equation — the structural reconciliation between the
+    # three Source KPI cards above and the Analytics-row Total Errors
+    # KPI below. Deselected sources are struck through; Total stays at
+    # the unfiltered cross-source sum so it always matches the Analytics
+    # Total under the same days_int (Epic #161).
+    _render_sources_equation(counts, selected_source_values)
 
     st.divider()
 
