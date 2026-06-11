@@ -163,6 +163,58 @@ def _render_sources_equation(
     st.markdown(_sources_equation_markdown(counts, selected_source_values))
 
 
+def _subset_kpi_caption_text(count: int, total: int) -> str:
+    """Compose the "of N (Z.Z%)" denominator caption for a subset KPI.
+
+    Pure-format helper (no Streamlit) so unit tests can assert on the
+    output without a Streamlit script context. The thin wrapper
+    :func:`_render_subset_kpi_card` calls ``st.caption`` with the
+    return value.
+
+    Behaviour:
+
+    - ``total == 0`` → ``"of 0"`` only (no ``%`` suffix, no
+      divide-by-zero). Empty time ranges render gracefully.
+    - ``total > 0`` → ``"of N (Z.Z%)"`` where percentage is
+      ``round(100 * count / total, 1)``.
+    - ``count == 0, total > 0`` → ``"0 of N (0.0%)"`` (via the count
+      surfaced separately as the primary value).
+    - ``count == total`` → ``"N of N (100.0%)"``.
+
+    The "of N" denominator carries the semantic weight that this is a
+    *slice* of Total, not an addend. The Analytics block caption adds
+    explicit prose disambiguation as a backup signal.
+    """
+    if total == 0:
+        return f"of {total}"
+    pct = round(100 * count / total, 1)
+    return f"of {total} ({pct}%)"
+
+
+def _render_subset_kpi_card(
+    label: str,
+    count: int,
+    total: int,
+    help_text: str | None = None,
+) -> None:
+    """Render a subset KPI card showing ``count`` plus an "of N" denominator.
+
+    Visually distinct from :func:`_kpi_card` (the primary / additive
+    style) by virtue of the explicit ``of N`` denominator below the
+    primary value — the textual signal that this card is a *slice* of
+    a parent Total, not an addend. Used in the Errors tab Analytics
+    row for the Critical and SQL Errors KPIs, both of which are subsets
+    of Total Errors and may overlap each other.
+    """
+    c = st.container(border=True)
+    with c:
+        st.markdown(f"**{label}**")
+        st.markdown(f"<h3 style='margin-top:0'>{count}</h3>", unsafe_allow_html=True)
+        st.caption(_subset_kpi_caption_text(count, total))
+        if help_text:
+            st.caption(help_text)
+
+
 @st.cache_data(ttl=ERRORS_CACHE_TTL_SECONDS, show_spinner="Loading errors...")
 def _load(
     days: int,
@@ -315,16 +367,28 @@ def render(days_int: int) -> None:
     st.subheader("Analytics")
     st.caption(
         "Time-range totals across all three sources. Not narrowed by the "
-        "Sources chip or the category / severity / user / search filters above."
+        "Sources chip or the category / severity / user / search filters above. "
+        "**Critical and SQL Errors are subsets of Total Errors and may overlap "
+        "each other** (a critical SQL-generation error counts toward both)."
     )
 
     a1, a2, a3, a4 = st.columns(4)
     with a1:
         _kpi_card("Total Errors", aggregates["total"])
     with a2:
-        _kpi_card("Critical", aggregates["critical"], help_text="Severity = critical")
+        _render_subset_kpi_card(
+            "Critical",
+            aggregates["critical"],
+            aggregates["total"],
+            help_text="Severity = critical",
+        )
     with a3:
-        _kpi_card("SQL Errors", aggregates["sql_errors"], help_text="Generation + Execution")
+        _render_subset_kpi_card(
+            "SQL Errors",
+            aggregates["sql_errors"],
+            aggregates["total"],
+            help_text="Categories: sql_generation + sql_execution",
+        )
     with a4:
         _kpi_card("Retry Success", f"{aggregates['retry_success_rate']}%")
 
