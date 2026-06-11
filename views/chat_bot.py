@@ -110,6 +110,22 @@ _RESET_CONFIRM_WINDOW_SECONDS = 5.0
 def _render_reset_agent_sidebar() -> None:
     """Sidebar container that clears all agent-side conversation state.
 
+    Gated on ``agentic_mode`` (Epic #171 / Feature #172): the container
+    is only rendered when the user has agentic mode enabled. Legacy
+    Vanna users see nothing here — clearing agent state doesn't affect
+    the Vanna pipeline, so showing the button would imply an
+    interaction that has no effect.
+
+    The gate reads ``st.session_state["agentic_mode"]`` directly. This is
+    populated from the persisted user preference by
+    :func:`orm.functions.set_user_preferences_in_session_state`, which
+    runs at the top of every script rerun. Commit-on-close semantics:
+    toggling the dialog checkbox writes to session_state inside the
+    dialog body, but the sidebar already rendered higher in the script
+    on the toggle's rerun, so the sidebar does NOT update live while
+    the dialog is open. When the dialog closes, the next rerun re-reads
+    the (now-saved) DB value and the sidebar updates.
+
     Two-state UX:
       - Idle: a single "Reset agent" button. Clicking it arms the
         confirmation by stamping st.session_state['_pending_agent_reset_at'].
@@ -119,6 +135,11 @@ def _render_reset_agent_sidebar() -> None:
     The arming flag is checked lazily on each render and on click — no
     background timers. Expired arming silently returns to Idle.
     """
+    # Default to True so admins / fresh sessions with no persisted
+    # preference still see the button.
+    if not st.session_state.get("agentic_mode", True):
+        return
+
     armed_at = st.session_state.get("_pending_agent_reset_at")
     now = time.time()
     is_armed = isinstance(armed_at, (int, float)) and (now - armed_at) <= _RESET_CONFIRM_WINDOW_SECONDS
@@ -380,8 +401,12 @@ def _render_agentic_section():
             pass
 
 
-@st.dialog("Settings")
-def settings_dialog():
+def _settings_dialog_body():
+    """Pure body of the Settings dialog. Split from the ``@st.dialog``-
+    decorated wrapper (Epic #171 / Feature #172) so unit tests can drive
+    the section-order logic without a Streamlit script context.
+    Production unchanged — :func:`settings_dialog` delegates here.
+    """
     try:
         vn_instance = get_vn()
         if vn_instance:
@@ -394,17 +419,29 @@ def settings_dialog():
 
     st.divider()
 
-    st.subheader("Display")
-    _render_display_form()
-
-    st.divider()
-
     st.subheader("Agentic")
     _render_agentic_section()
 
     st.divider()
+
+    st.subheader("Display")
+    _render_display_form()
+
+    st.divider()
     if st.button("Close", key="settings_dialog_close"):
         st.rerun()
+
+
+# ``on_dismiss="rerun"`` is load-bearing for sidebar refresh: by default
+# Streamlit's ``@st.dialog`` decorator uses ``on_dismiss="ignore"``, so
+# when the user clicks off / X's out of the dialog NO rerun fires and the
+# sidebar (which reads ``st.session_state["agentic_mode"]`` from the
+# top-of-script ``set_user_preferences_in_session_state`` call) stays
+# stale. The explicit Close button below already calls ``st.rerun()``,
+# but dismissal-by-click-off needs this opt-in. Epic #171 / Feature #172.
+@st.dialog("Settings", on_dismiss="rerun")
+def settings_dialog():
+    _settings_dialog_body()
 
 
 ######### Sidebar settings #########
@@ -446,8 +483,8 @@ if st.session_state.get("show_community_engagement", False):
 What is the average patient age?
 How many patients visited last month?
 What are the top diagnoses?""",
-            language="csv",
-        )
+                language="csv",
+            )
 
 # Display Community Questions in sidebar
 if st.session_state.get("community_questions"):
@@ -491,6 +528,7 @@ if st.session_state.get("show_question_history", True):
                 )
             try:
                 from views import admin_audit  # noqa: F401
+
                 if st.button("View all in audit →", key="qh_view_all_in_audit"):
                     import json as _json
 
