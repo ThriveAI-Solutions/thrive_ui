@@ -10,6 +10,22 @@ Consumes :func:`orm.error_read_model.query_errors` and
 :func:`orm.error_read_model.count_errors_by_source` plus
 :func:`orm.error_read_model.query_aggregates` for the KPI / chart block,
 along with the pure helpers in :mod:`views.errors_helpers`.
+
+Two-ledger error-count contract (Epic #161):
+
+  - **Ledger A — Chat-flow errors.** ``Message`` rows where
+    ``Message.type == ERROR``. Consumed by the Admin Overview "Chat
+    Errors" KPI (see :mod:`views.admin_analytics`). Not consumed here.
+
+  - **Ledger B — System errors.** The 3-source union (``thrive_error_log``
+    + agent-run failures + JSONL fallback file) rolled up by
+    :func:`orm.error_read_model.query_aggregates`. THIS module's canonical
+    loader is :func:`_load_aggregates`, which Admin Overview's "Critical
+    System Errors" KPI also imports (shared cache). Every KPI rendered
+    in this module belongs to Ledger B.
+
+New error-count surfaces MUST declare which ledger they consume and
+route through the corresponding loader.
 """
 
 from __future__ import annotations

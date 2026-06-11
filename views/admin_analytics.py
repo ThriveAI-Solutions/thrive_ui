@@ -1,3 +1,26 @@
+"""Admin Analytics tabbed surface.
+
+Two-ledger error-count contract (Epic #161):
+
+  - **Ledger A — Chat-flow errors.** Counted from ``Message`` rows where
+    ``Message.type == ERROR``. Consumed by the Admin Overview "Chat Errors"
+    KPI (rendered in :func:`_render_overview_tab`). Surfaces the errors
+    that interrupted a chat turn.
+
+  - **Ledger B — System errors.** The 3-source union (``thrive_error_log``
+    + agent-run failures + JSONL fallback file) rolled up by
+    :func:`orm.error_read_model.query_aggregates` and cached via
+    :func:`views.errors._load_aggregates`. Consumed by the Errors tab and
+    by the Admin Overview "Critical System Errors" KPI. The Overview KPI
+    shares the ``_load_aggregates`` cache so it always equals the Errors
+    tab's Critical card under the same ``days_int``.
+
+New error-count surfaces MUST declare which ledger they consume and route
+through the corresponding loader. Do not introduce a third ad-hoc counter
+without updating this contract — that is the drift Epic #161 exists to
+prevent.
+"""
+
 import datetime as dt
 import json
 
@@ -179,7 +202,8 @@ def _to_dense_days(rows, days: int):
 
 def _render_overview_tab(days_int: int):
     """Render the Overview tab (existing content + new KPIs)."""
-    from orm.logging_functions import get_activity_stats, get_error_stats, get_llm_stats
+    from orm.logging_functions import get_activity_stats, get_llm_stats
+    from views.errors import _load_aggregates as _errors_load_aggregates
 
     (
         users_count,
@@ -193,7 +217,12 @@ def _render_overview_tab(days_int: int):
     # Get stats from new logging tables
     llm_stats = get_llm_stats(days=days_int)
     activity_stats = get_activity_stats(days=days_int)
-    error_stats = get_error_stats(days=days_int)
+    # Ledger B (System errors) — shared cache with the Errors tab.
+    # Importing _load_aggregates here mirrors the precedent at the global
+    # Refresh Data button below and guarantees Overview's "Critical System
+    # Errors" KPI always equals the Errors tab's Critical card under the
+    # same days_int (Epic #161).
+    error_aggregates = _errors_load_aggregates(days_int)
 
     # KPIs row - original + new
     k1, k2, k3, k4, k5, k6, k7, k8 = st.columns(8)
@@ -203,7 +232,11 @@ def _render_overview_tab(days_int: int):
     with k2:
         _kpi_card("Questions", int(df["questions"].sum()))
     with k3:
-        _kpi_card("Errors", int(df["errors"].sum()))
+        _kpi_card(
+            "Chat Errors",
+            int(df["errors"].sum()),
+            help_text=("Chat-flow errors (Message.type=ERROR). Distinct from the Errors tab's System Errors ledger."),
+        )
     with k4:
         _kpi_card("Active Users", active_users)
     with k5:
@@ -213,7 +246,14 @@ def _render_overview_tab(days_int: int):
     with k7:
         _kpi_card("Logins Today", activity_stats["logins_today"])
     with k8:
-        _kpi_card("Critical Errors", error_stats["critical"], "Requires attention")
+        _kpi_card(
+            "Critical System Errors",
+            error_aggregates["critical"],
+            help_text=(
+                "Severity=critical across ErrorLog + Agent Runs + Fallback "
+                "File. Matches the Errors tab's Critical card."
+            ),
+        )
 
     st.divider()
 
