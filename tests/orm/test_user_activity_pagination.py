@@ -55,6 +55,7 @@ def _seed_user(session, *, id, username):
             last_name="X",
             password="hash:abc",
             email=f"{username}@x.io",
+            organization="TestOrg",  # required per Epic #179
         )
     )
     session.commit()

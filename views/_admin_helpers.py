@@ -13,6 +13,7 @@ import streamlit as st
 from pandas import DataFrame
 
 from orm.functions import (
+    UserValidationError,
     admin_change_password,
     create_user,
     delete_user,
@@ -127,22 +128,30 @@ def import_users():
                     role_id = _patient_fallback_role_id
                     logger.warning(f"Role '{role_name}' not found for user {username}, defaulting to Patient")
 
-                ok = create_user(
-                    username,
-                    password,
-                    first_name if first_name else username,
-                    last_name if last_name else "",
-                    role_id,
-                    email=email,
-                    organization=organization,
-                )
+                try:
+                    ok = create_user(
+                        username,
+                        password,
+                        first_name if first_name else username,
+                        last_name if last_name else "",
+                        role_id,
+                        email=email,
+                        organization=organization,
+                    )
+                except UserValidationError as ve:
+                    # Required-field validation per Epic #179. Surface the
+                    # specific missing fields rather than the generic "rejected"
+                    # message so the admin can fix the CSV row directly.
+                    failed_count += 1
+                    failed_users.append(
+                        f"{username}: missing or invalid required field(s) — {', '.join(ve.missing_fields)}"
+                    )
+                    continue
                 if ok:
                     success_count += 1
                 else:
                     failed_count += 1
-                    failed_users.append(
-                        f"{username}: create_user rejected (duplicate username/email, bad email format, or invalid input)"
-                    )
+                    failed_users.append(f"{username}: create_user rejected (duplicate username/email)")
 
             except Exception as e:
                 failed_count += 1

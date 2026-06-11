@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from orm.functions import create_user, update_user
+from orm.functions import UserValidationError, create_user, update_user
 from orm.models import User, UserRole
 
 
@@ -64,11 +64,13 @@ def test_update_user_sets_email_and_organization(in_memory_orm_session):
 
 @pytest.mark.parametrize("bad_email", ["foo", "foo@", "@bar.com", "foo@bar"])
 def test_update_user_rejects_invalid_email_format(in_memory_orm_session, bad_email):
+    """Epic #179: bad email on update raises UserValidationError."""
     role_id = _doctor_role_id(in_memory_orm_session)
     user_id = _seed_alice(in_memory_orm_session, role_id)
 
-    ok = update_user(user_id, email=bad_email)
-    assert ok is False
+    with pytest.raises(UserValidationError) as exc_info:
+        update_user(user_id, email=bad_email)
+    assert "email" in exc_info.value.missing_fields
 
     with in_memory_orm_session() as session:
         user = session.query(User).filter(User.id == user_id).one()
@@ -104,11 +106,13 @@ def test_update_user_rejects_duplicate_email_case_insensitive(in_memory_orm_sess
 
 
 def test_update_user_rejects_empty_organization_after_strip(in_memory_orm_session):
+    """Epic #179: whitespace-only org on update raises UserValidationError."""
     role_id = _doctor_role_id(in_memory_orm_session)
     user_id = _seed_alice(in_memory_orm_session, role_id)
 
-    ok = update_user(user_id, organization="   ")
-    assert ok is False
+    with pytest.raises(UserValidationError) as exc_info:
+        update_user(user_id, organization="   ")
+    assert "organization" in exc_info.value.missing_fields
 
     with in_memory_orm_session() as session:
         user = session.query(User).filter(User.id == user_id).one()

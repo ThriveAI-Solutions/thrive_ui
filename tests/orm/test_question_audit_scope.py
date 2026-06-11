@@ -52,7 +52,10 @@ def _seed_roles(session):
     session.commit()
 
 
-def _seed_user(session, *, id, username, org=None, role_id=4):
+def _seed_user(session, *, id, username, org="TestOrg", role_id=4):
+    # Default ``org`` is "TestOrg" — post Epic #179 organization is NOT NULL
+    # on thrive_user, so seeders that defaulted to None would hit an
+    # IntegrityError at INSERT.
     session.add(
         User(
             id=id,
