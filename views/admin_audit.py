@@ -19,6 +19,13 @@ from views.admin_analytics import _render_activity_tab, _render_audit_tab, _rend
 
 
 def render(days_int: int) -> None:
+    # Per-rerun guard: Streamlit allows only one dialog open() per script run, but
+    # st.tabs runs ALL tab bodies on every rerun and each tab has its own dataframe
+    # selection state that persists across reruns. Whichever tab claims this flag
+    # first in a rerun gets to open its dialog; the others skip. Reset at the top
+    # so a new rerun starts with a clean slot.
+    st.session_state["_audit_dialog_claimed_this_rerun"] = False
+
     inner = st.tabs(["Questions", "Admin Actions", "User Activity"])
     with inner[0]:
         _render_audit_trail_tab(days_int)

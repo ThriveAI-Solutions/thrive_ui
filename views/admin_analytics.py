@@ -630,8 +630,16 @@ def _render_audit_trail_tab(days_int: int):
                     selected_item = items[row_idx]
                     open_id = st.session_state.get("audit_dialog_open_user_message_id")
                     if open_id != selected_item["user_message_id"]:
-                        st.session_state["audit_dialog_open_user_message_id"] = selected_item["user_message_id"]
-                    _render_audit_question_dialog(selected_item)
+                        # NEW selection — claim the per-rerun dialog slot and open.
+                        # ``st.tabs`` runs every tab body each rerun and each tab has its
+                        # own persisted dataframe selection, so without the cross-tab
+                        # guard two tabs could both call ``st.dialog`` in the same script
+                        # run, which Streamlit forbids. Same-id reselection across reruns
+                        # short-circuits at the outer ``if`` and does NOT reopen.
+                        if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
+                            st.session_state["_audit_dialog_claimed_this_rerun"] = True
+                            st.session_state["audit_dialog_open_user_message_id"] = selected_item["user_message_id"]
+                            _render_audit_question_dialog(selected_item)
             else:
                 # Dataframe selection cleared (e.g. clicking the row again) — reset our
                 # tracking key so re-selecting the same row reopens the dialog.
@@ -1074,8 +1082,14 @@ def _render_activity_tab(days_int: int):
                 selected_item = items[row_idx]
                 open_id = st.session_state.get("audit_activity_dialog_open_id")
                 if open_id != selected_item["id"]:
-                    st.session_state["audit_activity_dialog_open_id"] = selected_item["id"]
-                _render_user_activity_dialog(selected_item)
+                    # NEW selection — claim the per-rerun dialog slot and open. See the
+                    # Questions tab branch above for the rationale: ``st.tabs`` evaluates
+                    # every tab body each rerun, so the cross-tab guard prevents two
+                    # tabs from both calling ``st.dialog`` in the same script run.
+                    if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
+                        st.session_state["_audit_dialog_claimed_this_rerun"] = True
+                        st.session_state["audit_activity_dialog_open_id"] = selected_item["id"]
+                        _render_user_activity_dialog(selected_item)
         else:
             # Selection cleared — reset tracking key so re-selecting the same
             # row reopens the dialog.
@@ -1333,8 +1347,14 @@ def _render_audit_tab(days_int: int):
                 selected_item = items[row_idx]
                 open_id = st.session_state.get("audit_actions_dialog_open_id")
                 if open_id != selected_item["id"]:
-                    st.session_state["audit_actions_dialog_open_id"] = selected_item["id"]
-                _render_admin_action_dialog(selected_item)
+                    # NEW selection — claim the per-rerun dialog slot and open. See the
+                    # Questions tab branch in ``_render_audit_trail_tab`` for the full
+                    # rationale: Streamlit forbids two ``st.dialog`` calls per script
+                    # run and ``st.tabs`` evaluates every tab body each rerun.
+                    if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
+                        st.session_state["_audit_dialog_claimed_this_rerun"] = True
+                        st.session_state["audit_actions_dialog_open_id"] = selected_item["id"]
+                        _render_admin_action_dialog(selected_item)
         else:
             # Selection cleared — drop the tracking key so re-selecting the
             # same row reopens the dialog.
