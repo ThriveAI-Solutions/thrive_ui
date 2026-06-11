@@ -105,6 +105,7 @@ class _TabHarness:
         render_fn_name: str,
         item_factory,
         data_editor_key: str,
+        prev_view_checks_key: str,
         dialog_id_key: str,
         id_field: str,
         dialog_attr: str,
@@ -114,6 +115,7 @@ class _TabHarness:
         self.render_fn_name = render_fn_name
         self.item_factory = item_factory
         self.data_editor_key = data_editor_key
+        self.prev_view_checks_key = prev_view_checks_key
         self.dialog_id_key = dialog_id_key
         self.id_field = id_field
         self.dialog_attr = dialog_attr
@@ -181,6 +183,7 @@ def _all_harnesses() -> list[_TabHarness]:
             render_fn_name="_render_audit_trail_tab",
             item_factory=lambda i: _make_question_item(user_message_id=i),
             data_editor_key="audit_dataframe",
+            prev_view_checks_key="audit_questions_prev_view_checks",
             dialog_id_key="audit_dialog_open_user_message_id",
             id_field="user_message_id",
             dialog_attr="_render_audit_question_dialog",
@@ -191,6 +194,7 @@ def _all_harnesses() -> list[_TabHarness]:
             render_fn_name="_render_audit_tab",
             item_factory=lambda i: _make_admin_action_item(id=i),
             data_editor_key="audit_actions_dataframe",
+            prev_view_checks_key="audit_actions_prev_view_checks",
             dialog_id_key="audit_actions_dialog_open_id",
             id_field="id",
             dialog_attr="_render_admin_action_dialog",
@@ -201,6 +205,7 @@ def _all_harnesses() -> list[_TabHarness]:
             render_fn_name="_render_activity_tab",
             item_factory=lambda i: _make_user_activity_item(id=i),
             data_editor_key="audit_activity_dataframe",
+            prev_view_checks_key="audit_activity_prev_view_checks",
             dialog_id_key="audit_activity_dialog_open_id",
             id_field="id",
             dialog_attr="_render_user_activity_dialog",
@@ -281,6 +286,7 @@ def _make_stub(
             self.components.v1.html = MagicMock()
             self.column_config = _ColumnConfig()
             self.captured_data_editor_kwargs: list[dict] = []
+            self.rerun = MagicMock()
 
         # -- Layout / widgets ----------------------------------------------
         def multiselect(self, *_a, key=None, **_kw):
@@ -530,6 +536,7 @@ def test_multi_tick_does_not_open_dialog(harness, n_checked):
         render_fn_name=harness.render_fn_name,
         item_factory=harness.item_factory,
         data_editor_key=harness.data_editor_key,
+        prev_view_checks_key=harness.prev_view_checks_key,
         dialog_id_key=harness.dialog_id_key,
         id_field=harness.id_field,
         dialog_attr=harness.dialog_attr,
@@ -750,3 +757,150 @@ def test_csv_export_does_not_include_view_column():
     assert captured_export_dfs, "download_button data must have decoded as CSV"
     df = captured_export_dfs[-1]
     assert "View" not in df.columns, f"CSV export must NOT include the View column; saw columns={list(df.columns)}"
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — Single-select enforcement (multi-tick auto-unticks older rows)
+# ---------------------------------------------------------------------------
+
+
+def _build_multi_item_harness(harness, items):
+    """Clone ``harness`` so its loader returns ``items`` (multi-row case).
+    Mirrors the swap pattern from ``test_multi_tick_does_not_open_dialog``.
+    """
+
+    def _swap_loaders(_items):
+        return harness.loader_patches(items)
+
+    return _TabHarness(
+        label=harness.label,
+        render_fn_name=harness.render_fn_name,
+        item_factory=harness.item_factory,
+        data_editor_key=harness.data_editor_key,
+        prev_view_checks_key=harness.prev_view_checks_key,
+        dialog_id_key=harness.dialog_id_key,
+        id_field=harness.id_field,
+        dialog_attr=harness.dialog_attr,
+        loader_patches=_swap_loaders,
+    )
+
+
+@pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
+def test_two_ticks_unticks_older_row_and_reruns(harness):
+    """User had row 1 ticked. They tick row 2 as well. Single-select
+    enforcement must:
+    (a) clear row 1's ``View`` entry from the data_editor's widget-state
+        ``edited_rows`` (so the next render shows row 1 as unticked),
+    (b) call ``st.rerun()`` exactly once,
+    (c) NOT open any dialog on this rerun — the dialog opens on the NEXT
+        rerun when ``checked_count == 1`` is true again.
+    """
+    items = [harness.item_factory(i) for i in range(1, 4)]  # 3 rows
+    swapped = _build_multi_item_harness(harness, items)
+
+    initial_session = {
+        harness.prev_view_checks_key: [1],
+        harness.data_editor_key: {
+            "edited_rows": {1: {"View": True}, 2: {"View": True}},
+        },
+    }
+
+    calls: list = []
+    stub = _make_stub(
+        view_column_values=[False, True, True],
+        initial_session=initial_session,
+    )
+    _run_tab(swapped, stub, items[0], dialog_recorder=calls.append)
+
+    edited_rows = stub.session_state[harness.data_editor_key].get("edited_rows", {})
+    # Row 1 (older tick) must be cleared.
+    assert "View" not in edited_rows.get(1, {}), (
+        f"{harness.label}: row 1 (older tick) must be removed from edited_rows; saw edited_rows={edited_rows!r}"
+    )
+    # Row 2 (newer tick) must be preserved.
+    assert edited_rows.get(2, {}).get("View") is True, f"{harness.label}: row 2 (newer tick) must remain in edited_rows"
+
+    stub.rerun.assert_called_once()
+    assert calls == [], (
+        f"{harness.label}: multi-tick rerun must not open dialog "
+        f"(dialog opens on the NEXT rerun once edits are reflected)"
+    )
+
+    # ``prev_view_checks`` is updated to the kept row.
+    assert stub.session_state.get(harness.prev_view_checks_key) == [2], (
+        f"{harness.label}: prev_view_checks must reflect the kept row"
+    )
+
+
+@pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
+def test_three_ticks_keeps_a_newly_checked_row(harness):
+    """User had row 0 ticked previously. They add ticks on rows 1 and 2
+    in the same interaction (now 3 total). Enforcement keeps one newly-
+    checked row and unticks the older row 0."""
+    items = [harness.item_factory(i) for i in range(1, 4)]  # 3 rows
+    swapped = _build_multi_item_harness(harness, items)
+
+    initial_session = {
+        harness.prev_view_checks_key: [0],
+        harness.data_editor_key: {
+            "edited_rows": {
+                0: {"View": True},
+                1: {"View": True},
+                2: {"View": True},
+            },
+        },
+    }
+
+    calls: list = []
+    stub = _make_stub(
+        view_column_values=[True, True, True],
+        initial_session=initial_session,
+    )
+    _run_tab(swapped, stub, items[0], dialog_recorder=calls.append)
+
+    edited_rows = stub.session_state[harness.data_editor_key].get("edited_rows", {})
+    # Row 0 (only prev-checked row) must be cleared.
+    assert "View" not in edited_rows.get(0, {}), (
+        f"{harness.label}: row 0 (only prev-checked) must be cleared; saw edited_rows={edited_rows!r}"
+    )
+    # At least one of {1, 2} must remain (the keeper).
+    remaining = [idx for idx in (1, 2) if edited_rows.get(idx, {}).get("View") is True]
+    assert remaining, f"{harness.label}: at least one newly-checked row must remain; saw edited_rows={edited_rows!r}"
+
+    stub.rerun.assert_called_once()
+    assert calls == []
+
+
+@pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
+def test_single_tick_does_not_trigger_rerun(harness):
+    """Sanity check: the new enforcement block is a no-op when only one
+    row is ticked. ``st.rerun()`` must NOT be called and the dialog must
+    open normally."""
+    item = harness.item_factory(99)
+
+    calls: list = []
+    stub = _make_stub(view_column_values=[True])
+    _run_tab(harness, stub, item, dialog_recorder=calls.append)
+
+    stub.rerun.assert_not_called()
+    assert calls == [item]
+    assert stub.session_state.get(harness.prev_view_checks_key) == [0]
+
+
+@pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
+def test_zero_ticks_resets_prev_view_checks_to_empty(harness):
+    """When the user unticks everything, ``prev_view_checks`` resets to
+    the empty list so a subsequent single tick is treated as fresh."""
+    item = harness.item_factory(99)
+
+    initial_session = {harness.prev_view_checks_key: [1]}
+    calls: list = []
+    stub = _make_stub(
+        view_column_values=[False, False, False],
+        initial_session=initial_session,
+    )
+    _run_tab(harness, stub, item, dialog_recorder=calls.append)
+
+    stub.rerun.assert_not_called()
+    assert calls == []
+    assert stub.session_state.get(harness.prev_view_checks_key) == []

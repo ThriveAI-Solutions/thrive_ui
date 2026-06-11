@@ -670,13 +670,40 @@ def _render_audit_trail_tab(days_int: int):
             )
 
             try:
-                checked = edited_df[edited_df[_VIEW_COLUMN_LABEL]]
+                current_checked = [int(i) for i in edited_df.index[edited_df[_VIEW_COLUMN_LABEL]].tolist()]
             except Exception:
-                checked = pd.DataFrame()
+                current_checked = []
 
-            checked_count = len(checked)
+            # Single-select enforcement. The ``CheckboxColumn`` natively
+            # allows multi-tick; we want radio-button semantics with
+            # checkbox aesthetics. When the user ticks a new row while
+            # another is already ticked, untick the older one(s) by
+            # mutating ``data_editor``'s widget state at
+            # ``st.session_state["audit_dataframe"]["edited_rows"]`` and
+            # ``st.rerun()`` so the next render reflects the single tick.
+            prev_checked = list(st.session_state.get("audit_questions_prev_view_checks", []))
+            if len(current_checked) > 1:
+                newly_checked = [i for i in current_checked if i not in prev_checked]
+                keep_idx = newly_checked[0] if newly_checked else current_checked[0]
+                editor_state = st.session_state.get("audit_dataframe")
+                if isinstance(editor_state, dict):
+                    edited_rows = editor_state.setdefault("edited_rows", {})
+                    for idx in current_checked:
+                        if idx == keep_idx:
+                            continue
+                        row_edits = edited_rows.get(idx)
+                        if isinstance(row_edits, dict) and _VIEW_COLUMN_LABEL in row_edits:
+                            del row_edits[_VIEW_COLUMN_LABEL]
+                            if not row_edits:
+                                del edited_rows[idx]
+                st.session_state["audit_questions_prev_view_checks"] = [keep_idx]
+                st.rerun()
+            else:
+                st.session_state["audit_questions_prev_view_checks"] = current_checked
+
+            checked_count = len(current_checked)
             if checked_count == 1:
-                row_idx = int(checked.index[0])
+                row_idx = current_checked[0]
                 if 0 <= row_idx < len(items):
                     selected_item = items[row_idx]
                     # Auto-open: dialog fires when exactly one row is
@@ -695,8 +722,6 @@ def _render_audit_trail_tab(days_int: int):
                 # Allow re-ticking the same row to reopen the dialog by
                 # clearing the gate.
                 st.session_state.pop("audit_dialog_open_user_message_id", None)
-            # checked_count > 1: multi-select, no dialog fires. User must
-            # untick extras.
         else:
             # agent_logging.mode == "disabled": render the table read-only;
             # no editor and no action button — the dialog is unreachable.
@@ -1145,13 +1170,37 @@ def _render_activity_tab(days_int: int):
         )
 
         try:
-            checked = edited_df[edited_df[_VIEW_COLUMN_LABEL]]
+            current_checked = [int(i) for i in edited_df.index[edited_df[_VIEW_COLUMN_LABEL]].tolist()]
         except Exception:
-            checked = pd.DataFrame()
+            current_checked = []
 
-        checked_count = len(checked)
+        # Single-select enforcement (see Questions tab block for the full
+        # rationale). Mutate ``data_editor``'s widget state to untick the
+        # older row(s) and ``st.rerun()`` so the next render reflects the
+        # single tick.
+        prev_checked = list(st.session_state.get("audit_activity_prev_view_checks", []))
+        if len(current_checked) > 1:
+            newly_checked = [i for i in current_checked if i not in prev_checked]
+            keep_idx = newly_checked[0] if newly_checked else current_checked[0]
+            editor_state = st.session_state.get("audit_activity_dataframe")
+            if isinstance(editor_state, dict):
+                edited_rows = editor_state.setdefault("edited_rows", {})
+                for idx in current_checked:
+                    if idx == keep_idx:
+                        continue
+                    row_edits = edited_rows.get(idx)
+                    if isinstance(row_edits, dict) and _VIEW_COLUMN_LABEL in row_edits:
+                        del row_edits[_VIEW_COLUMN_LABEL]
+                        if not row_edits:
+                            del edited_rows[idx]
+            st.session_state["audit_activity_prev_view_checks"] = [keep_idx]
+            st.rerun()
+        else:
+            st.session_state["audit_activity_prev_view_checks"] = current_checked
+
+        checked_count = len(current_checked)
         if checked_count == 1:
-            row_idx = int(checked.index[0])
+            row_idx = current_checked[0]
             if 0 <= row_idx < len(items):
                 selected_item = items[row_idx]
                 # Auto-open: dialog fires when exactly one row is ticked.
@@ -1169,8 +1218,6 @@ def _render_activity_tab(days_int: int):
             # Allow re-ticking the same row to reopen the dialog by
             # clearing the gate.
             st.session_state.pop("audit_activity_dialog_open_id", None)
-        # checked_count > 1: multi-select, no dialog fires. User must
-        # untick extras.
     else:
         st.info("No recent activity found.")
 
@@ -1427,13 +1474,37 @@ def _render_audit_tab(days_int: int):
         )
 
         try:
-            checked = edited_df[edited_df[_VIEW_COLUMN_LABEL]]
+            current_checked = [int(i) for i in edited_df.index[edited_df[_VIEW_COLUMN_LABEL]].tolist()]
         except Exception:
-            checked = pd.DataFrame()
+            current_checked = []
 
-        checked_count = len(checked)
+        # Single-select enforcement (see Questions tab block for the full
+        # rationale). Mutate ``data_editor``'s widget state to untick the
+        # older row(s) and ``st.rerun()`` so the next render reflects the
+        # single tick.
+        prev_checked = list(st.session_state.get("audit_actions_prev_view_checks", []))
+        if len(current_checked) > 1:
+            newly_checked = [i for i in current_checked if i not in prev_checked]
+            keep_idx = newly_checked[0] if newly_checked else current_checked[0]
+            editor_state = st.session_state.get("audit_actions_dataframe")
+            if isinstance(editor_state, dict):
+                edited_rows = editor_state.setdefault("edited_rows", {})
+                for idx in current_checked:
+                    if idx == keep_idx:
+                        continue
+                    row_edits = edited_rows.get(idx)
+                    if isinstance(row_edits, dict) and _VIEW_COLUMN_LABEL in row_edits:
+                        del row_edits[_VIEW_COLUMN_LABEL]
+                        if not row_edits:
+                            del edited_rows[idx]
+            st.session_state["audit_actions_prev_view_checks"] = [keep_idx]
+            st.rerun()
+        else:
+            st.session_state["audit_actions_prev_view_checks"] = current_checked
+
+        checked_count = len(current_checked)
         if checked_count == 1:
-            row_idx = int(checked.index[0])
+            row_idx = current_checked[0]
             if 0 <= row_idx < len(items):
                 selected_item = items[row_idx]
                 # Auto-open: dialog fires when exactly one row is ticked.
@@ -1451,8 +1522,6 @@ def _render_audit_tab(days_int: int):
             # Allow re-ticking the same row to reopen the dialog by
             # clearing the gate.
             st.session_state.pop("audit_actions_dialog_open_id", None)
-        # checked_count > 1: multi-select, no dialog fires. User must
-        # untick extras.
     else:
         st.info("No admin actions in the selected time range.")
 
