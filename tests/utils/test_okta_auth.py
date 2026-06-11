@@ -23,9 +23,10 @@ def test_user_model_has_okta_sub_and_email_columns():
 
     assert "okta_sub" in columns, "User.okta_sub column missing"
     assert "email" in columns, "User.email column missing"
-    # Both must be nullable so existing seeded users keep working.
+    # okta_sub stays nullable so local-only users still work.
     assert columns["okta_sub"]["nullable"] is True
-    assert columns["email"]["nullable"] is True
+    # Per Epic #179 email is now NOT NULL — every user has an email.
+    assert columns["email"]["nullable"] is False
 
     # Both must be unique.
     unique_indexes = inspector.get_unique_constraints(User.__tablename__)
@@ -306,10 +307,12 @@ def test_sync_okta_user_to_db_bootstrap_match_by_email_stamps_sub(in_memory_orm_
 
         # Manually insert a pre-provisioned row with email set, sub NULL,
         # admin role (i.e. an admin pre-created this user expecting them to log in).
+        # Epic #179: organization is NOT NULL — admin pre-set "OrgAcme" here.
         pre = User(
             username="alice@example.com",
             password=OIDC_PASSWORD_SENTINEL,
             email="alice@example.com",
+            organization="OrgAcme",
             okta_sub=None,
             first_name="Alice",
             last_name="Anderson",
@@ -375,6 +378,7 @@ def test_sync_okta_user_to_db_handles_jit_race_via_integrity_error(in_memory_orm
                             username="alice-other",
                             password=OIDC_PASSWORD_SENTINEL,
                             email="alice@example.com",
+                            organization="ThriveAI",  # required per Epic #179
                             okta_sub="okta-sub-1",
                             first_name="Alice",
                             last_name="Anderson",
@@ -408,6 +412,7 @@ def test_sync_okta_user_to_db_email_match_is_case_insensitive(in_memory_orm_sess
             username="alice@example.com",
             password=OIDC_PASSWORD_SENTINEL,
             email="Alice@Example.com",
+            organization="ThriveAI",  # required per Epic #179
             okta_sub=None,
             first_name="A",
             last_name="A",
