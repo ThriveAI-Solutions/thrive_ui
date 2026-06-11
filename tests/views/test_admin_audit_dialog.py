@@ -1,14 +1,18 @@
-"""Tests for the Questions audit tab row-click dialog (#155).
+"""Tests for the Questions audit tab View Selected dialog (#155 / #170).
 
 Covers:
-  (a) Dialog opens when selection state changes and closes when cleared.
+  (a) Dialog opens when the View Selected button is clicked with exactly
+      one row checked (Epic #169 / #170 swapped the dataframe selection
+      trigger for a ``st.data_editor`` + checkbox column + explicit
+      button).
   (b) Deep-link round-trip — setting `manage_users_pref_user_id` causes
       Manage Users to pre-populate `mu_selected_label` with the target user.
   (c) `role_can_see_query_details` returning False hides the SQL block and
       the full DataFrame inside the dialog body while keeping question /
       summary / error visible.
   (d) `[agent_logging].mode = "disabled"` makes the dialog unreachable
-      (selection_mode is not passed to st.dataframe).
+      (``st.data_editor`` is not invoked; only the read-only ``st.dataframe``
+      branch runs).
   (e) The dialog renders all rows from `dataframe_preview`, not just the
       first 5 (regression on the old expander `.head(5)` truncation).
 """
@@ -376,15 +380,19 @@ class TestManageUsersInboundPrefill:
 
 
 class TestAgentLoggingDisabled:
-    def test_disabled_mode_skips_selection_mode_kwarg(self):
+    def test_disabled_mode_uses_dataframe_not_data_editor(self):
         """When `[agent_logging].mode = "disabled"`, the audit tab must
-        render the dataframe WITHOUT `selection_mode`, so a click cannot
-        open the dialog (defense in depth — disabled mode should produce
-        no rows in the first place)."""
+        render via the read-only ``st.dataframe`` branch and NOT call
+        ``st.data_editor`` — so there's no checkbox column and no
+        ``View Selected`` button, making the dialog unreachable
+        (defense in depth — disabled mode should produce no rows in the
+        first place). The read-only display must also drop the ``View``
+        column entirely (it would be a confusing always-False checkbox)."""
         from views import admin_analytics
 
-        # Capture the kwargs passed to st.dataframe by the audit tab.
-        captured_kwargs: list[dict] = []
+        dataframe_call_count = [0]
+        data_editor_call_count = [0]
+        captured_readonly_dfs = []
 
         class _Stub:
             def __init__(self):
@@ -393,8 +401,8 @@ class TestAgentLoggingDisabled:
                 self.components = MagicMock()
                 self.components.v1 = MagicMock()
                 self.components.v1.html = MagicMock()
+                self.column_config = MagicMock()
 
-            # Streamlit surface ----
             def multiselect(self, *_a, key=None, **_kw):
                 self.session_state.setdefault(key, [])
                 return []
@@ -418,9 +426,17 @@ class TestAgentLoggingDisabled:
                 n = spec if isinstance(spec, int) else len(spec)
                 return [MagicMock() for _ in range(n)]
 
-            def dataframe(self, _df, **kwargs):
-                captured_kwargs.append(kwargs)
+            def dataframe(self, df, **_kwargs):
+                dataframe_call_count[0] += 1
+                # Capture only DataFrames whose key indicates the audit grid
+                # so we don't grab unrelated read-only tables.
+                if _kwargs.get("key") == "audit_dataframe":
+                    captured_readonly_dfs.append(df)
                 return MagicMock()
+
+            def data_editor(self, df, **_kwargs):
+                data_editor_call_count[0] += 1
+                return df
 
             def info(self, *_a, **_kw):
                 pass
@@ -459,9 +475,6 @@ class TestAgentLoggingDisabled:
                 return _decorator
 
         stub = _Stub()
-
-        # Stub the cached filter options + page result with one row, so the
-        # dataframe code path runs.
         filter_options = {"usernames": ["alice"], "orgs": ["Acme"]}
         page_payload = {
             "items": [_make_item()],
@@ -476,24 +489,29 @@ class TestAgentLoggingDisabled:
         ):
             admin_analytics._render_audit_trail_tab(30)
 
-        assert captured_kwargs, "Expected st.dataframe to be called"
-        # In disabled mode, NO selection_mode kwarg should be passed.
-        for kw in captured_kwargs:
-            assert "selection_mode" not in kw, (
-                "When agent_logging.mode == 'disabled', selection_mode must "
-                f"be omitted from st.dataframe; saw kwargs: {kw}"
-            )
-            assert "on_select" not in kw, (
-                f"When agent_logging.mode == 'disabled', on_select must be omitted from st.dataframe; saw kwargs: {kw}"
-            )
+        assert data_editor_call_count[0] == 0, (
+            "When agent_logging.mode == 'disabled', st.data_editor must NOT be called — "
+            "the dialog must be unreachable. The audit table should fall through to the "
+            "read-only st.dataframe branch."
+        )
+        assert dataframe_call_count[0] >= 1, (
+            "In disabled mode, the table should still render via the read-only st.dataframe branch."
+        )
+        # The read-only DataFrame must NOT carry a meaningless ``View`` column.
+        assert captured_readonly_dfs, "Expected the audit grid to render via st.dataframe in disabled mode"
+        assert "View" not in captured_readonly_dfs[0].columns, (
+            "In disabled mode the read-only display must drop the View column entirely; "
+            f"saw columns={list(captured_readonly_dfs[0].columns)}"
+        )
 
-    def test_full_mode_passes_selection_mode_kwarg(self):
+    def test_full_mode_uses_data_editor_with_view_checkbox_column(self):
         """When `[agent_logging].mode` is anything other than 'disabled'
-        (default 'full'), the audit tab must wire up selection_mode + on_select
-        so row clicks open the dialog."""
+        (default 'full'), the audit tab must call ``st.data_editor`` and
+        configure a leading ``View`` ``CheckboxColumn`` so the explicit
+        ``View Selected`` button workflow is wired up."""
         from views import admin_analytics
 
-        captured_kwargs: list[dict] = []
+        captured_data_editor_kwargs: list[dict] = []
 
         class _Stub:
             def __init__(self):
@@ -502,6 +520,9 @@ class TestAgentLoggingDisabled:
                 self.components = MagicMock()
                 self.components.v1 = MagicMock()
                 self.components.v1.html = MagicMock()
+                # column_config attribute: returning the call args lets
+                # downstream code (the tab) inspect what was configured.
+                self.column_config = MagicMock()
 
             def multiselect(self, *_a, key=None, **_kw):
                 self.session_state.setdefault(key, [])
@@ -526,13 +547,14 @@ class TestAgentLoggingDisabled:
                 n = spec if isinstance(spec, int) else len(spec)
                 return [MagicMock() for _ in range(n)]
 
-            def dataframe(self, _df, **kwargs):
-                captured_kwargs.append(kwargs)
-                # No selection — simulate the user not clicking anything,
-                # so the dialog branch doesn't execute.
-                ev = MagicMock()
-                ev.selection = {"rows": []}
-                return ev
+            def data_editor(self, df, **kwargs):
+                captured_data_editor_kwargs.append(kwargs)
+                # Return the DataFrame unchanged so the tab can read
+                # ``edited_df["View"]`` (all False by default).
+                return df
+
+            def dataframe(self, _df, **_kw):
+                return MagicMock()
 
             def info(self, *_a, **_kw):
                 pass
@@ -582,102 +604,135 @@ class TestAgentLoggingDisabled:
         ):
             admin_analytics._render_audit_trail_tab(30)
 
-        assert captured_kwargs, "Expected st.dataframe to be called"
-        kw = captured_kwargs[0]
-        assert kw.get("selection_mode") == "single-row"
-        assert kw.get("on_select") == "rerun"
+        assert captured_data_editor_kwargs, "Expected st.data_editor to be called"
+        kw = captured_data_editor_kwargs[0]
         assert kw.get("key") == "audit_dataframe"
+        cc = kw.get("column_config")
+        assert cc is not None and "View" in cc, (
+            f"Expected a 'View' entry in column_config; saw keys={list((cc or {}).keys())}"
+        )
 
 
 # ---------------------------------------------------------------------------
-# (a) Selection state opens / closes the dialog
+# (a) View Selected button opens the dialog; no click → no dialog
 # ---------------------------------------------------------------------------
+
+
+def _make_questions_stub(*, view_column_values: list[bool], view_button_clicked: bool = False):
+    """Build a Streamlit stub for ``_render_audit_trail_tab`` that simulates
+    the new (Epic #169) data_editor + checkbox + View Selected button flow.
+
+    ``view_column_values`` controls which rows the user has 'checked' on
+    the ``View`` column. The stub seeds those values back into ``edited_df``
+    so the production code's ``edited_df[edited_df['View']]`` filter picks
+    them up just like Streamlit would after a checkbox toggle.
+
+    ``view_button_clicked`` is True iff the test wants the
+    ``audit_questions_view_selected_btn`` to be 'clicked'.
+    """
+    import pandas as pd
+
+    class _Stub:
+        def __init__(self):
+            self.session_state = {}
+            self.secrets = {"agent_logging": {"mode": "full"}}
+            self.components = MagicMock()
+            self.components.v1 = MagicMock()
+            self.components.v1.html = MagicMock()
+            self.column_config = MagicMock()
+            self.captured_data_editor_kwargs: list[dict] = []
+
+        def multiselect(self, *_a, key=None, **_kw):
+            self.session_state.setdefault(key, [])
+            return []
+
+        def text_input(self, *_a, key=None, **_kw):
+            self.session_state.setdefault(key, "")
+            return ""
+
+        def selectbox(self, *_a, options=None, index=0, key=None, **_kw):
+            opts = list(options or [])
+            val = opts[index] if opts else None
+            if key:
+                self.session_state.setdefault(key, val)
+            return val
+
+        def number_input(self, *_a, key=None, **_kw):
+            self.session_state.setdefault(key, 1)
+            return 1
+
+        def columns(self, spec):
+            n = spec if isinstance(spec, int) else len(spec)
+            return [MagicMock() for _ in range(n)]
+
+        def data_editor(self, df, **kwargs):
+            self.captured_data_editor_kwargs.append(kwargs)
+            # Simulate the user toggling checkboxes: rebuild ``View`` with
+            # the per-test values so the production filter picks them up.
+            out = df.copy()
+            if "View" in out.columns and view_column_values:
+                # Pad / truncate to the row count.
+                vals = list(view_column_values) + [False] * max(0, len(out) - len(view_column_values))
+                out["View"] = vals[: len(out)]
+            return out
+
+        def dataframe(self, _df, **_kw):
+            return MagicMock()
+
+        def info(self, *_a, **_kw):
+            pass
+
+        def button(self, *_a, key=None, **_kw):
+            return bool(view_button_clicked) if key == "audit_questions_view_selected_btn" else False
+
+        def caption(self, *_a, **_kw):
+            pass
+
+        def markdown(self, *_a, **_kw):
+            pass
+
+        def write(self, *_a, **_kw):
+            pass
+
+        def code(self, *_a, **_kw):
+            pass
+
+        def divider(self):
+            pass
+
+        def warning(self, *_a, **_kw):
+            pass
+
+        def error(self, *_a, **_kw):
+            pass
+
+        def download_button(self, *_a, **_kw):
+            pass
+
+        def dialog(self, _title):
+            def _decorator(fn):
+                return fn
+
+            return _decorator
+
+    return _Stub(), pd  # pd returned for the test's local convenience
 
 
 class TestSelectionStateTrigger:
-    def test_row_selection_opens_dialog_and_sets_state(self):
-        """When the dataframe event reports a selected row, the audit tab must
-        set `audit_dialog_open_user_message_id` and invoke the dialog function
-        for that row."""
+    def test_button_click_with_one_row_checked_opens_dialog(self):
+        """When exactly one row's View checkbox is checked AND the
+        View Selected button is clicked, the audit tab must set
+        ``audit_dialog_open_user_message_id`` and invoke the dialog
+        function for that row."""
         from views import admin_analytics
 
         item = _make_item(user_message_id=314)
         dialog_calls: list[dict] = []
 
-        class _Stub:
-            def __init__(self):
-                self.session_state = {}
-                self.secrets = {"agent_logging": {"mode": "full"}}
-                self.components = MagicMock()
-                self.components.v1 = MagicMock()
-                self.components.v1.html = MagicMock()
-
-            def multiselect(self, *_a, key=None, **_kw):
-                self.session_state.setdefault(key, [])
-                return []
-
-            def text_input(self, *_a, key=None, **_kw):
-                self.session_state.setdefault(key, "")
-                return ""
-
-            def selectbox(self, *_a, options=None, index=0, key=None, **_kw):
-                opts = list(options or [])
-                val = opts[index] if opts else None
-                if key:
-                    self.session_state.setdefault(key, val)
-                return val
-
-            def number_input(self, *_a, key=None, **_kw):
-                self.session_state.setdefault(key, 1)
-                return 1
-
-            def columns(self, spec):
-                n = spec if isinstance(spec, int) else len(spec)
-                return [MagicMock() for _ in range(n)]
-
-            def dataframe(self, _df, **_kw):
-                # Simulate the user selecting row 0.
-                ev = MagicMock()
-                ev.selection = {"rows": [0]}
-                return ev
-
-            def info(self, *_a, **_kw):
-                pass
-
-            def button(self, *_a, **_kw):
-                return False
-
-            def caption(self, *_a, **_kw):
-                pass
-
-            def markdown(self, *_a, **_kw):
-                pass
-
-            def write(self, *_a, **_kw):
-                pass
-
-            def code(self, *_a, **_kw):
-                pass
-
-            def divider(self):
-                pass
-
-            def warning(self, *_a, **_kw):
-                pass
-
-            def error(self, *_a, **_kw):
-                pass
-
-            def download_button(self, *_a, **_kw):
-                pass
-
-            def dialog(self, _title):
-                def _decorator(fn):
-                    return fn
-
-                return _decorator
-
-        stub = _Stub()
+        stub, _pd = _make_questions_stub(
+            view_column_values=[True],
+            view_button_clicked=True,
+        )
 
         def _fake_dialog(passed_item):
             dialog_calls.append(passed_item)
@@ -698,91 +753,21 @@ class TestSelectionStateTrigger:
         ):
             admin_analytics._render_audit_trail_tab(30)
 
-        assert dialog_calls == [item], "Dialog must be invoked for the selected row's item"
+        assert dialog_calls == [item], "Dialog must be invoked for the checked row's item"
         assert stub.session_state.get("audit_dialog_open_user_message_id") == 314
 
-    def test_no_selection_clears_dialog_state_key(self):
-        """When the user clears the selection (rows: []), the dialog tracking
-        key should be removed from session_state so re-selecting the same row
-        reopens the dialog."""
+    def test_no_button_click_does_not_open_dialog(self):
+        """If the user checks a row but never clicks View Selected, the
+        dialog must NOT open and no tracking key is set."""
         from views import admin_analytics
 
         item = _make_item(user_message_id=314)
 
-        class _Stub:
-            def __init__(self):
-                # Pre-existing open key from a prior dialog session.
-                self.session_state = {"audit_dialog_open_user_message_id": 314}
-                self.secrets = {"agent_logging": {"mode": "full"}}
-                self.components = MagicMock()
-                self.components.v1 = MagicMock()
-                self.components.v1.html = MagicMock()
-
-            def multiselect(self, *_a, key=None, **_kw):
-                self.session_state.setdefault(key, [])
-                return []
-
-            def text_input(self, *_a, key=None, **_kw):
-                self.session_state.setdefault(key, "")
-                return ""
-
-            def selectbox(self, *_a, options=None, index=0, key=None, **_kw):
-                opts = list(options or [])
-                val = opts[index] if opts else None
-                if key:
-                    self.session_state.setdefault(key, val)
-                return val
-
-            def number_input(self, *_a, key=None, **_kw):
-                self.session_state.setdefault(key, 1)
-                return 1
-
-            def columns(self, spec):
-                n = spec if isinstance(spec, int) else len(spec)
-                return [MagicMock() for _ in range(n)]
-
-            def dataframe(self, _df, **_kw):
-                ev = MagicMock()
-                ev.selection = {"rows": []}
-                return ev
-
-            def info(self, *_a, **_kw):
-                pass
-
-            def button(self, *_a, **_kw):
-                return False
-
-            def caption(self, *_a, **_kw):
-                pass
-
-            def markdown(self, *_a, **_kw):
-                pass
-
-            def write(self, *_a, **_kw):
-                pass
-
-            def code(self, *_a, **_kw):
-                pass
-
-            def divider(self):
-                pass
-
-            def warning(self, *_a, **_kw):
-                pass
-
-            def error(self, *_a, **_kw):
-                pass
-
-            def download_button(self, *_a, **_kw):
-                pass
-
-            def dialog(self, _title):
-                def _decorator(fn):
-                    return fn
-
-                return _decorator
-
-        stub = _Stub()
+        # Row is checked, but button is NOT clicked.
+        stub, _pd = _make_questions_stub(
+            view_column_values=[True],
+            view_button_clicked=False,
+        )
 
         with (
             patch.object(admin_analytics, "st", stub),

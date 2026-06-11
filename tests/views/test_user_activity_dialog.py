@@ -420,17 +420,24 @@ class TestDeepLinkRoundTrip:
 def _activity_tab_stub_class():
     """Build a Streamlit stub for ``_render_activity_tab`` testing.
 
-    Returns the class so tests can mutate per-test behaviour (e.g.
-    different `selected_rows`)."""
+    Returns the class so tests can mutate per-test behaviour.
+
+    Epic #169 / Feature #170: the trigger primitive is now
+    ``st.data_editor`` + ``View`` ``CheckboxColumn`` + ``View Selected``
+    button. ``view_column_values`` controls which rows are 'checked'
+    and ``view_button_clicked`` fires the button.
+    """
 
     class _Stub:
-        def __init__(self, *, selected_rows=None, initial_session=None):
+        def __init__(self, *, view_column_values=None, view_button_clicked=False, initial_session=None):
             self.session_state = dict(initial_session or {})
-            self.captured_dataframe_kwargs: list[dict] = []
-            self._selected_rows = list(selected_rows or [])
+            self.captured_data_editor_kwargs: list[dict] = []
+            self._view_column_values = list(view_column_values or [])
+            self._view_button_clicked = bool(view_button_clicked)
             self.components = MagicMock()
             self.components.v1 = MagicMock()
             self.components.v1.html = MagicMock()
+            self.column_config = MagicMock()
 
         def selectbox(self, *_a, options=None, index=0, key=None, **_kw):
             opts = list(options or [])
@@ -462,17 +469,22 @@ def _activity_tab_stub_class():
                 cols.append(cm)
             return cols
 
-        def dataframe(self, _df, **kwargs):
-            self.captured_dataframe_kwargs.append(kwargs)
-            ev = MagicMock()
-            ev.selection = {"rows": list(self._selected_rows)}
-            return ev
+        def data_editor(self, df, **kwargs):
+            self.captured_data_editor_kwargs.append(kwargs)
+            out = df.copy()
+            if "View" in out.columns and self._view_column_values:
+                vals = list(self._view_column_values) + [False] * max(0, len(out) - len(self._view_column_values))
+                out["View"] = vals[: len(out)]
+            return out
+
+        def dataframe(self, _df, **_kwargs):
+            return MagicMock()
 
         def info(self, *_a, **_kw):
             pass
 
-        def button(self, *_a, **_kw):
-            return False
+        def button(self, *_a, key=None, **_kw):
+            return self._view_button_clicked if key == "audit_activity_view_selected_btn" else False
 
         def caption(self, *_a, **_kw):
             pass
@@ -508,15 +520,15 @@ def _activity_tab_stub_class():
 
 
 class TestActivityTabSelectionTrigger:
-    def test_dataframe_uses_single_row_selection_primitive(self):
-        """The activity grid must use the trigger primitive locked in by #155:
-        ``selection_mode='single-row'`` + ``on_select='rerun'`` +
-        ``key='audit_activity_dataframe'``."""
+    def test_data_editor_wired_with_view_checkbox_column(self):
+        """The activity grid must use the Epic #169 / #170 trigger
+        primitive: ``st.data_editor`` + leading ``View``
+        ``CheckboxColumn`` + a stable key (``audit_activity_dataframe``)."""
         from views import admin_analytics
 
         item = _make_item(id=999)
         Stub = _activity_tab_stub_class()
-        stub = Stub(selected_rows=[])
+        stub = Stub(view_column_values=[])
 
         with (
             patch.object(admin_analytics, "st", stub),
@@ -538,20 +550,23 @@ class TestActivityTabSelectionTrigger:
         ):
             admin_analytics._render_activity_tab(30)
 
-        assert stub.captured_dataframe_kwargs, "Expected st.dataframe to be called"
-        kw = stub.captured_dataframe_kwargs[0]
-        assert kw.get("selection_mode") == "single-row"
-        assert kw.get("on_select") == "rerun"
+        assert stub.captured_data_editor_kwargs, "Expected st.data_editor to be called"
+        kw = stub.captured_data_editor_kwargs[0]
         assert kw.get("key") == "audit_activity_dataframe"
+        cc = kw.get("column_config")
+        assert cc is not None and "View" in cc, (
+            f"Expected a 'View' entry in column_config; saw keys={list((cc or {}).keys())}"
+        )
 
-    def test_row_selection_opens_dialog_and_sets_state(self):
-        """When a row is selected, ``audit_activity_dialog_open_id`` is set and
-        the dialog function is invoked with the corresponding item."""
+    def test_button_click_with_one_row_checked_opens_dialog(self):
+        """With exactly one View checkbox ticked AND the View Selected
+        button clicked, ``audit_activity_dialog_open_id`` is set and the
+        dialog is invoked with the corresponding item."""
         from views import admin_analytics
 
         item = _make_item(id=777)
         Stub = _activity_tab_stub_class()
-        stub = Stub(selected_rows=[0])
+        stub = Stub(view_column_values=[True], view_button_clicked=True)
         dialog_calls: list[dict] = []
 
         def _fake_dialog(passed_item):
@@ -578,20 +593,18 @@ class TestActivityTabSelectionTrigger:
         ):
             admin_analytics._render_activity_tab(30)
 
-        assert dialog_calls == [item], "Dialog must be invoked with the selected row's item"
+        assert dialog_calls == [item], "Dialog must be invoked with the checked row's item"
         assert stub.session_state.get("audit_activity_dialog_open_id") == 777
 
-    def test_no_selection_clears_dialog_state_key(self):
-        """Clearing the selection removes ``audit_activity_dialog_open_id`` so
-        re-selecting the same row reopens the dialog."""
+    def test_no_button_click_does_not_open_dialog(self):
+        """Checking the box without clicking View Selected must NOT open
+        the dialog."""
         from views import admin_analytics
 
         item = _make_item(id=777)
         Stub = _activity_tab_stub_class()
-        stub = Stub(
-            selected_rows=[],
-            initial_session={"audit_activity_dialog_open_id": 777},
-        )
+        # Row checked, button not clicked.
+        stub = Stub(view_column_values=[True], view_button_clicked=False)
 
         with (
             patch.object(admin_analytics, "st", stub),

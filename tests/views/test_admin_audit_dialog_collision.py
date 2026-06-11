@@ -3,28 +3,23 @@
 Background
 ----------
 ``views/admin_audit.py:render`` builds an inner ``st.tabs`` with three child
-audit tabs (Questions, Admin Actions, User Activity). Each child renders its
-own ``st.dataframe(on_select="rerun", selection_mode="single-row")`` whose
-selection state persists across reruns in ``st.session_state``. Because
-``st.tabs`` evaluates *every* tab body on every rerun (not just the visible
-one), and Streamlit forbids more than one ``st.dialog`` call per script run,
-the prior pattern — where each tab unconditionally called
-``_render_X_dialog(selected_item)`` whenever ``selected_rows`` was non-empty —
-could fire two dialogs in the same rerun and raise:
+audit tabs (Questions, Admin Actions, User Activity). Epic #169 / #170
+swapped each tab's trigger primitive from
+``st.dataframe(on_select=..., selection_mode='single-row')`` to
+``st.data_editor`` + a leading ``View`` ``CheckboxColumn`` + an explicit
+``View Selected`` button. ``st.tabs`` still evaluates *every* tab body on
+every rerun, and Streamlit still forbids more than one ``st.dialog`` call
+per script run — so the cross-tab claim guard remains as defense in depth.
 
-    streamlit.errors.StreamlitAPIException:
-    Only one dialog is allowed to be opened at the same time.
-
-The fix introduces a per-rerun guard, ``_audit_dialog_claimed_this_rerun``:
+The per-rerun guard, ``_audit_dialog_claimed_this_rerun``:
 
 * ``views/admin_audit.py:render`` resets the flag to ``False`` at the top of
   every rerun, before ``st.tabs`` is created.
 * Each of the three tab dialog branches checks-and-sets the flag *inside*
-  the ``if open_id != selected_item[...]`` gate, so at most one tab opens
-  a dialog per rerun, and a row already opened in a prior rerun does not
-  reopen on subsequent reruns.
+  the View Selected button-click branch, so at most one tab opens a dialog
+  per rerun.
 
-These tests pin both behaviours.
+These tests pin both behaviours under the new (data_editor + button) flow.
 """
 
 from __future__ import annotations
@@ -101,27 +96,46 @@ class _SharedSessionStub:
     ``_audit_dialog_claimed_this_rerun`` lives on a SHARED ``session_state``
     dict — that's the whole point of the fix.
 
-    ``per_key_selections`` lets each tab's dataframe report a different
-    ``selected_rows`` value, keyed by the dataframe's ``key=`` kwarg.
+    Epic #169 / #170 changed the trigger primitive. Each tab now wires its
+    grid as ``st.data_editor`` + a ``View`` checkbox column, and opens its
+    dialog when the ``audit_<tab>_view_selected_btn`` button is clicked
+    with exactly one row's checkbox ticked.
+
+    ``per_key_view_checked`` lets each tab's data_editor seed the ``View``
+    column with a per-row list of booleans, keyed by the data_editor's
+    ``key=`` kwarg (one of ``audit_dataframe``, ``audit_actions_dataframe``,
+    ``audit_activity_dataframe``).
+    ``per_key_button_clicks`` lets each tab's View Selected button report
+    as 'clicked', keyed by the button's ``key=`` kwarg.
     """
+
+    # The View column key/value used by all three tabs.
+    _VIEW_COL = "View"
 
     def __init__(
         self,
         *,
-        per_key_selections: dict | None = None,
+        per_key_view_checked: dict | None = None,
+        per_key_button_clicks: dict | None = None,
         initial_session: dict | None = None,
         secrets: dict | None = None,
     ):
         self.session_state: dict = dict(initial_session or {})
-        self._per_key_selections = dict(per_key_selections or {})
+        self._per_key_view_checked = dict(per_key_view_checked or {})
+        self._per_key_button_clicks = dict(per_key_button_clicks or {})
         self.secrets = secrets if secrets is not None else {"agent_logging": {"mode": "full"}}
-        # The dataframe kwargs captured per call, for diagnostics.
-        self.captured_dataframe_kwargs: list[dict] = []
+        # The data_editor kwargs captured per call, for diagnostics.
+        self.captured_data_editor_kwargs: list[dict] = []
         # ``components.v1.html`` is invoked by the question dialog body; the
         # tab body itself does not hit it but we expose it for safety.
         self.components = MagicMock()
         self.components.v1 = MagicMock()
         self.components.v1.html = MagicMock()
+        # Real ``st.column_config`` is fine to expose as a Mock; the
+        # production tab calls ``st.column_config.CheckboxColumn(...)`` /
+        # ``TextColumn(...)`` purely to populate the ``column_config`` kwarg
+        # we don't introspect here.
+        self.column_config = MagicMock()
 
     # ---- Layout primitives -----------------------------------------------
     def tabs(self, _labels):
@@ -176,20 +190,26 @@ class _SharedSessionStub:
             self.session_state.setdefault(key, 1)
         return 1
 
-    def button(self, *_a, **_kw):
-        return False
+    def button(self, *_a, key=None, **_kw):
+        return bool(self._per_key_button_clicks.get(key, False))
 
     def download_button(self, *_a, **_kw):
         return False
 
     # ---- Output primitives ----------------------------------------------
-    def dataframe(self, _df, **kwargs):
-        self.captured_dataframe_kwargs.append(kwargs)
+    def data_editor(self, df, **kwargs):
+        self.captured_data_editor_kwargs.append(kwargs)
         key = kwargs.get("key")
-        rows = self._per_key_selections.get(key, [])
-        ev = MagicMock()
-        ev.selection = {"rows": list(rows)}
-        return ev
+        checks = self._per_key_view_checked.get(key, [])
+        out = df.copy()
+        if self._VIEW_COL in out.columns and checks:
+            vals = list(checks) + [False] * max(0, len(out) - len(checks))
+            out[self._VIEW_COL] = vals[: len(out)]
+        return out
+
+    def dataframe(self, _df, **_kwargs):
+        # Disabled-mode (read-only) branch + the Action Distribution table.
+        return MagicMock()
 
     def info(self, *_a, **_kw):
         pass
@@ -312,13 +332,13 @@ def _patches_for_render(
 
 class TestCrossTabCollision:
     def test_single_dialog_when_multiple_tabs_have_selections(self):
-        """Production repro: Questions tab has a lingering selection AND
-        Admin Actions tab has a lingering selection AND User Activity tab
-        has a lingering selection, all with tab-local ``open_id`` keys that
-        differ from the would-be selected items' ids. Without the fix, every
-        rerun fires two or three ``st.dialog`` calls and Streamlit raises.
+        """Production repro: Questions tab has row 0 checked AND clicks
+        View Selected AND Admin Actions tab has row 0 checked AND clicks
+        View Selected AND same for User Activity — all in the same rerun.
+        Without the cross-tab guard, every rerun would fire two or three
+        ``st.dialog`` calls and Streamlit would raise.
 
-        With the fix, exactly ONE dialog is invoked per rerun.
+        With the guard, exactly ONE dialog is invoked per rerun.
         """
         from views import admin_audit
 
@@ -326,15 +346,20 @@ class TestCrossTabCollision:
         a_item = _make_admin_action_item(id=271)
         u_item = _make_user_activity_item(id=42)
 
-        # All three tabs report a selected row 0; tab-local ``open_id`` keys
-        # are absent so the ``open_id != selected[id]`` guard would otherwise
-        # pass through to the dialog call in every tab.
+        # All three tabs have row 0 checked, AND all three tabs' View
+        # Selected buttons are 'clicked' simultaneously — that's the
+        # cross-tab collision the guard exists to prevent.
         stub = _SharedSessionStub(
-            per_key_selections={
-                "audit_dataframe": [0],
-                "audit_actions_dataframe": [0],
-                "audit_activity_dataframe": [0],
-            }
+            per_key_view_checked={
+                "audit_dataframe": [True],
+                "audit_actions_dataframe": [True],
+                "audit_activity_dataframe": [True],
+            },
+            per_key_button_clicks={
+                "audit_questions_view_selected_btn": True,
+                "audit_actions_view_selected_btn": True,
+                "audit_activity_view_selected_btn": True,
+            },
         )
 
         q_calls: list = []
@@ -373,16 +398,20 @@ class TestCrossTabCollision:
         )
 
     def test_same_row_reselection_does_not_reopen(self):
-        """If the Questions tab dataframe still reports the same selected row
-        whose ``user_message_id`` matches ``audit_dialog_open_user_message_id``
-        from a prior rerun, the dialog must NOT be re-fired. (Before the fix,
-        the dialog re-rendered on every rerun.)"""
+        """If the user has row 0 checked on the Questions tab but does
+        NOT click View Selected again, the dialog must NOT re-fire on
+        subsequent reruns. (Under the new explicit-button pattern the
+        dialog trigger is the button click event itself — Streamlit
+        button events are not sticky across reruns — so this is naturally
+        defensible, but we pin it.)"""
         from views import admin_audit
 
         q_item = _make_question_item(user_message_id=999)
 
         stub = _SharedSessionStub(
-            per_key_selections={"audit_dataframe": [0]},
+            per_key_view_checked={"audit_dataframe": [True]},
+            # No button click this rerun.
+            per_key_button_clicks={},
             # Same id already tracked — dialog was opened in a prior rerun.
             initial_session={"audit_dialog_open_user_message_id": 999},
         )
@@ -417,22 +446,23 @@ class TestCrossTabCollision:
 
     def test_guard_resets_per_rerun(self):
         """The cross-tab claim guard must be cleared at the top of every rerun.
-        Two consecutive ``render`` calls with NEW selections must each fire
-        exactly one dialog. (If the guard leaked across reruns, the second
-        rerun would silently drop the dialog.)"""
+        Two consecutive ``render`` calls in which the user re-clicks the
+        Questions tab's ``View Selected`` button must each fire exactly
+        one dialog. (If the guard leaked across reruns, the second rerun
+        would silently drop the dialog.)"""
         from views import admin_audit
 
-        # Two distinct Questions items across the two reruns. Same dataframe
-        # key, different ``user_message_id``s, so each rerun's selection is
-        # genuinely "new" relative to whatever the tab tracked previously.
+        # Two distinct Questions items across the two reruns. Same
+        # data_editor key, different ``user_message_id``s.
         q_item_1 = _make_question_item(user_message_id=111)
         q_item_2 = _make_question_item(user_message_id=222)
 
         # A single shared stub across both reruns so session_state persists,
-        # just like real Streamlit. Only the loader return values + selections
-        # differ between reruns.
+        # just like real Streamlit. Row 0 is checked in both reruns AND
+        # the View Selected button is 'clicked' in both reruns.
         stub = _SharedSessionStub(
-            per_key_selections={"audit_dataframe": [0]},
+            per_key_view_checked={"audit_dataframe": [True]},
+            per_key_button_clicks={"audit_questions_view_selected_btn": True},
         )
 
         # ---- Rerun 1 -----------------------------------------------------
@@ -580,7 +610,8 @@ class TestCrossTabCollision:
         q_item = _make_question_item(user_message_id=1)
 
         stub = _SharedSessionStub(
-            per_key_selections={"audit_dataframe": [0]},
+            per_key_view_checked={"audit_dataframe": [True]},
+            per_key_button_clicks={"audit_questions_view_selected_btn": True},
             initial_session={"_audit_dialog_claimed_this_rerun": True},
         )
 
