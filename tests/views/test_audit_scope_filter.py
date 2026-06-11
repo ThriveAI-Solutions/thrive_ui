@@ -52,7 +52,6 @@ def _make_stub(
     *,
     secrets_mode: str = "full",
     multiselect_returns: dict | None = None,
-    dataframe_returns_selection: bool = False,
     button_returns: dict | None = None,
     initial_session_state: dict | None = None,
 ):
@@ -63,13 +62,21 @@ def _make_stub(
     multiselect_returns : dict keyed by ``key=`` value. Lets tests inject
         the "user picked these" values without faking widget interaction.
     button_returns : dict keyed by ``key=`` value. Lets tests fire the CSV
-        export button on demand.
+        export button (``audit_export_btn``) on demand.
+
+    Epic #169 / #170: the Questions audit grid is now ``st.data_editor``
+    with a labeled ``View`` checkbox column that auto-opens the detail
+    dialog on tick (no button). ``table_rows`` are captured from
+    ``data_editor(df, ...)`` rather than ``dataframe(df, ...)``. The
+    read-only ``st.dataframe`` branch (agent_logging.mode = 'disabled')
+    is also captured for completeness.
     """
 
     captured_multiselect_kwargs: list[dict] = []
     captured_table_rows: list[list[dict]] = []
     captured_download_kwargs: list[dict] = []
     captured_export_df: list[pd.DataFrame] = []
+    captured_data_editor_kwargs: list[dict] = []
 
     multiselect_returns = multiselect_returns or {}
     button_returns = button_returns or {}
@@ -82,6 +89,7 @@ def _make_stub(
             self.components = MagicMock()
             self.components.v1 = MagicMock()
             self.components.v1.html = MagicMock()
+            self.column_config = MagicMock()
 
         # -- widgets -------------------------------------------------------
         def multiselect(self, label, options=None, key=None, **kw):
@@ -120,18 +128,23 @@ def _make_stub(
             n = spec if isinstance(spec, int) else len(spec)
             return [MagicMock() for _ in range(n)]
 
-        def dataframe(self, df, **_kw):
+        def data_editor(self, df, **kw):
+            captured_data_editor_kwargs.append(kw)
             try:
                 captured_table_rows.append(df.to_dict(orient="records"))
             except Exception:
                 captured_table_rows.append([])
-            if dataframe_returns_selection:
-                ev = MagicMock()
-                ev.selection = {"rows": [0]}
-                return ev
-            ev = MagicMock()
-            ev.selection = {"rows": []}
-            return ev
+            # Return the DataFrame unchanged (no rows checked by default,
+            # so the auto-open dialog branch does not fire).
+            return df
+
+        def dataframe(self, df, **_kw):
+            # Disabled-mode read-only branch.
+            try:
+                captured_table_rows.append(df.to_dict(orient="records"))
+            except Exception:
+                captured_table_rows.append([])
+            return MagicMock()
 
         def info(self, *_a, **_kw):
             pass
@@ -185,6 +198,7 @@ def _make_stub(
         "table_rows": captured_table_rows,
         "download_kwargs": captured_download_kwargs,
         "export_df": captured_export_df,
+        "data_editor_kwargs": captured_data_editor_kwargs,
     }
 
 

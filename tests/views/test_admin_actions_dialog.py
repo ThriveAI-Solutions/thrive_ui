@@ -354,14 +354,22 @@ class TestTargetLine:
 # ---------------------------------------------------------------------------
 
 
-def _make_tab_stub():
-    """Build a stub ``st`` module sufficient for ``_render_audit_tab`` to run."""
+def _make_tab_stub(*, view_column_values=None, initial_session: dict | None = None):
+    """Build a stub ``st`` module sufficient for ``_render_audit_tab`` to run.
+
+    Mirrors the new (Epic #169 / #170) data_editor + checkbox column +
+    auto-open-on-tick flow. ``view_column_values`` controls which rows
+    are 'checked' on the ``View`` column. ``initial_session`` seeds
+    ``session_state`` — used by the "sticky tick across reruns" tests
+    to pre-populate ``audit_actions_dialog_open_id``.
+    """
 
     class _Stub:
         def __init__(self):
-            self.session_state = {}
-            self.captured_dataframe_kwargs: list[dict] = []
+            self.session_state = dict(initial_session or {})
+            self.captured_data_editor_kwargs: list[dict] = []
             self.dialog_invocations: list[dict] = []
+            self.column_config = MagicMock()
 
         # Streamlit surface --------------------------------------------------
         def columns(self, spec):
@@ -391,12 +399,22 @@ def _make_tab_stub():
             self.session_state.setdefault(key, 1)
             return 1
 
-        def dataframe(self, _df, **kwargs):
-            self.captured_dataframe_kwargs.append(kwargs)
-            # Default: simulate the configured selection_event hook (set per test).
-            return getattr(self, "_dataframe_event", None) or MagicMock(selection={"rows": []})
+        def data_editor(self, df, **kwargs):
+            self.captured_data_editor_kwargs.append(kwargs)
+            # Simulate user toggling the View checkboxes.
+            out = df.copy()
+            if "View" in out.columns and view_column_values:
+                vals = list(view_column_values) + [False] * max(0, len(out) - len(view_column_values))
+                out["View"] = vals[: len(out)]
+            return out
 
-        def button(self, *_a, **_kw):
+        def dataframe(self, _df, **_kw):
+            # Distribution table still uses st.dataframe; just return a Mock.
+            return MagicMock()
+
+        def button(self, *_a, key=None, **_kw):
+            # No button participates in the auto-open flow — Prev/Next
+            # buttons still render but do nothing here.
             return False
 
         def caption(self, *_a, **_kw):
@@ -439,19 +457,17 @@ def _make_tab_stub():
 
 
 class TestSelectionStateTrigger:
-    def test_row_selection_opens_dialog_and_sets_state(self):
-        """When the dataframe event reports a selected row, _render_audit_tab
-        must set ``audit_actions_dialog_open_id`` and invoke the dialog
-        function for that row."""
+    def test_one_tick_auto_opens_dialog(self):
+        """When the View checkbox is ticked for exactly one row,
+        ``_render_audit_tab`` must set ``audit_actions_dialog_open_id``
+        and auto-invoke the dialog function for that row — no button
+        click needed."""
         from views import admin_analytics
 
         item = _make_action(id=314)
         dialog_calls: list[dict] = []
 
-        stub = _make_tab_stub()
-        ev = MagicMock()
-        ev.selection = {"rows": [0]}
-        stub._dataframe_event = ev
+        stub = _make_tab_stub(view_column_values=[True])
 
         with (
             patch.object(admin_analytics, "st", stub),
@@ -468,20 +484,22 @@ class TestSelectionStateTrigger:
         ):
             admin_analytics._render_audit_tab(30)
 
-        assert dialog_calls == [item], "Dialog must be invoked for the selected row's item"
+        assert dialog_calls == [item], "Dialog must be invoked for the ticked row's item"
         assert stub.session_state.get("audit_actions_dialog_open_id") == 314
 
-    def test_no_selection_clears_dialog_state_key(self):
+    def test_zero_ticks_does_not_open_dialog(self):
+        """If no row is ticked, the dialog must NOT fire and the per-tab
+        ``open_id`` gate is cleared so the same row can be re-ticked."""
         from views import admin_analytics
 
         item = _make_action(id=314)
 
-        stub = _make_tab_stub()
-        # Pre-existing tracking key — must be cleared when selection is empty.
-        stub.session_state["audit_actions_dialog_open_id"] = 314
-        ev = MagicMock()
-        ev.selection = {"rows": []}
-        stub._dataframe_event = ev
+        # No row is checked. Pre-populate the gate to verify it gets
+        # cleared.
+        stub = _make_tab_stub(
+            view_column_values=[False],
+            initial_session={"audit_actions_dialog_open_id": 314},
+        )
 
         with (
             patch.object(admin_analytics, "st", stub),
@@ -499,12 +517,48 @@ class TestSelectionStateTrigger:
             admin_analytics._render_audit_tab(30)
 
         dialog_mock.assert_not_called()
-        assert "audit_actions_dialog_open_id" not in stub.session_state
+        assert "audit_actions_dialog_open_id" not in stub.session_state, (
+            "Zero ticks must clear the open_id gate so the same row can be re-ticked"
+        )
 
-    def test_dataframe_wired_with_single_row_selection_primitive(self):
-        """The grid must always use the locked-in trigger primitive:
-        ``selection_mode='single-row'``, ``on_select='rerun'``, and a stable
-        key. Epic #154 mandates this for #156 + #157."""
+    def test_sticky_tick_across_rerun_does_not_refire(self):
+        """If the checkbox stays ticked between reruns (Streamlit
+        ``data_editor`` retains the True value) the dialog must NOT
+        re-fire — the per-tab gate stops it."""
+        from views import admin_analytics
+
+        item = _make_action(id=314)
+
+        # Row is still ticked AND the gate already records this row as
+        # open from a prior rerun.
+        stub = _make_tab_stub(
+            view_column_values=[True],
+            initial_session={"audit_actions_dialog_open_id": 314},
+        )
+
+        with (
+            patch.object(admin_analytics, "st", stub),
+            patch.object(admin_analytics, "_render_admin_action_dialog") as dialog_mock,
+            patch(
+                "orm.logging_functions.get_admin_actions_page",
+                return_value={"items": [item], "total": 1},
+            ),
+            patch(
+                "orm.logging_functions.get_admin_action_stats",
+                return_value={"total": 1, "user_changes": 0, "training_actions": 0, "failed": 0},
+            ),
+            patch("orm.logging_functions.get_admin_actions_by_type", return_value=[]),
+        ):
+            admin_analytics._render_audit_tab(30)
+
+        dialog_mock.assert_not_called()
+        # Gate stays set to the same id (sticky tick).
+        assert stub.session_state.get("audit_actions_dialog_open_id") == 314
+
+    def test_data_editor_wired_with_view_checkbox_column(self):
+        """The Admin Actions grid must call ``st.data_editor`` with a
+        leading ``View`` ``CheckboxColumn`` and a stable key
+        (``audit_actions_dataframe``). Epic #169 / Feature #170."""
         from views import admin_analytics
 
         item = _make_action()
@@ -525,11 +579,13 @@ class TestSelectionStateTrigger:
         ):
             admin_analytics._render_audit_tab(30)
 
-        assert stub.captured_dataframe_kwargs, "Expected st.dataframe to be called for the grid"
-        kw = stub.captured_dataframe_kwargs[0]
-        assert kw.get("selection_mode") == "single-row"
-        assert kw.get("on_select") == "rerun"
+        assert stub.captured_data_editor_kwargs, "Expected st.data_editor to be called for the grid"
+        kw = stub.captured_data_editor_kwargs[0]
         assert kw.get("key") == "audit_actions_dataframe"
+        cc = kw.get("column_config")
+        assert cc is not None and "View" in cc, (
+            f"Expected a 'View' entry in column_config; saw keys={list((cc or {}).keys())}"
+        )
 
 
 # ---------------------------------------------------------------------------
