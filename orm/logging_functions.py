@@ -1115,57 +1115,6 @@ def get_user_activity_page(days: int = 7, page: int = 1, page_size: int = 50) ->
         return {"items": [], "total": 0}
 
 
-def get_error_stats(days: int = 7) -> dict:
-    """Get error statistics for analytics."""
-    try:
-        since = datetime.now() - timedelta(days=days)
-        with SessionLocal() as session:
-            from sqlalchemy import func as sqla_func
-
-            total = session.query(sqla_func.count(ErrorLog.id)).filter(ErrorLog.created_at >= since).scalar() or 0
-            critical = (
-                session.query(sqla_func.count(ErrorLog.id))
-                .filter(
-                    ErrorLog.created_at >= since,
-                    ErrorLog.severity == ErrorSeverity.CRITICAL.value,
-                )
-                .scalar()
-                or 0
-            )
-            sql_errors = (
-                session.query(sqla_func.count(ErrorLog.id))
-                .filter(
-                    ErrorLog.created_at >= since,
-                    ErrorLog.category.in_([ErrorCategory.SQL_GENERATION.value, ErrorCategory.SQL_EXECUTION.value]),
-                )
-                .scalar()
-                or 0
-            )
-            retry_attempted = (
-                session.query(sqla_func.count(ErrorLog.id))
-                .filter(ErrorLog.created_at >= since, ErrorLog.auto_retry_attempted == True)  # noqa: E712
-                .scalar()
-                or 0
-            )
-            retry_successful = (
-                session.query(sqla_func.count(ErrorLog.id))
-                .filter(ErrorLog.created_at >= since, ErrorLog.retry_successful == True)  # noqa: E712
-                .scalar()
-                or 0
-            )
-            retry_rate = (retry_successful / retry_attempted * 100) if retry_attempted > 0 else 0
-
-            return {
-                "total": total,
-                "critical": critical,
-                "sql_errors": sql_errors,
-                "retry_success_rate": round(retry_rate, 1),
-            }
-    except Exception as e:
-        logger.warning("Failed to get error stats: %s", e)
-        return {"total": 0, "critical": 0, "sql_errors": 0, "retry_success_rate": 0}
-
-
 def get_admin_action_stats(days: int = 30) -> dict:
     """Get admin action statistics."""
     try:

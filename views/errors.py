@@ -10,6 +10,22 @@ Consumes :func:`orm.error_read_model.query_errors` and
 :func:`orm.error_read_model.count_errors_by_source` plus
 :func:`orm.error_read_model.query_aggregates` for the KPI / chart block,
 along with the pure helpers in :mod:`views.errors_helpers`.
+
+Two-ledger error-count contract (Epic #161):
+
+  - **Ledger A — Chat-flow errors.** ``Message`` rows where
+    ``Message.type == ERROR``. Consumed by the Admin Overview "Chat
+    Errors" KPI (see :mod:`views.admin_analytics`). Not consumed here.
+
+  - **Ledger B — System errors.** The 3-source union (``thrive_error_log``
+    + agent-run failures + JSONL fallback file) rolled up by
+    :func:`orm.error_read_model.query_aggregates`. THIS module's canonical
+    loader is :func:`_load_aggregates`, which Admin Overview's "Critical
+    System Errors" KPI also imports (shared cache). Every KPI rendered
+    in this module belongs to Ledger B.
+
+New error-count surfaces MUST declare which ledger they consume and
+route through the corresponding loader.
 """
 
 from __future__ import annotations
@@ -80,6 +96,121 @@ def _kpi_card(
         else:
             st.markdown(f"**{label}**")
             st.markdown(f"<h3 style='margin-top:0'>{value}</h3>", unsafe_allow_html=True)
+        if help_text:
+            st.caption(help_text)
+
+
+# Canonical display labels for the Sources-row additivity equation.
+# Order matches the three Source KPI cards rendered below.
+_SOURCE_DISPLAY_LABELS: tuple[tuple[str, str], ...] = (
+    (ErrorSource.ERROR_LOG.value, "Error Log"),
+    (ErrorSource.AGENT_RUN.value, "Agent Runs"),
+    (ErrorSource.FALLBACK_SINK.value, "Fallback File"),
+)
+
+
+def _sources_equation_markdown(
+    counts: dict[str, int],
+    selected_source_values: list[str],
+) -> str:
+    """Compose the Sources-row additivity equation as a markdown string.
+
+    Pure-format helper (no Streamlit) so unit tests can assert on the
+    output without a Streamlit script context. The thin wrapper
+    :func:`_render_sources_equation` calls ``st.markdown`` with the
+    return value.
+
+    The equation renders as::
+
+        Total: 47 = Error Log (32) + Agent Runs (12) + Fallback File (3)
+
+    Filter state is signaled by striking through any deselected term
+    (markdown ``~~term~~``) while the Total remains the unfiltered
+    cross-source sum. This preserves the Epic #161 invariant:
+    *Sources equation Total == Analytics Total Errors* regardless of
+    Source chip state. Recalculating Total based on selection would
+    reintroduce the exact drift this Epic is built to fix.
+
+    Edge cases:
+
+    - Missing keys in ``counts`` default to 0 via ``dict.get``.
+    - Empty ``selected_source_values`` renders all three terms struck
+      through; Total still shows the unfiltered sum.
+    """
+    selected = set(selected_source_values or [])
+    terms: list[str] = []
+    total = 0
+    for src_value, display_label in _SOURCE_DISPLAY_LABELS:
+        n = counts.get(src_value, 0)
+        total += n
+        term = f"{display_label} ({n})"
+        if src_value not in selected:
+            term = f"~~{term}~~"
+        terms.append(term)
+    return f"Total: {total} = " + " + ".join(terms)
+
+
+def _render_sources_equation(
+    counts: dict[str, int],
+    selected_source_values: list[str],
+) -> None:
+    """Render the Sources-row additivity equation under the 3 Source KPIs.
+
+    Thin wrapper around the pure-format helper
+    :func:`_sources_equation_markdown` so unit tests can assert on the
+    rendered markdown string without a Streamlit script context.
+    """
+    st.markdown(_sources_equation_markdown(counts, selected_source_values))
+
+
+def _subset_kpi_caption_text(count: int, total: int) -> str:
+    """Compose the "of N (Z.Z%)" denominator caption for a subset KPI.
+
+    Pure-format helper (no Streamlit) so unit tests can assert on the
+    output without a Streamlit script context. The thin wrapper
+    :func:`_render_subset_kpi_card` calls ``st.caption`` with the
+    return value.
+
+    Behaviour:
+
+    - ``total == 0`` → ``"of 0"`` only (no ``%`` suffix, no
+      divide-by-zero). Empty time ranges render gracefully.
+    - ``total > 0`` → ``"of N (Z.Z%)"`` where percentage is
+      ``round(100 * count / total, 1)``.
+    - ``count == 0, total > 0`` → ``"0 of N (0.0%)"`` (via the count
+      surfaced separately as the primary value).
+    - ``count == total`` → ``"N of N (100.0%)"``.
+
+    The "of N" denominator carries the semantic weight that this is a
+    *slice* of Total, not an addend. The Analytics block caption adds
+    explicit prose disambiguation as a backup signal.
+    """
+    if total == 0:
+        return f"of {total}"
+    pct = round(100 * count / total, 1)
+    return f"of {total} ({pct}%)"
+
+
+def _render_subset_kpi_card(
+    label: str,
+    count: int,
+    total: int,
+    help_text: str | None = None,
+) -> None:
+    """Render a subset KPI card showing ``count`` plus an "of N" denominator.
+
+    Visually distinct from :func:`_kpi_card` (the primary / additive
+    style) by virtue of the explicit ``of N`` denominator below the
+    primary value — the textual signal that this card is a *slice* of
+    a parent Total, not an addend. Used in the Errors tab Analytics
+    row for the Critical and SQL Errors KPIs, both of which are subsets
+    of Total Errors and may overlap each other.
+    """
+    c = st.container(border=True)
+    with c:
+        st.markdown(f"**{label}**")
+        st.markdown(f"<h3 style='margin-top:0'>{count}</h3>", unsafe_allow_html=True)
+        st.caption(_subset_kpi_caption_text(count, total))
         if help_text:
             st.caption(help_text)
 
@@ -220,6 +351,13 @@ def render(days_int: int) -> None:
             dim=ErrorSource.FALLBACK_SINK.value not in selected_source_values,
         )
 
+    # Additivity equation — the structural reconciliation between the
+    # three Source KPI cards above and the Analytics-row Total Errors
+    # KPI below. Deselected sources are struck through; Total stays at
+    # the unfiltered cross-source sum so it always matches the Analytics
+    # Total under the same days_int (Epic #161).
+    _render_sources_equation(counts, selected_source_values)
+
     st.divider()
 
     # ── Analytics block (migrated from the original Error Analysis tab) ──
@@ -229,16 +367,28 @@ def render(days_int: int) -> None:
     st.subheader("Analytics")
     st.caption(
         "Time-range totals across all three sources. Not narrowed by the "
-        "Sources chip or the category / severity / user / search filters above."
+        "Sources chip or the category / severity / user / search filters above. "
+        "**Critical and SQL Errors are subsets of Total Errors and may overlap "
+        "each other** (a critical SQL-generation error counts toward both)."
     )
 
     a1, a2, a3, a4 = st.columns(4)
     with a1:
         _kpi_card("Total Errors", aggregates["total"])
     with a2:
-        _kpi_card("Critical", aggregates["critical"], help_text="Severity = critical")
+        _render_subset_kpi_card(
+            "Critical",
+            aggregates["critical"],
+            aggregates["total"],
+            help_text="Severity = critical",
+        )
     with a3:
-        _kpi_card("SQL Errors", aggregates["sql_errors"], help_text="Generation + Execution")
+        _render_subset_kpi_card(
+            "SQL Errors",
+            aggregates["sql_errors"],
+            aggregates["total"],
+            help_text="Categories: sql_generation + sql_execution",
+        )
     with a4:
         _kpi_card("Retry Success", f"{aggregates['retry_success_rate']}%")
 
