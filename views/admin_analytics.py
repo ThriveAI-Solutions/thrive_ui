@@ -39,14 +39,14 @@ logger = get_logger(__name__)
 ANALYTICS_CACHE_TTL_SECONDS = 300
 
 # Epic #169 / Feature #170: shared copy for the labeled View checkbox column
-# and the View Selected action button used on all three audit tables
-# (Questions, Admin Actions, User Activity). Keeping these as module-level
-# constants ensures the three sites stay literally identical and gives the
-# tests a single string to assert against.
+# used on all three audit tables (Questions, Admin Actions, User Activity).
+# Keeping these as module-level constants ensures the three sites stay
+# literally identical and gives the tests a single string to assert against.
+# Interaction model: auto-open dialog when exactly one row is ticked (no
+# action button) — re-ticking the same row after closing is supported via
+# the per-tab ``open_id`` session-state gate cleared on zero-tick reruns.
 _VIEW_COLUMN_LABEL = "View"
-_VIEW_COLUMN_HELP = "Select a row and click 'View Selected' to open the detail dialog"
-_VIEW_SELECTED_BUTTON_LABEL = "👁 View Selected"
-_VIEW_SELECTED_DISABLED_HELP = "Select exactly one row to view detail"
+_VIEW_COLUMN_HELP = "Tick a box to open the detail dialog"
 
 
 def _kpi_card(label: str, value, help_text: str | None = None):
@@ -513,9 +513,9 @@ def _render_audit_question_dialog(item: dict) -> None:
 
     Epic #169 / Feature #170 swapped the trigger primitive from
     ``st.dataframe(on_select=..., selection_mode='single-row')`` to a
-    ``st.data_editor`` + ``CheckboxColumn`` + explicit ``View Selected``
-    button. Subsystems #156 and #157 adopt the same pattern. See Epic #169
-    Architecture Considerations.
+    ``st.data_editor`` + labeled ``CheckboxColumn`` that auto-opens this
+    dialog when exactly one row is ticked. Subsystems #156 and #157
+    adopt the same pattern. See Epic #169 Architecture Considerations.
     """
     _render_audit_question_dialog_body(item)
 
@@ -616,13 +616,13 @@ def _render_audit_trail_tab(days_int: int):
 
     # Table — Epic #169 / Feature #170 swaps the prior single-row selection
     # trigger (``st.dataframe(on_select=..., selection_mode='single-row')``)
-    # for a manual ``st.data_editor`` + leading ``CheckboxColumn`` + explicit
-    # ``View Selected`` action button. The training-table pattern at
-    # ``views/admin_training.py:55-88`` is the reference implementation.
-    # Streamlit's row-selection widget can't be labeled via ``column_config``
-    # because it's a frontend element, not a data column. A manual boolean
-    # data column gives us a labeled header + help tooltip — the
-    # discoverability win the Epic exists to deliver.
+    # for a manual ``st.data_editor`` + leading labeled ``CheckboxColumn``
+    # that auto-opens the detail dialog on tick. Streamlit's row-selection
+    # widget can't be labeled via ``column_config`` because it's a frontend
+    # element, not a data column. A manual boolean data column gives us a
+    # labeled header + help tooltip — the discoverability win the Epic
+    # exists to deliver — while preserving the original one-step
+    # ``selection_mode='single-row'`` interaction model.
     if items:
         table_rows = []
         for it in items:
@@ -675,25 +675,28 @@ def _render_audit_trail_tab(days_int: int):
                 checked = pd.DataFrame()
 
             checked_count = len(checked)
-            btn_disabled = checked_count != 1
-            if st.button(
-                _VIEW_SELECTED_BUTTON_LABEL,
-                disabled=btn_disabled,
-                help=_VIEW_SELECTED_DISABLED_HELP if btn_disabled else None,
-                key="audit_questions_view_selected_btn",
-            ):
-                # Exactly one row checked — look it up and open the dialog.
-                # The cross-tab claim guard from PR #168 stays in place
-                # (defense-in-depth: ``st.tabs`` evaluates every tab body
-                # each rerun, and Streamlit forbids more than one
-                # ``st.dialog`` call per script run).
+            if checked_count == 1:
                 row_idx = int(checked.index[0])
                 if 0 <= row_idx < len(items):
                     selected_item = items[row_idx]
-                    if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
-                        st.session_state["_audit_dialog_claimed_this_rerun"] = True
-                        st.session_state["audit_dialog_open_user_message_id"] = selected_item["user_message_id"]
-                        _render_audit_question_dialog(selected_item)
+                    # Auto-open: dialog fires when exactly one row is
+                    # ticked. Gate on the tab-specific ``open_id`` session
+                    # key so the dialog doesn't re-fire on every rerun
+                    # while the checkbox stays ticked. Cross-tab claim
+                    # guard from PR #168 still applies as
+                    # defense-in-depth.
+                    open_id = st.session_state.get("audit_dialog_open_user_message_id")
+                    if open_id != selected_item["user_message_id"]:
+                        if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
+                            st.session_state["_audit_dialog_claimed_this_rerun"] = True
+                            st.session_state["audit_dialog_open_user_message_id"] = selected_item["user_message_id"]
+                            _render_audit_question_dialog(selected_item)
+            elif checked_count == 0:
+                # Allow re-ticking the same row to reopen the dialog by
+                # clearing the gate.
+                st.session_state.pop("audit_dialog_open_user_message_id", None)
+            # checked_count > 1: multi-select, no dialog fires. User must
+            # untick extras.
         else:
             # agent_logging.mode == "disabled": render the table read-only;
             # no editor and no action button — the dialog is unreachable.
@@ -1006,8 +1009,9 @@ def _render_user_activity_dialog(item: dict) -> None:
     """``@st.dialog``-decorated wrapper invoked from ``_render_activity_tab``.
 
     Epic #169 / Feature #170 swapped the trigger primitive to
-    ``st.data_editor`` + a ``CheckboxColumn`` + an explicit
-    ``View Selected`` button. See Epic #169 Architecture Considerations.
+    ``st.data_editor`` + a labeled ``CheckboxColumn`` that auto-opens
+    this dialog when exactly one row is ticked. See Epic #169
+    Architecture Considerations.
     """
     _render_user_activity_dialog_body(item)
 
@@ -1105,8 +1109,8 @@ def _render_activity_tab(days_int: int):
     total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
 
     if items:
-        # Epic #169 / Feature #170: same data_editor + CheckboxColumn +
-        # View Selected button pattern as the Questions tab. See the
+        # Epic #169 / Feature #170: same data_editor + labeled
+        # CheckboxColumn auto-open pattern as the Questions tab. See the
         # ``_render_audit_trail_tab`` comments for the full rationale.
         table_rows = [
             {
@@ -1146,20 +1150,27 @@ def _render_activity_tab(days_int: int):
             checked = pd.DataFrame()
 
         checked_count = len(checked)
-        btn_disabled = checked_count != 1
-        if st.button(
-            _VIEW_SELECTED_BUTTON_LABEL,
-            disabled=btn_disabled,
-            help=_VIEW_SELECTED_DISABLED_HELP if btn_disabled else None,
-            key="audit_activity_view_selected_btn",
-        ):
+        if checked_count == 1:
             row_idx = int(checked.index[0])
             if 0 <= row_idx < len(items):
                 selected_item = items[row_idx]
-                if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
-                    st.session_state["_audit_dialog_claimed_this_rerun"] = True
-                    st.session_state["audit_activity_dialog_open_id"] = selected_item["id"]
-                    _render_user_activity_dialog(selected_item)
+                # Auto-open: dialog fires when exactly one row is ticked.
+                # Gate on the tab-specific ``open_id`` session key so the
+                # dialog doesn't re-fire on every rerun while the
+                # checkbox stays ticked. Cross-tab claim guard from PR
+                # #168 still applies as defense-in-depth.
+                open_id = st.session_state.get("audit_activity_dialog_open_id")
+                if open_id != selected_item["id"]:
+                    if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
+                        st.session_state["_audit_dialog_claimed_this_rerun"] = True
+                        st.session_state["audit_activity_dialog_open_id"] = selected_item["id"]
+                        _render_user_activity_dialog(selected_item)
+        elif checked_count == 0:
+            # Allow re-ticking the same row to reopen the dialog by
+            # clearing the gate.
+            st.session_state.pop("audit_activity_dialog_open_id", None)
+        # checked_count > 1: multi-select, no dialog fires. User must
+        # untick extras.
     else:
         st.info("No recent activity found.")
 
@@ -1280,9 +1291,9 @@ def _render_admin_action_dialog(item: dict) -> None:
     """``@st.dialog``-decorated wrapper invoked from ``_render_audit_tab``.
 
     Uses the same trigger primitive as the Questions tab: Epic #169 /
-    Feature #170's ``st.data_editor`` + ``CheckboxColumn`` + explicit
-    ``View Selected`` button. Clicking the button with exactly one row
-    checked opens this dialog. See Epic #169.
+    Feature #170's ``st.data_editor`` + labeled ``CheckboxColumn``.
+    Ticking exactly one row auto-opens this dialog (no button). See
+    Epic #169.
     """
     _render_admin_action_dialog_body(item)
 
@@ -1374,9 +1385,9 @@ def _render_audit_tab(days_int: int):
     total_pages = max(1, (total + int(page_size) - 1) // int(page_size))
 
     if items:
-        # Epic #169 / Feature #170: data_editor + CheckboxColumn + View
-        # Selected button — see ``_render_audit_trail_tab`` for the full
-        # rationale.
+        # Epic #169 / Feature #170: data_editor + labeled CheckboxColumn
+        # auto-open on tick — see ``_render_audit_trail_tab`` for the
+        # full rationale.
         table_rows = []
         for it in items:
             ts = it.get("created_at")
@@ -1421,20 +1432,27 @@ def _render_audit_tab(days_int: int):
             checked = pd.DataFrame()
 
         checked_count = len(checked)
-        btn_disabled = checked_count != 1
-        if st.button(
-            _VIEW_SELECTED_BUTTON_LABEL,
-            disabled=btn_disabled,
-            help=_VIEW_SELECTED_DISABLED_HELP if btn_disabled else None,
-            key="audit_actions_view_selected_btn",
-        ):
+        if checked_count == 1:
             row_idx = int(checked.index[0])
             if 0 <= row_idx < len(items):
                 selected_item = items[row_idx]
-                if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
-                    st.session_state["_audit_dialog_claimed_this_rerun"] = True
-                    st.session_state["audit_actions_dialog_open_id"] = selected_item["id"]
-                    _render_admin_action_dialog(selected_item)
+                # Auto-open: dialog fires when exactly one row is ticked.
+                # Gate on the tab-specific ``open_id`` session key so the
+                # dialog doesn't re-fire on every rerun while the
+                # checkbox stays ticked. Cross-tab claim guard from PR
+                # #168 still applies as defense-in-depth.
+                open_id = st.session_state.get("audit_actions_dialog_open_id")
+                if open_id != selected_item["id"]:
+                    if not st.session_state.get("_audit_dialog_claimed_this_rerun"):
+                        st.session_state["_audit_dialog_claimed_this_rerun"] = True
+                        st.session_state["audit_actions_dialog_open_id"] = selected_item["id"]
+                        _render_admin_action_dialog(selected_item)
+        elif checked_count == 0:
+            # Allow re-ticking the same row to reopen the dialog by
+            # clearing the gate.
+            st.session_state.pop("audit_actions_dialog_open_id", None)
+        # checked_count > 1: multi-select, no dialog fires. User must
+        # untick extras.
     else:
         st.info("No admin actions in the selected time range.")
 

@@ -1,10 +1,10 @@
-"""Tests for the Questions audit tab View Selected dialog (#155 / #170).
+"""Tests for the Questions audit tab View checkbox dialog (#155 / #170).
 
 Covers:
-  (a) Dialog opens when the View Selected button is clicked with exactly
-      one row checked (Epic #169 / #170 swapped the dataframe selection
-      trigger for a ``st.data_editor`` + checkbox column + explicit
-      button).
+  (a) Dialog auto-opens when exactly one row's ``View`` checkbox is
+      ticked (Epic #169 / #170 swapped the dataframe selection trigger
+      for a ``st.data_editor`` + labeled checkbox column that auto-opens
+      the dialog on tick).
   (b) Deep-link round-trip — setting `manage_users_pref_user_id` causes
       Manage Users to pre-populate `mu_selected_label` with the target user.
   (c) `role_can_see_query_details` returning False hides the SQL block and
@@ -383,11 +383,11 @@ class TestAgentLoggingDisabled:
     def test_disabled_mode_uses_dataframe_not_data_editor(self):
         """When `[agent_logging].mode = "disabled"`, the audit tab must
         render via the read-only ``st.dataframe`` branch and NOT call
-        ``st.data_editor`` — so there's no checkbox column and no
-        ``View Selected`` button, making the dialog unreachable
-        (defense in depth — disabled mode should produce no rows in the
-        first place). The read-only display must also drop the ``View``
-        column entirely (it would be a confusing always-False checkbox)."""
+        ``st.data_editor`` — so there's no checkbox column, making the
+        dialog unreachable (defense in depth — disabled mode should
+        produce no rows in the first place). The read-only display
+        must also drop the ``View`` column entirely (it would be a
+        confusing always-False checkbox)."""
         from views import admin_analytics
 
         dataframe_call_count = [0]
@@ -507,8 +507,8 @@ class TestAgentLoggingDisabled:
     def test_full_mode_uses_data_editor_with_view_checkbox_column(self):
         """When `[agent_logging].mode` is anything other than 'disabled'
         (default 'full'), the audit tab must call ``st.data_editor`` and
-        configure a leading ``View`` ``CheckboxColumn`` so the explicit
-        ``View Selected`` button workflow is wired up."""
+        configure a leading ``View`` ``CheckboxColumn`` so the
+        auto-open-on-tick workflow is wired up."""
         from views import admin_analytics
 
         captured_data_editor_kwargs: list[dict] = []
@@ -614,27 +614,28 @@ class TestAgentLoggingDisabled:
 
 
 # ---------------------------------------------------------------------------
-# (a) View Selected button opens the dialog; no click → no dialog
+# (a) Auto-open dialog on tick; 0 ticks → no dialog; sticky tick → no re-fire
 # ---------------------------------------------------------------------------
 
 
-def _make_questions_stub(*, view_column_values: list[bool], view_button_clicked: bool = False):
+def _make_questions_stub(*, view_column_values: list[bool], initial_session: dict | None = None):
     """Build a Streamlit stub for ``_render_audit_trail_tab`` that simulates
-    the new (Epic #169) data_editor + checkbox + View Selected button flow.
+    the new (Epic #169 / #170) data_editor + auto-open-on-tick flow.
 
     ``view_column_values`` controls which rows the user has 'checked' on
     the ``View`` column. The stub seeds those values back into ``edited_df``
     so the production code's ``edited_df[edited_df['View']]`` filter picks
     them up just like Streamlit would after a checkbox toggle.
 
-    ``view_button_clicked`` is True iff the test wants the
-    ``audit_questions_view_selected_btn`` to be 'clicked'.
+    ``initial_session`` seeds ``session_state`` — used by the "sticky
+    tick across reruns" tests to pre-populate
+    ``audit_dialog_open_user_message_id``.
     """
     import pandas as pd
 
     class _Stub:
         def __init__(self):
-            self.session_state = {}
+            self.session_state = dict(initial_session or {})
             self.secrets = {"agent_logging": {"mode": "full"}}
             self.components = MagicMock()
             self.components.v1 = MagicMock()
@@ -683,7 +684,9 @@ def _make_questions_stub(*, view_column_values: list[bool], view_button_clicked:
             pass
 
         def button(self, *_a, key=None, **_kw):
-            return bool(view_button_clicked) if key == "audit_questions_view_selected_btn" else False
+            # No button participates in the auto-open flow — Prev/Next/
+            # Export buttons still render but do nothing here.
+            return False
 
         def caption(self, *_a, **_kw):
             pass
@@ -719,20 +722,16 @@ def _make_questions_stub(*, view_column_values: list[bool], view_button_clicked:
 
 
 class TestSelectionStateTrigger:
-    def test_button_click_with_one_row_checked_opens_dialog(self):
-        """When exactly one row's View checkbox is checked AND the
-        View Selected button is clicked, the audit tab must set
-        ``audit_dialog_open_user_message_id`` and invoke the dialog
-        function for that row."""
+    def test_one_tick_auto_opens_dialog(self):
+        """When exactly one row's View checkbox is ticked, the audit tab
+        must set ``audit_dialog_open_user_message_id`` and auto-invoke
+        the dialog function for that row — no button click needed."""
         from views import admin_analytics
 
         item = _make_item(user_message_id=314)
         dialog_calls: list[dict] = []
 
-        stub, _pd = _make_questions_stub(
-            view_column_values=[True],
-            view_button_clicked=True,
-        )
+        stub, _pd = _make_questions_stub(view_column_values=[True])
 
         def _fake_dialog(passed_item):
             dialog_calls.append(passed_item)
@@ -753,20 +752,22 @@ class TestSelectionStateTrigger:
         ):
             admin_analytics._render_audit_trail_tab(30)
 
-        assert dialog_calls == [item], "Dialog must be invoked for the checked row's item"
+        assert dialog_calls == [item], "Dialog must be invoked for the ticked row's item"
         assert stub.session_state.get("audit_dialog_open_user_message_id") == 314
 
-    def test_no_button_click_does_not_open_dialog(self):
-        """If the user checks a row but never clicks View Selected, the
-        dialog must NOT open and no tracking key is set."""
+    def test_zero_ticks_does_not_open_dialog(self):
+        """If no row is ticked, the dialog must NOT open and the per-tab
+        ``open_id`` gate is cleared so the next tick of the same row will
+        reopen the dialog cleanly."""
         from views import admin_analytics
 
         item = _make_item(user_message_id=314)
 
-        # Row is checked, but button is NOT clicked.
+        # No row is ticked. Pre-populate the gate so we can assert it gets
+        # cleared (the "untick clears gate" half of the contract).
         stub, _pd = _make_questions_stub(
-            view_column_values=[True],
-            view_button_clicked=False,
+            view_column_values=[False],
+            initial_session={"audit_dialog_open_user_message_id": 314},
         )
 
         with (
@@ -786,4 +787,42 @@ class TestSelectionStateTrigger:
             admin_analytics._render_audit_trail_tab(30)
 
         dialog_mock.assert_not_called()
-        assert "audit_dialog_open_user_message_id" not in stub.session_state
+        assert "audit_dialog_open_user_message_id" not in stub.session_state, (
+            "Zero ticks must clear the open_id gate so the same row can be re-ticked"
+        )
+
+    def test_sticky_tick_across_rerun_does_not_refire(self):
+        """If the checkbox stays ticked between reruns (Streamlit
+        ``data_editor`` retains the True value) the dialog must NOT
+        re-fire — the per-tab gate stops it. Without the gate, every
+        rerun would trigger another dialog."""
+        from views import admin_analytics
+
+        item = _make_item(user_message_id=314)
+
+        # Row is still ticked, AND the gate already records this row as
+        # open from a prior rerun.
+        stub, _pd = _make_questions_stub(
+            view_column_values=[True],
+            initial_session={"audit_dialog_open_user_message_id": 314},
+        )
+
+        with (
+            patch.object(admin_analytics, "st", stub),
+            patch.object(
+                admin_analytics,
+                "_cached_audit_filter_options",
+                return_value={"usernames": [], "orgs": []},
+            ),
+            patch.object(admin_analytics, "_render_audit_question_dialog") as dialog_mock,
+            patch(
+                "orm.logging_functions.get_question_audit_page",
+                return_value={"items": [item], "total": 1},
+            ),
+            patch("orm.functions.get_all_users", return_value=[]),
+        ):
+            admin_analytics._render_audit_trail_tab(30)
+
+        dialog_mock.assert_not_called()
+        # Gate stays set to the same id (sticky tick).
+        assert stub.session_state.get("audit_dialog_open_user_message_id") == 314

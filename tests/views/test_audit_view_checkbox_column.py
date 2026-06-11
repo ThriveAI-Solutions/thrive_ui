@@ -1,17 +1,21 @@
 """Tests for Epic #169 / Feature #170 — the labeled ``View`` checkbox
-column + ``View Selected`` action button shared by all three audit
-tables (Questions, Admin Actions, User Activity).
+column shared by all three audit tables (Questions, Admin Actions, User
+Activity).
+
+Per the post-PR-#187 refactor (Feature #170), the trigger is **auto-open
+on tick**: ticking exactly one ``View`` checkbox opens the corresponding
+detail dialog immediately — there is no ``View Selected`` button.
 
 Covers, parametrised across the 3 tabs where possible:
 
   - The ``View`` column is configured as ``st.column_config.CheckboxColumn``
     with the spec's label and help tooltip.
   - All non-View data columns are configured with ``disabled=True``.
-  - The ``View Selected`` button is disabled when 0 or >1 rows are
-    checked, enabled with exactly 1; its tooltip when disabled equals
-    ``_VIEW_SELECTED_DISABLED_HELP``.
-  - Clicking the button with exactly one row checked invokes the
-    corresponding detail dialog with the matching row payload.
+  - Ticking exactly one row auto-fires the dialog with the matching row
+    payload; 0 and >1 ticks do NOT fire the dialog.
+  - With the per-tab ``open_id`` already set in ``session_state``,
+    re-rendering with the same row still ticked does NOT re-fire the
+    dialog (gate prevents re-fire on every rerun).
   - CSV export for the Questions tab does NOT include the ``View``
     column (it lives only in the on-screen ``edited_df``).
 """
@@ -90,9 +94,9 @@ def _make_user_activity_item(*, id: int = 1) -> dict:
 
 class _TabHarness:
     """Encapsulates per-tab details (render function, item factory,
-    data_editor key, View Selected button key, dialog function name)
-    so the parametrised tests can drive any of the 3 audit tabs from
-    a single body."""
+    data_editor key, dialog gate session key + id field, dialog function
+    name) so the parametrised tests can drive any of the 3 audit tabs
+    from a single body."""
 
     def __init__(
         self,
@@ -101,7 +105,8 @@ class _TabHarness:
         render_fn_name: str,
         item_factory,
         data_editor_key: str,
-        button_key: str,
+        dialog_id_key: str,
+        id_field: str,
         dialog_attr: str,
         loader_patches: list,
     ):
@@ -109,7 +114,8 @@ class _TabHarness:
         self.render_fn_name = render_fn_name
         self.item_factory = item_factory
         self.data_editor_key = data_editor_key
-        self.button_key = button_key
+        self.dialog_id_key = dialog_id_key
+        self.id_field = id_field
         self.dialog_attr = dialog_attr
         self.loader_patches = loader_patches  # callable returning list of patchers
 
@@ -175,7 +181,8 @@ def _all_harnesses() -> list[_TabHarness]:
             render_fn_name="_render_audit_trail_tab",
             item_factory=lambda i: _make_question_item(user_message_id=i),
             data_editor_key="audit_dataframe",
-            button_key="audit_questions_view_selected_btn",
+            dialog_id_key="audit_dialog_open_user_message_id",
+            id_field="user_message_id",
             dialog_attr="_render_audit_question_dialog",
             loader_patches=_questions_loader_patches,
         ),
@@ -184,7 +191,8 @@ def _all_harnesses() -> list[_TabHarness]:
             render_fn_name="_render_audit_tab",
             item_factory=lambda i: _make_admin_action_item(id=i),
             data_editor_key="audit_actions_dataframe",
-            button_key="audit_actions_view_selected_btn",
+            dialog_id_key="audit_actions_dialog_open_id",
+            id_field="id",
             dialog_attr="_render_admin_action_dialog",
             loader_patches=_actions_loader_patches,
         ),
@@ -193,7 +201,8 @@ def _all_harnesses() -> list[_TabHarness]:
             render_fn_name="_render_activity_tab",
             item_factory=lambda i: _make_user_activity_item(id=i),
             data_editor_key="audit_activity_dataframe",
-            button_key="audit_activity_view_selected_btn",
+            dialog_id_key="audit_activity_dialog_open_id",
+            id_field="id",
             dialog_attr="_render_user_activity_dialog",
             loader_patches=_activity_loader_patches,
         ),
@@ -252,25 +261,20 @@ class _ColumnConfig:
 def _make_stub(
     *,
     view_column_values: list[bool] | None = None,
-    button_clicks: dict | None = None,
-    capture_button_kwargs: dict | None = None,
+    initial_session: dict | None = None,
 ):
     """Build a streamlit stub for any of the three tab render functions.
 
     ``view_column_values`` is the list of per-row checkbox values written
     back into ``edited_df`` (simulating user toggles).
-    ``button_clicks`` is a dict keyed by button ``key=`` value; lets
-    tests fire any specific button on demand.
-    ``capture_button_kwargs`` (optional output dict): if passed, the
-    stub appends ``{label, key, kwargs}`` for every ``st.button(...)``
-    call into ``capture_button_kwargs["calls"]``.
+    ``initial_session`` seeds the stub's ``session_state`` dict — used
+    by the "checkbox stays ticked across rerun" tests to pre-populate
+    the tab's ``open_id`` gate.
     """
-
-    button_clicks = button_clicks or {}
 
     class _Stub:
         def __init__(self):
-            self.session_state = {}
+            self.session_state = dict(initial_session or {})
             self.secrets = {"agent_logging": {"mode": "full"}}
             self.components = MagicMock()
             self.components.v1 = MagicMock()
@@ -361,9 +365,10 @@ def _make_stub(
 
         # -- Buttons -------------------------------------------------------
         def button(self, label="", key=None, **kwargs):
-            if capture_button_kwargs is not None:
-                capture_button_kwargs.setdefault("calls", []).append({"label": label, "key": key, "kwargs": kwargs})
-            return bool(button_clicks.get(key, False))
+            # No buttons participate in the auto-open flow anymore. The
+            # Prev/Next/Export buttons still render — we just return False
+            # so they do nothing.
+            return False
 
         def download_button(self, *_a, **_kw):
             pass
@@ -451,32 +456,72 @@ def test_non_view_columns_are_disabled(harness):
 
 
 # ---------------------------------------------------------------------------
-# Test 3 — View Selected button enabled state (0 / 1 / many)
+# Test 3 — Auto-open: exactly one tick fires the dialog
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
-@pytest.mark.parametrize(
-    "checked_count,expected_disabled",
-    [(0, True), (1, False), (2, True), (3, True)],
-    ids=["zero", "one", "two", "three"],
-)
-def test_view_selected_button_enabled_state(harness, checked_count, expected_disabled):
-    """``View Selected`` button is disabled when 0 or >1 rows are
-    checked; enabled when exactly 1 is checked. When disabled, the
-    button's ``help`` tooltip equals ``_VIEW_SELECTED_DISABLED_HELP``."""
-    from views import admin_analytics
+def test_one_tick_auto_opens_dialog(harness):
+    """With exactly one ``View`` checkbox ticked the corresponding
+    dialog function is auto-invoked with the matching row's payload —
+    no button click is needed."""
+    item = harness.item_factory(314)
+    dialog_recorder: list[dict] = []
+    stub = _make_stub(view_column_values=[True])
+    _run_tab(harness, stub, item, dialog_recorder=dialog_recorder.append)
 
-    # We need ``len(items)`` to equal ``checked_count`` worth of rows so
-    # the dataframe slot exists for each checkbox value. Pre-build enough
-    # items.
-    items = [harness.item_factory(i) for i in range(1, max(1, checked_count) + 1)]
-    view_vals = [True] * checked_count + [False] * (len(items) - checked_count)
+    assert dialog_recorder == [item], (
+        f"{harness.label}: ticking exactly one row must auto-fire the dialog; got {len(dialog_recorder)} call(s)"
+    )
+    # The per-tab open_id gate must be set to the row's id so subsequent
+    # reruns don't re-fire the dialog while the checkbox stays ticked.
+    assert stub.session_state.get(harness.dialog_id_key) == item[harness.id_field]
 
-    button_kwargs_capture: dict = {}
-    stub = _make_stub(view_column_values=view_vals, capture_button_kwargs=button_kwargs_capture)
 
-    # Patch loader to return our pre-built items list, NOT just one row.
+# ---------------------------------------------------------------------------
+# Test 4 — Zero ticks: no dialog, gate cleared
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
+def test_zero_ticks_does_not_open_dialog(harness):
+    """No rows ticked → the dialog must not fire. The per-tab gate is
+    also cleared so a subsequent tick of the same row reopens the
+    dialog cleanly."""
+    item = harness.item_factory(7)
+    dialog_recorder: list[dict] = []
+    stub = _make_stub(
+        view_column_values=[False],
+        # Pre-populate the gate to verify it gets cleared on zero ticks.
+        initial_session={harness.dialog_id_key: item[harness.id_field]},
+    )
+    _run_tab(harness, stub, item, dialog_recorder=dialog_recorder.append)
+
+    assert dialog_recorder == [], (
+        f"{harness.label}: zero ticks must NOT open the dialog; got {len(dialog_recorder)} call(s)"
+    )
+    assert harness.dialog_id_key not in stub.session_state, (
+        f"{harness.label}: zero ticks must clear the {harness.dialog_id_key!r} gate so the "
+        "same row can be re-ticked to reopen the dialog"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — Multi-tick: no dialog fires
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
+@pytest.mark.parametrize("n_checked", [2, 3], ids=["two", "three"])
+def test_multi_tick_does_not_open_dialog(harness, n_checked):
+    """More than one row ticked → no dialog fires. User must untick the
+    extras down to exactly one for the dialog to open."""
+    items = [harness.item_factory(i) for i in range(1, n_checked + 1)]
+    view_vals = [True] * n_checked
+    dialog_recorder: list[dict] = []
+
+    stub = _make_stub(view_column_values=view_vals)
+
     def _swap_loaders(_items):
         return harness.loader_patches(items)
 
@@ -485,58 +530,100 @@ def test_view_selected_button_enabled_state(harness, checked_count, expected_dis
         render_fn_name=harness.render_fn_name,
         item_factory=harness.item_factory,
         data_editor_key=harness.data_editor_key,
-        button_key=harness.button_key,
+        dialog_id_key=harness.dialog_id_key,
+        id_field=harness.id_field,
         dialog_attr=harness.dialog_attr,
         loader_patches=_swap_loaders,
     )
 
-    _run_tab(swapped, stub, items[0])
+    _run_tab(swapped, stub, items[0], dialog_recorder=dialog_recorder.append)
 
-    # Find the View Selected button call by its key.
-    btn_calls = [c for c in button_kwargs_capture.get("calls", []) if c["key"] == harness.button_key]
-    assert btn_calls, (
-        f"{harness.label}: ``st.button({harness.button_key!r})`` was never called — "
-        "the View Selected button must always render below the data_editor"
+    assert dialog_recorder == [], (
+        f"{harness.label}: {n_checked} ticks must NOT open the dialog; got {len(dialog_recorder)} call(s)"
     )
-    call = btn_calls[0]
-    assert call["kwargs"].get("disabled") is expected_disabled, (
-        f"{harness.label} / checked={checked_count}: button disabled state mismatch; "
-        f"got disabled={call['kwargs'].get('disabled')}, expected {expected_disabled}"
-    )
-    if expected_disabled:
-        assert call["kwargs"].get("help") == admin_analytics._VIEW_SELECTED_DISABLED_HELP, (
-            f"{harness.label}: disabled-state tooltip must equal _VIEW_SELECTED_DISABLED_HELP"
-        )
-    # Label always equals _VIEW_SELECTED_BUTTON_LABEL.
-    assert call["label"] == admin_analytics._VIEW_SELECTED_BUTTON_LABEL
 
 
 # ---------------------------------------------------------------------------
-# Test 4 — Button click with one row checked fires the dialog
+# Test 6 — Checkbox stays ticked across rerun: dialog does NOT re-fire
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
-def test_button_click_with_one_row_checked_invokes_dialog(harness):
-    """With exactly one ``View`` checkbox ticked and the View Selected
-    button clicked, the corresponding dialog function is invoked with
-    the matching row's payload."""
-    item = harness.item_factory(314)
+def test_checkbox_stays_ticked_across_rerun_does_not_refire(harness):
+    """If the checkbox stays ticked between reruns (Streamlit
+    ``data_editor`` retains the row's True value) the dialog must NOT
+    re-fire — the per-tab ``open_id`` gate stops it. This is the
+    critical regression: without the gate, every rerun would trigger
+    another dialog."""
+    item = harness.item_factory(42)
     dialog_recorder: list[dict] = []
+
+    # Simulate "the dialog was already opened in a prior rerun" by
+    # pre-populating the per-tab gate. The checkbox is still ticked.
     stub = _make_stub(
         view_column_values=[True],
-        button_clicks={harness.button_key: True},
+        initial_session={harness.dialog_id_key: item[harness.id_field]},
     )
     _run_tab(harness, stub, item, dialog_recorder=dialog_recorder.append)
 
-    assert dialog_recorder == [item], (
-        f"{harness.label}: the dialog must be invoked exactly once with the checked row's item; "
-        f"got {len(dialog_recorder)} call(s)"
+    assert dialog_recorder == [], (
+        f"{harness.label}: with the per-tab gate already set to this row's id and the "
+        "checkbox still ticked, the dialog must NOT re-fire on this rerun. "
+        f"Got {len(dialog_recorder)} unwanted call(s)."
     )
+    # Gate stays set to the same id.
+    assert stub.session_state.get(harness.dialog_id_key) == item[harness.id_field]
 
 
 # ---------------------------------------------------------------------------
-# Test 5 — CSV export DOES NOT include the View column (Questions tab)
+# Test 7 — Untick then re-tick reopens the dialog
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("harness", _all_harnesses(), ids=lambda h: h.label)
+def test_untick_then_retick_reopens_dialog(harness):
+    """Rerun A: row ticked → dialog opens, gate set. Rerun B: row
+    unticked → gate cleared. Rerun C: row re-ticked → dialog opens
+    again. This is what "Allow re-ticking the same row to reopen" in
+    the spec means."""
+    item = harness.item_factory(99)
+
+    # Rerun A — row ticked, fresh session.
+    a_calls: list = []
+    stub_a = _make_stub(view_column_values=[True])
+    _run_tab(harness, stub_a, item, dialog_recorder=a_calls.append)
+    assert a_calls == [item], f"{harness.label}: rerun A must open the dialog"
+    assert stub_a.session_state.get(harness.dialog_id_key) == item[harness.id_field]
+
+    # Rerun B — row unticked. Carry session_state forward. The cross-tab
+    # claim flag is reset by ``admin_audit.render`` in production at the
+    # top of every rerun, before the inner ``st.tabs`` evaluate; we
+    # simulate that here by dropping it on each new rerun.
+    b_session = dict(stub_a.session_state)
+    b_session.pop("_audit_dialog_claimed_this_rerun", None)
+    b_calls: list = []
+    stub_b = _make_stub(
+        view_column_values=[False],
+        initial_session=b_session,
+    )
+    _run_tab(harness, stub_b, item, dialog_recorder=b_calls.append)
+    assert b_calls == [], f"{harness.label}: rerun B (unticked) must not fire"
+    assert harness.dialog_id_key not in stub_b.session_state, f"{harness.label}: untick must clear the gate"
+
+    # Rerun C — row re-ticked.
+    c_session = dict(stub_b.session_state)
+    c_session.pop("_audit_dialog_claimed_this_rerun", None)
+    c_calls: list = []
+    stub_c = _make_stub(
+        view_column_values=[True],
+        initial_session=c_session,
+    )
+    _run_tab(harness, stub_c, item, dialog_recorder=c_calls.append)
+    assert c_calls == [item], f"{harness.label}: rerun C (re-ticked after untick) must reopen the dialog"
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — CSV export DOES NOT include the View column (Questions tab)
 # ---------------------------------------------------------------------------
 
 

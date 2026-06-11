@@ -423,17 +423,18 @@ def _activity_tab_stub_class():
     Returns the class so tests can mutate per-test behaviour.
 
     Epic #169 / Feature #170: the trigger primitive is now
-    ``st.data_editor`` + ``View`` ``CheckboxColumn`` + ``View Selected``
-    button. ``view_column_values`` controls which rows are 'checked'
-    and ``view_button_clicked`` fires the button.
+    ``st.data_editor`` + labeled ``View`` ``CheckboxColumn`` that auto-
+    opens the dialog when exactly one row is ticked.
+    ``view_column_values`` controls which rows are 'checked'.
+    ``initial_session`` seeds ``session_state`` — used to pre-populate
+    ``audit_activity_dialog_open_id`` for the sticky-tick tests.
     """
 
     class _Stub:
-        def __init__(self, *, view_column_values=None, view_button_clicked=False, initial_session=None):
+        def __init__(self, *, view_column_values=None, initial_session=None):
             self.session_state = dict(initial_session or {})
             self.captured_data_editor_kwargs: list[dict] = []
             self._view_column_values = list(view_column_values or [])
-            self._view_button_clicked = bool(view_button_clicked)
             self.components = MagicMock()
             self.components.v1 = MagicMock()
             self.components.v1.html = MagicMock()
@@ -484,7 +485,9 @@ def _activity_tab_stub_class():
             pass
 
         def button(self, *_a, key=None, **_kw):
-            return self._view_button_clicked if key == "audit_activity_view_selected_btn" else False
+            # No button participates in the auto-open flow — Prev/Next
+            # buttons still render but do nothing here.
+            return False
 
         def caption(self, *_a, **_kw):
             pass
@@ -558,15 +561,16 @@ class TestActivityTabSelectionTrigger:
             f"Expected a 'View' entry in column_config; saw keys={list((cc or {}).keys())}"
         )
 
-    def test_button_click_with_one_row_checked_opens_dialog(self):
-        """With exactly one View checkbox ticked AND the View Selected
-        button clicked, ``audit_activity_dialog_open_id`` is set and the
-        dialog is invoked with the corresponding item."""
+    def test_one_tick_auto_opens_dialog(self):
+        """With exactly one View checkbox ticked,
+        ``audit_activity_dialog_open_id`` is set and the dialog is
+        auto-invoked with the corresponding item — no button click
+        needed."""
         from views import admin_analytics
 
         item = _make_item(id=777)
         Stub = _activity_tab_stub_class()
-        stub = Stub(view_column_values=[True], view_button_clicked=True)
+        stub = Stub(view_column_values=[True])
         dialog_calls: list[dict] = []
 
         def _fake_dialog(passed_item):
@@ -593,18 +597,22 @@ class TestActivityTabSelectionTrigger:
         ):
             admin_analytics._render_activity_tab(30)
 
-        assert dialog_calls == [item], "Dialog must be invoked with the checked row's item"
+        assert dialog_calls == [item], "Dialog must be invoked with the ticked row's item"
         assert stub.session_state.get("audit_activity_dialog_open_id") == 777
 
-    def test_no_button_click_does_not_open_dialog(self):
-        """Checking the box without clicking View Selected must NOT open
-        the dialog."""
+    def test_zero_ticks_does_not_open_dialog(self):
+        """No row ticked → no dialog. The per-tab ``open_id`` gate is
+        also cleared so the same row can be re-ticked to reopen the
+        dialog."""
         from views import admin_analytics
 
         item = _make_item(id=777)
         Stub = _activity_tab_stub_class()
-        # Row checked, button not clicked.
-        stub = Stub(view_column_values=[True], view_button_clicked=False)
+        # No row checked. Pre-populate the gate to verify it gets cleared.
+        stub = Stub(
+            view_column_values=[False],
+            initial_session={"audit_activity_dialog_open_id": 777},
+        )
 
         with (
             patch.object(admin_analytics, "st", stub),
@@ -628,7 +636,47 @@ class TestActivityTabSelectionTrigger:
             admin_analytics._render_activity_tab(30)
 
         dialog_mock.assert_not_called()
-        assert "audit_activity_dialog_open_id" not in stub.session_state
+        assert "audit_activity_dialog_open_id" not in stub.session_state, (
+            "Zero ticks must clear the open_id gate so the same row can be re-ticked"
+        )
+
+    def test_sticky_tick_across_rerun_does_not_refire(self):
+        """If the checkbox stays ticked between reruns the dialog must
+        NOT re-fire — the per-tab gate stops it."""
+        from views import admin_analytics
+
+        item = _make_item(id=777)
+        Stub = _activity_tab_stub_class()
+        # Row still ticked, gate already records this row.
+        stub = Stub(
+            view_column_values=[True],
+            initial_session={"audit_activity_dialog_open_id": 777},
+        )
+
+        with (
+            patch.object(admin_analytics, "st", stub),
+            patch.object(admin_analytics, "_render_user_activity_dialog") as dialog_mock,
+            patch(
+                "orm.logging_functions.get_activity_stats",
+                return_value={
+                    "logins_today": 0,
+                    "failed_logins": 0,
+                    "settings_changes": 0,
+                    "unique_users": 0,
+                },
+            ),
+            patch("orm.logging_functions.get_activity_over_time", return_value=[]),
+            patch("orm.logging_functions.get_activity_by_type", return_value=[]),
+            patch(
+                "orm.logging_functions.get_user_activity_page",
+                return_value={"items": [item], "total": 1},
+            ),
+        ):
+            admin_analytics._render_activity_tab(30)
+
+        dialog_mock.assert_not_called()
+        # Gate stays set to the same id (sticky tick).
+        assert stub.session_state.get("audit_activity_dialog_open_id") == 777
 
 
 # ---------------------------------------------------------------------------

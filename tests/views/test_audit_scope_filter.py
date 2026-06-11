@@ -62,13 +62,14 @@ def _make_stub(
     multiselect_returns : dict keyed by ``key=`` value. Lets tests inject
         the "user picked these" values without faking widget interaction.
     button_returns : dict keyed by ``key=`` value. Lets tests fire the CSV
-        export button (``audit_export_btn``) or the View Selected button
-        (``audit_questions_view_selected_btn``) on demand.
+        export button (``audit_export_btn``) on demand.
 
-    Epic #169 / #170: the Questions audit grid is now ``st.data_editor``,
-    so ``table_rows`` are captured from ``data_editor(df, ...)`` rather
-    than ``dataframe(df, ...)``. The read-only ``st.dataframe`` branch
-    (agent_logging.mode = 'disabled') is also captured for completeness.
+    Epic #169 / #170: the Questions audit grid is now ``st.data_editor``
+    with a labeled ``View`` checkbox column that auto-opens the detail
+    dialog on tick (no button). ``table_rows`` are captured from
+    ``data_editor(df, ...)`` rather than ``dataframe(df, ...)``. The
+    read-only ``st.dataframe`` branch (agent_logging.mode = 'disabled')
+    is also captured for completeness.
     """
 
     captured_multiselect_kwargs: list[dict] = []
@@ -134,8 +135,7 @@ def _make_stub(
             except Exception:
                 captured_table_rows.append([])
             # Return the DataFrame unchanged (no rows checked by default,
-            # so the View Selected button will be disabled and no dialog
-            # branch fires).
+            # so the auto-open dialog branch does not fire).
             return df
 
         def dataframe(self, df, **_kw):
