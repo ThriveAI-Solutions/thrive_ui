@@ -82,6 +82,10 @@ def _make_stub(
             self.components = MagicMock()
             self.components.v1 = MagicMock()
             self.components.v1.html = MagicMock()
+            # ``st.column_config.Column(...)`` is called by the audit tab
+            # body when wiring the leading View affordance column (Feature
+            # #170). MagicMock auto-creates a ``Column`` callable.
+            self.column_config = MagicMock()
 
         # -- widgets -------------------------------------------------------
         def multiselect(self, label, options=None, key=None, **kw):

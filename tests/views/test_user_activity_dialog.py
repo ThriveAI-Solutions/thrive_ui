@@ -431,6 +431,9 @@ def _activity_tab_stub_class():
             self.components = MagicMock()
             self.components.v1 = MagicMock()
             self.components.v1.html = MagicMock()
+            # Feature #170: ``st.column_config.Column(...)`` is now invoked
+            # by ``_render_activity_tab`` when wiring the leading View column.
+            self.column_config = MagicMock()
 
         def selectbox(self, *_a, options=None, index=0, key=None, **_kw):
             opts = list(options or [])

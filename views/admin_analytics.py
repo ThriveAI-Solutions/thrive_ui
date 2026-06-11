@@ -38,6 +38,21 @@ logger = get_logger(__name__)
 # Cache TTL for analytics queries (5 minutes)
 ANALYTICS_CACHE_TTL_SECONDS = 300
 
+# Epic #169 / Feature #170: Leading "View" affordance column on row-click
+# audit tables (Questions, Admin Actions, User Activity). Streamlit's built-in
+# ``selection_mode="single-row"`` checkbox column cannot be relabeled or
+# annotated via ``column_config`` — so we render a separate, non-data leading
+# column whose header copy + tooltip make the row-click affordance discoverable.
+# The constants are shared across the three render sites so the treatment is
+# uniform AND tests have a single place to assert against.
+#
+# The icon glyph is the eye character (``👁``). Equivalent single-character
+# glyphs (``→`` / ``🔍`` / ``📑``) render comparably; the eye was selected
+# because it directly evokes "view" / "inspect".
+_VIEW_COLUMN_LABEL = "View"
+_VIEW_COLUMN_ICON = "👁"
+_VIEW_COLUMN_HELP = "Click any row to open the detail dialog"
+
 
 def _kpi_card(label: str, value, help_text: str | None = None):
     """Render a KPI card with label, value, and optional help text."""
@@ -611,6 +626,11 @@ def _render_audit_trail_tab(days_int: int):
         for it in items:
             table_rows.append(
                 {
+                    # Epic #169 / Feature #170: leading non-data View column —
+                    # discoverability cue for the row-click-opens-dialog
+                    # affordance. On-screen only — NEVER added to the CSV
+                    # export aggregator path below.
+                    _VIEW_COLUMN_LABEL: _VIEW_COLUMN_ICON,
                     "Asked At": it["asked_at"],
                     "User": it["username"],
                     "Organization": it.get("organization") or "(no org)",
@@ -632,6 +652,13 @@ def _render_audit_trail_tab(days_int: int):
                 on_select="rerun",
                 selection_mode="single-row",
                 key="audit_dataframe",
+                column_config={
+                    _VIEW_COLUMN_LABEL: st.column_config.Column(
+                        label=_VIEW_COLUMN_LABEL,
+                        help=_VIEW_COLUMN_HELP,
+                        width="small",
+                    ),
+                },
             )
             selected_rows = []
             try:
@@ -666,12 +693,20 @@ def _render_audit_trail_tab(days_int: int):
                     del st.session_state["audit_dialog_open_user_message_id"]
         else:
             # agent_logging.mode == "disabled": render the table read-only;
-            # selection trigger and dialog branch are short-circuited.
+            # selection trigger and dialog branch are short-circuited. The View
+            # column still renders for visual consistency, but clicks are no-ops.
             st.dataframe(
                 pd.DataFrame(table_rows),
                 width="stretch",
                 hide_index=True,
                 key="audit_dataframe",
+                column_config={
+                    _VIEW_COLUMN_LABEL: st.column_config.Column(
+                        label=_VIEW_COLUMN_LABEL,
+                        help=_VIEW_COLUMN_HELP,
+                        width="small",
+                    ),
+                },
             )
     else:
         st.info("No audit rows match the current filters.")
@@ -1074,6 +1109,11 @@ def _render_activity_tab(days_int: int):
     if items:
         table_rows = [
             {
+                # Epic #169 / Feature #170: leading View affordance column.
+                # Same treatment as Questions and Admin Actions; on-screen only
+                # (no User Activity CSV export today, but if one ships later
+                # it MUST build from a separate aggregator path).
+                _VIEW_COLUMN_LABEL: _VIEW_COLUMN_ICON,
                 "Timestamp": it["created_at"],
                 "User": it.get("username") or "(unknown)",
                 "Type": it.get("activity_type"),
@@ -1089,6 +1129,13 @@ def _render_activity_tab(days_int: int):
             on_select="rerun",
             selection_mode="single-row",
             key="audit_activity_dataframe",
+            column_config={
+                _VIEW_COLUMN_LABEL: st.column_config.Column(
+                    label=_VIEW_COLUMN_LABEL,
+                    help=_VIEW_COLUMN_HELP,
+                    width="small",
+                ),
+            },
         )
         selected_rows = []
         try:
@@ -1338,6 +1385,10 @@ def _render_audit_tab(days_int: int):
             ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if hasattr(ts, "strftime") else str(ts or "")
             table_rows.append(
                 {
+                    # Epic #169 / Feature #170: leading View affordance column.
+                    # Same treatment as Questions and User Activity; on-screen
+                    # only — NEVER added to any export aggregator path.
+                    _VIEW_COLUMN_LABEL: _VIEW_COLUMN_ICON,
                     "Time": ts_str,
                     "Admin": it.get("admin_username") or "Unknown",
                     "Action Type": it.get("action_type") or "",
@@ -1354,6 +1405,13 @@ def _render_audit_tab(days_int: int):
             on_select="rerun",
             selection_mode="single-row",
             key="audit_actions_dataframe",
+            column_config={
+                _VIEW_COLUMN_LABEL: st.column_config.Column(
+                    label=_VIEW_COLUMN_LABEL,
+                    help=_VIEW_COLUMN_HELP,
+                    width="small",
+                ),
+            },
         )
 
         selected_rows = []

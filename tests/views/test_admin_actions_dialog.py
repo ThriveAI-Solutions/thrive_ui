@@ -362,6 +362,9 @@ def _make_tab_stub():
             self.session_state = {}
             self.captured_dataframe_kwargs: list[dict] = []
             self.dialog_invocations: list[dict] = []
+            # Feature #170: ``st.column_config.Column(...)`` is now invoked
+            # by ``_render_audit_tab`` when wiring the leading View column.
+            self.column_config = MagicMock()
 
         # Streamlit surface --------------------------------------------------
         def columns(self, spec):

@@ -393,6 +393,9 @@ class TestAgentLoggingDisabled:
                 self.components = MagicMock()
                 self.components.v1 = MagicMock()
                 self.components.v1.html = MagicMock()
+                # Feature #170: ``st.column_config.Column(...)`` is now invoked
+                # by the audit tab body when wiring the leading View column.
+                self.column_config = MagicMock()
 
             # Streamlit surface ----
             def multiselect(self, *_a, key=None, **_kw):
@@ -502,6 +505,9 @@ class TestAgentLoggingDisabled:
                 self.components = MagicMock()
                 self.components.v1 = MagicMock()
                 self.components.v1.html = MagicMock()
+                # Feature #170: ``st.column_config.Column(...)`` is now invoked
+                # by the audit tab body when wiring the leading View column.
+                self.column_config = MagicMock()
 
             def multiselect(self, *_a, key=None, **_kw):
                 self.session_state.setdefault(key, [])
@@ -611,6 +617,9 @@ class TestSelectionStateTrigger:
                 self.components = MagicMock()
                 self.components.v1 = MagicMock()
                 self.components.v1.html = MagicMock()
+                # Feature #170: ``st.column_config.Column(...)`` is now invoked
+                # by the audit tab body when wiring the leading View column.
+                self.column_config = MagicMock()
 
             def multiselect(self, *_a, key=None, **_kw):
                 self.session_state.setdefault(key, [])
@@ -717,6 +726,9 @@ class TestSelectionStateTrigger:
                 self.components = MagicMock()
                 self.components.v1 = MagicMock()
                 self.components.v1.html = MagicMock()
+                # Feature #170: ``st.column_config.Column(...)`` is now invoked
+                # by the audit tab body when wiring the leading View column.
+                self.column_config = MagicMock()
 
             def multiselect(self, *_a, key=None, **_kw):
                 self.session_state.setdefault(key, [])

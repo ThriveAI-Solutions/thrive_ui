@@ -122,6 +122,9 @@ class _SharedSessionStub:
         self.components = MagicMock()
         self.components.v1 = MagicMock()
         self.components.v1.html = MagicMock()
+        # ``st.column_config.Column(...)`` is invoked by the audit tab bodies
+        # (Feature #170) when wiring the leading View affordance column.
+        self.column_config = MagicMock()
 
     # ---- Layout primitives -----------------------------------------------
     def tabs(self, _labels):
