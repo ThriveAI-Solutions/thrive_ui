@@ -1,39 +1,54 @@
-"""Allergy SNOMED code allow-list and drug-allergy conflict crosswalk.
+"""Curated allergy SNOMED code allow-list and drug-allergy conflict crosswalk.
 
-Per epic #201:
-- ALLERGY_SNOMED_BY_CATEGORY drives the `federated_problems_v` fallback path
-  (when `federated_allergies_v` is unavailable, allergies are identified by
-  SNOMED code allow-list + text LIKE on the diagnosis column).
-- DRUG_ALLERGY_CONFLICTS feeds the soft conflict signal: when a patient has
-  a recorded drug allergy AND an active medication in the same class, the
-  allergies tool result emits a notes_to_agent advisory. NOT a CDS verdict.
+This module is the shared source of truth for allergy SNOMED codes used
+across the agent. It backs three consumers:
 
-The crosswalks are deliberately small and hand-curated. Expand by class as
-real coverage gaps appear.
+1. `search_codes` — the allergy-intent shortcut (e.g., "penicillin allergy",
+   "any food allergy") routes through `synonyms.json` for the `snomed`
+   vocabulary to the curated subsets defined here.
+2. The `federated_problems_v` fallback path on the allergies domain of
+   `get_patient_clinical_data` (Epic #201) — when the dedicated
+   `federated_allergies_v` view is unavailable, the agent identifies
+   allergies in the problem list via this allow-list + `ALLERGY_TEXT_PATTERNS`.
+3. The soft drug-allergy conflict advisory — `DRUG_ALLERGY_CONFLICTS` pairs
+   each curated allergen with the RxNorm code set of conflicting drug
+   classes; the allergies tool emits a `notes_to_agent` advisory when an
+   active med overlaps. Explicitly advisory, NOT a CDS verdict.
+
+The categories follow Epic #203:
+
+- drug — antibiotic / analgesic class allergies
+- food — IgE-mediated food allergens
+- environmental — pollens, allergic rhinitis variants
+- contact — latex and other contact-route allergens
+- anaphylaxis — life-threatening / acute systemic reactions
+
+Hand-curated and intentionally small. Expand by category as concrete
+coverage gaps surface during agent evaluation rather than guessing at
+completeness.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import List
+from typing import Final, List
 
 
-# SNOMED allergy codes grouped by clinical category. Used by the
-# federated_problems_v fallback path and by the search_codes intent shortcut.
-ALLERGY_SNOMED_BY_CATEGORY: dict[str, list[str]] = {
+ALLERGY_SNOMED_BY_CATEGORY: Final[dict[str, list[str]]] = {
     "drug": [
-        "91936005",  # Allergy to penicillin
-        "91937001",  # Allergy to sulfonamide
+        "91936005",   # Allergy to penicillin
         "294505008",  # Allergy to amoxicillin
+        "91937001",   # Allergy to sulfonamide
         "293584003",  # Allergy to aspirin
         "293586001",  # Allergy to NSAID
     ],
     "food": [
-        "91934008",  # Allergy to peanut
-        "91935009",  # Allergy to nut
+        "91934008",   # Allergy to peanut
+        "91935009",   # Allergy to nut
         "300913006",  # Allergy to seafood
         "417532002",  # Allergy to fish
-        "91938006",  # Allergy to dairy
-        "91930004",  # Allergy to egg
+        "91938006",   # Allergy to dairy
+        "91930004",   # Allergy to eggs
         "300915002",  # Allergy to wheat
     ],
     "environmental": [
@@ -46,11 +61,32 @@ ALLERGY_SNOMED_BY_CATEGORY: dict[str, list[str]] = {
     "contact": [
         "300916003",  # Allergy to latex
     ],
-    "adverse_reaction": [
+    "anaphylaxis": [
+        "39579001",   # Anaphylaxis
         "241929008",  # Acute allergic reaction
-        "39579001",  # Anaphylaxis
     ],
 }
+
+
+ALLERGY_CATEGORIES: Final[tuple[str, ...]] = tuple(ALLERGY_SNOMED_BY_CATEGORY.keys())
+
+
+def codes_for_category(category: str) -> list[str]:
+    """Return the SNOMED codes for a single allergy category.
+
+    Raises ValueError on unknown category so callers don't silently
+    drop a typo into a successful empty lookup.
+    """
+    if category not in ALLERGY_SNOMED_BY_CATEGORY:
+        raise ValueError(
+            f"unknown allergy category {category!r}; expected one of {ALLERGY_CATEGORIES}"
+        )
+    return list(ALLERGY_SNOMED_BY_CATEGORY[category])
+
+
+def all_allergy_codes() -> list[str]:
+    """Return every curated allergy SNOMED code, in category order."""
+    return [code for codes in ALLERGY_SNOMED_BY_CATEGORY.values() for code in codes]
 
 
 # Free-text allergen substrings used by the federated_problems_v fallback

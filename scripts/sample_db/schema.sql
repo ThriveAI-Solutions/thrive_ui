@@ -626,6 +626,29 @@ CREATE TABLE dw.federated_claims_summary_v (
     cms_claim_type VARCHAR(2)
 );
 
+-- federated_adt_v: admit/discharge/transfer events. Per epic #173, this view
+-- is the source for the admissions domain on get_patient_clinical_data.
+-- Unlike every other federated_*_v view, federated_adt_v exposes only
+-- `patient_id` (no `source_id`) — identity is resolved by joining
+-- internal_source_reference_v at empi_rank = 1.
+DROP TABLE IF EXISTS dw.federated_adt_v CASCADE;
+CREATE TABLE dw.federated_adt_v (
+    patient_id INTEGER,
+    source_name VARCHAR(256),
+    source_format VARCHAR(256),
+    last_modified_datetime TIMESTAMP,
+    event_date TIMESTAMP,
+    event_location VARCHAR(256),
+    location_type VARCHAR(256),
+    clean_setting VARCHAR(256),
+    status VARCHAR(256),
+    admit_from VARCHAR(256),
+    discharge_disposition VARCHAR(256),
+    discharge_location VARCHAR(256),
+    created_date TIMESTAMP,
+    source_raw_table VARCHAR(256)
+);
+
 -- federated_allergies_v: dedicated allergies view added by epic #201. Schema
 -- inferred from the dev-warehouse evaluation set (allergy / type / severity
 -- columns confirmed) plus the federated_problems_v shape. The Redshift

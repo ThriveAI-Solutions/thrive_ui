@@ -137,7 +137,7 @@ class AllergiesQuery(BaseModel):
     domain: Literal["allergies"] = "allergies"
     snomed_codes: Optional[List[str]] = None
     allergen_text: Optional[str] = None
-    category: Optional[Literal["drug", "food", "environmental", "contact", "adverse_reaction"]] = None
+    category: Optional[Literal["drug", "food", "environmental", "contact", "anaphylaxis"]] = None
     include_inactive: bool = False
     date_range: Optional[DateRange] = None
 
@@ -313,7 +313,7 @@ class AllergyItem(BaseModel):
     # Category is normalized from the warehouse `type` column (e.g.,
     # 'Drug allergy' → 'drug'); raw value preserved in `type_raw` for callers
     # that need the original wording.
-    category: Optional[Literal["drug", "food", "environmental", "contact", "adverse_reaction", "other"]] = None
+    category: Optional[Literal["drug", "food", "environmental", "contact", "anaphylaxis", "other"]] = None
     type_raw: Optional[str] = None
     severity: Optional[str] = None
     status: Optional[str] = None
@@ -815,7 +815,7 @@ _TYPE_TO_CATEGORY = {
     "food allergy": "food",
     "environmental allergy": "environmental",
     "contact allergy": "contact",
-    "adverse reaction": "adverse_reaction",
+    "adverse reaction": "anaphylaxis",
 }
 
 

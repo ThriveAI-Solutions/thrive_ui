@@ -1758,15 +1758,18 @@
   "snomed": {
     "drug allergy": {
       "synonyms": [
-        "medication allergy",
         "drug allergies",
+        "medication allergy",
         "medication allergies",
-        "rx allergy"
+        "rx allergy",
+        "any drug allergy",
+        "any medication allergy",
+        "drug hypersensitivity"
       ],
       "codes": [
         "91936005",
-        "91937001",
         "294505008",
+        "91937001",
         "293584003",
         "293586001"
       ]
@@ -1774,7 +1777,9 @@
     "food allergy": {
       "synonyms": [
         "food allergies",
-        "food sensitivity"
+        "food sensitivity",
+        "any food allergy",
+        "food hypersensitivity"
       ],
       "codes": [
         "91934008",
@@ -1789,10 +1794,13 @@
     "environmental allergy": {
       "synonyms": [
         "environmental allergies",
+        "any environmental allergy",
         "hay fever",
         "allergic rhinitis",
+        "seasonal allergies",
+        "seasonal allergy",
         "pollen allergy",
-        "seasonal allergies"
+        "pollen allergies"
       ],
       "codes": [
         "232347008",
@@ -1802,21 +1810,134 @@
         "418689008"
       ]
     },
+    "contact allergy": {
+      "synonyms": [
+        "contact allergies",
+        "any contact allergy",
+        "contact hypersensitivity"
+      ],
+      "codes": ["300916003"]
+    },
+    "anaphylaxis": {
+      "synonyms": [
+        "anaphylactic reaction",
+        "anaphylactic shock",
+        "severe allergic reaction",
+        "acute allergic reaction",
+        "systemic allergic reaction"
+      ],
+      "codes": ["39579001", "241929008"]
+    },
     "penicillin allergy": {
       "synonyms": [
         "pcn allergy",
         "allergic to penicillin",
-        "penicillin sensitivity"
+        "penicillin sensitivity",
+        "allergy to penicillin"
       ],
       "codes": ["91936005", "294505008"]
+    },
+    "amoxicillin allergy": {
+      "synonyms": [
+        "allergic to amoxicillin",
+        "amox allergy",
+        "allergy to amoxicillin"
+      ],
+      "codes": ["294505008"]
     },
     "sulfa allergy": {
       "synonyms": [
         "sulfonamide allergy",
         "sulfa drugs allergy",
-        "allergic to sulfa"
+        "allergic to sulfa",
+        "allergy to sulfonamide",
+        "sulfonamide hypersensitivity"
       ],
       "codes": ["91937001"]
+    },
+    "aspirin allergy": {
+      "synonyms": [
+        "asa allergy",
+        "allergic to aspirin",
+        "allergy to aspirin",
+        "salicylate allergy"
+      ],
+      "codes": ["293584003"]
+    },
+    "nsaid allergy": {
+      "synonyms": [
+        "nsaids allergy",
+        "non-steroidal anti-inflammatory allergy",
+        "allergic to nsaids",
+        "allergy to nsaid"
+      ],
+      "codes": ["293586001"]
+    },
+    "peanut allergy": {
+      "synonyms": [
+        "allergic to peanuts",
+        "allergy to peanut",
+        "peanut hypersensitivity"
+      ],
+      "codes": ["91934008"]
+    },
+    "nut allergy": {
+      "synonyms": [
+        "tree nut allergy",
+        "allergic to nuts",
+        "allergy to nuts",
+        "treenut allergy"
+      ],
+      "codes": ["91935009", "91934008"]
+    },
+    "seafood allergy": {
+      "synonyms": [
+        "shellfish allergy",
+        "allergic to seafood",
+        "allergy to seafood"
+      ],
+      "codes": ["300913006", "417532002"]
+    },
+    "fish allergy": {
+      "synonyms": [
+        "allergic to fish",
+        "allergy to fish"
+      ],
+      "codes": ["417532002"]
+    },
+    "dairy allergy": {
+      "synonyms": [
+        "milk allergy",
+        "allergic to dairy",
+        "allergic to milk",
+        "allergy to dairy",
+        "lactose allergy"
+      ],
+      "codes": ["91938006"]
+    },
+    "egg allergy": {
+      "synonyms": [
+        "allergic to eggs",
+        "allergy to eggs",
+        "egg white allergy"
+      ],
+      "codes": ["91930004"]
+    },
+    "wheat allergy": {
+      "synonyms": [
+        "allergic to wheat",
+        "allergy to wheat",
+        "gluten allergy"
+      ],
+      "codes": ["300915002"]
+    },
+    "latex allergy": {
+      "synonyms": [
+        "allergic to latex",
+        "allergy to latex",
+        "rubber allergy"
+      ],
+      "codes": ["300916003"]
     }
   }
 }

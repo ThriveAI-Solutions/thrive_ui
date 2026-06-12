@@ -19,7 +19,7 @@ _CATEGORY_TO_TYPES: dict[str, list[str]] = {
     "food": ["Food allergy"],
     "environmental": ["Environmental allergy"],
     "contact": ["Contact allergy"],
-    "adverse_reaction": ["Adverse Reaction"],
+    "anaphylaxis": ["Adverse Reaction"],
 }
 
 

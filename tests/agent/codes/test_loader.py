@@ -3,9 +3,9 @@ import pytest
 from agent.codes.loader import VocabLoader, search
 
 
-def test_loader_loads_all_five_vocabularies():
+def test_loader_loads_all_vocabularies():
     loader = VocabLoader()
-    for vocab in ("loinc", "cvx", "rxnorm", "icd10", "cpt"):
+    for vocab in ("loinc", "cvx", "rxnorm", "icd10", "cpt", "snomed"):
         rows = loader.entries(vocab)
         assert len(rows) >= 20, f"{vocab} has only {len(rows)} entries"
 
@@ -138,9 +138,87 @@ def test_synonym_layer_case_insensitive():
 
 
 def test_synonym_layer_does_not_affect_other_vocabularies():
-    """The synonym map only has icd10 entries today. Other vocabularies
-    should behave exactly like before (substring search)."""
+    """Substring search must still work in any vocabulary that doesn't
+    have a synonym map entry for the given query."""
     results = search(vocabulary="loinc", query="hemoglobin a1c", limit=5)
     assert any("a1c" in r.display_name.lower() for r in results)
     results = search(vocabulary="cvx", query="mmr", limit=5)
     assert any(r.code == "03" for r in results)
+
+
+# ---------------------------------------------------------------------------
+# SNOMED allergy intent shortcuts (Epic #203)
+# ---------------------------------------------------------------------------
+
+
+def test_snomed_penicillin_allergy_intent():
+    """'penicillin allergy' must hit the curated drug-allergy bucket and
+    return the penicillin + amoxicillin (cross-reactive) codes."""
+    results = search(vocabulary="snomed", query="penicillin allergy", limit=10)
+    codes = {r.code for r in results}
+    assert "91936005" in codes, f"expected 91936005 in {codes}"
+    assert "294505008" in codes, f"expected 294505008 (cross-reactive amoxicillin) in {codes}"
+
+
+def test_snomed_food_allergy_intent_returns_full_food_bucket():
+    """'any food allergy' must resolve to the curated food-allergy bucket."""
+    results = search(vocabulary="snomed", query="any food allergy", limit=20)
+    codes = {r.code for r in results}
+    expected = {"91934008", "91935009", "300913006", "417532002", "91938006", "91930004", "300915002"}
+    assert expected.issubset(codes), f"missing food allergy codes: {expected - codes}"
+
+
+def test_snomed_peanut_allergy_lay_term():
+    """'peanut allergy' resolves to the single peanut SNOMED code."""
+    results = search(vocabulary="snomed", query="peanut allergy", limit=5)
+    codes = {r.code for r in results}
+    assert codes == {"91934008"}, f"got {codes}"
+
+
+def test_snomed_hay_fever_resolves_to_environmental_bucket():
+    """Lay term 'hay fever' must reach environmental allergy codes."""
+    results = search(vocabulary="snomed", query="hay fever", limit=10)
+    codes = {r.code for r in results}
+    assert "232347008" in codes, f"expected pollen rhinitis 232347008 in {codes}"
+    assert any(c in codes for c in ("367498001", "446096008")), (
+        f"expected at least one allergic-rhinitis code in {codes}"
+    )
+
+
+def test_snomed_anaphylaxis_substring_fallback():
+    """Anaphylaxis is reachable through both the canonical key and via
+    plain substring match on the display name."""
+    by_canonical = search(vocabulary="snomed", query="anaphylaxis", limit=5)
+    assert any(r.code == "39579001" for r in by_canonical)
+
+
+def test_snomed_sulfa_allergy_synonym():
+    """'sulfa allergy' (lay shorthand) resolves to the sulfonamide code."""
+    results = search(vocabulary="snomed", query="sulfa allergy", limit=5)
+    codes = {r.code for r in results}
+    assert codes == {"91937001"}, f"got {codes}"
+
+
+def test_snomed_drug_allergy_intent_returns_full_drug_bucket():
+    """'drug allergy' / 'medication allergy' must surface the full
+    curated drug-allergy bucket."""
+    for needle in ("drug allergy", "medication allergy", "any drug allergy"):
+        results = search(vocabulary="snomed", query=needle, limit=10)
+        codes = {r.code for r in results}
+        expected = {"91936005", "294505008", "91937001", "293584003", "293586001"}
+        assert expected.issubset(codes), f"{needle!r} missing codes: {expected - codes}"
+
+
+def test_snomed_synonyms_codes_all_exist_in_data():
+    """Drift guard: every code listed in the synonyms.json snomed block
+    must exist in agent/codes/data/snomed.json. Catches typos before they
+    silently fall through the loader's phantom-code filter."""
+    from agent.codes.loader import _load, _load_synonyms
+
+    data_codes = {r["code"] for r in _load("snomed")}
+    snomed_block = _load_synonyms().get("snomed", {})
+    for canonical, entry in snomed_block.items():
+        for code in entry.get("codes", []):
+            assert code in data_codes, (
+                f"synonyms.json snomed[{canonical!r}] references {code!r} which is not in snomed.json"
+            )

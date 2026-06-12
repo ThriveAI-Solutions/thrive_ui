@@ -227,3 +227,5 @@ scripts/synthea/output/
 .idea/
 .vscode/
 .claude/
+mempalace.yaml
+.verify-evidence/

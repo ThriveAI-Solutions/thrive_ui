@@ -1,7 +1,12 @@
-"""search_codes — vocabulary lookup for ICD-10 / LOINC / CVX / RxNorm / CPT.
+"""search_codes — vocabulary lookup for ICD-10 / LOINC / CVX / RxNorm / CPT / SNOMED.
 
 Per spec §7.4: backed by embedded code reference tables (see
 agent/codes/data/*.json).
+
+SNOMED coverage in this build is currently allergy-focused (Epic #203);
+the curated category buckets live in agent/codes/allergies.py and are
+reachable via `synonyms.json` entries like "penicillin allergy",
+"peanut allergy", and "any food allergy".
 """
 
 from __future__ import annotations
