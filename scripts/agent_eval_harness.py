@@ -91,7 +91,15 @@ def _model_info() -> dict:
     import streamlit as st
 
     ai_keys = st.secrets.get("ai_keys", {})
-    provider = ai_keys.get("provider", "")
+    if ai_keys.get("ollama_model"):
+        inferred = "ollama"
+    elif ai_keys.get("anthropic_model"):
+        inferred = "anthropic"
+    elif ai_keys.get("bedrock_model_id"):
+        inferred = "bedrock"
+    else:
+        inferred = ""
+    provider = ai_keys.get("provider") or inferred
     model = ai_keys.get("ollama_model") or ai_keys.get("anthropic_model") or ai_keys.get("bedrock_model_id") or ""
     return {"provider": provider, "model": model}
 
@@ -123,7 +131,9 @@ async def _run_conversation(
     }
     try:
         selected = resolve_patient(adapter, planned.source_id)
-        adapter.pop_sql_log()  # don't attribute the lookup query to turn 1
+        # Clears the lookup query AND any stale entries left if a prior
+        # conversation errored mid-turn, so turn 1 attribution starts clean.
+        adapter.pop_sql_log()
         record["patient"]["display_name"] = selected.display_name
         deps = _build_deps(adapter, rag, selected, session_id=f"{run_id}-{planned.conversation_id}")
 
@@ -188,15 +198,28 @@ def main() -> int:
                 print(f"  ({turn.role}) {turn.prompt}")
         return 0
 
-    run_id = f"eval-{datetime.now():%Y%m%d-%H%M%S}"
-    out_path = args.out or (_RESULTS_DIR / f"{run_id}.json")
+    # --out is overwrite-only (no resume); when given, its stem becomes the
+    # run_id so the filename and the embedded id can't disagree.
+    if args.out is not None:
+        out_path = args.out
+        run_id = out_path.stem
+    else:
+        run_id = f"eval-{datetime.now():%Y%m%d-%H%M%S}"
+        out_path = _RESULTS_DIR / f"{run_id}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    configure_observability()
-    adapter = AnalyticsDbAdapter.from_streamlit_secrets()
-    rag = _build_rag()
-    runner = AgenticRunner()
-    judge = None if args.skip_judge else build_judge()
+    try:
+        configure_observability()
+        adapter = AnalyticsDbAdapter.from_streamlit_secrets()
+        rag = _build_rag()
+        runner = AgenticRunner()
+        judge = None if args.skip_judge else build_judge()
+    except Exception as exc:
+        print(
+            f"error: failed to initialize ({type(exc).__name__}: {exc}) — "
+            f"check [ai_keys], [analytics_db], [agent] in .streamlit/secrets.toml"
+        )
+        return 2
 
     results = {
         "run_id": run_id,
