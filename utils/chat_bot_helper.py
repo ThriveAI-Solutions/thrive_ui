@@ -1281,6 +1281,44 @@ def add_acknowledgement():
         st.write(random_acknowledgment)
 
 
+_MODEL_TIMEOUT_EXCEPTION_NAMES = frozenset(
+    {
+        # pydantic-ai wraps every backend timeout/transport error as ModelAPIError.
+        "ModelAPIError",
+        # openai SDK surface (when retries are exhausted).
+        "APITimeoutError",
+        "APIConnectionError",
+        # anthropic SDK surface.
+        "AnthropicAPITimeoutError",
+        # raw httpx transports (defense in depth — usually wrapped above).
+        "ReadTimeout",
+        "ConnectTimeout",
+        "TimeoutException",
+    }
+)
+
+
+def looks_like_model_timeout(e: BaseException) -> bool:
+    """Return True for transient LLM-backend timeout / connection failures.
+
+    Detected by class-name match so importing pydantic_ai / openai /
+    anthropic at module load is unnecessary — this helper is on the hot
+    path for the legacy Vanna flow too, which has no pydantic-ai dependency.
+    Walks the cause/context chain because ModelAPIError typically surfaces
+    a wrapped APITimeoutError, and Streamlit error boundaries sometimes
+    rewrap once more on the way up.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = e
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if type(cur).__name__ in _MODEL_TIMEOUT_EXCEPTION_NAMES:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    # String fallback for re-raise patterns that lose the original class.
+    return "request timed out" in str(e).lower()
+
+
 def normal_message_flow(my_question: str):
     """Top-level entry point — wraps the flow in a safety net so that any
     unexpected exception surfaces as a friendly ERROR card instead of
@@ -1297,11 +1335,23 @@ def normal_message_flow(my_question: str):
         if not isinstance(e, Exception):
             raise
         logger.exception("Unexpected error in chat flow")
+        # The 14-of-15 ModelAPIErrors in last week's logs were the user
+        # re-sending the same question 4–5 times after one timeout dropped
+        # the first attempt — the generic "Something went wrong" message
+        # gave them no signal to wait. Branch the wording so a known-
+        # transient cause reads as "wait, then retry" instead of "broken".
+        if looks_like_model_timeout(e):
+            body = (
+                "The AI model is slow or temporarily unreachable. "
+                "Please wait a moment and try again."
+            )
+        else:
+            body = f"Something went wrong while processing your question.\n\n{e}"
         try:
             add_message(
                 Message(
                     RoleType.ASSISTANT,
-                    f"Something went wrong while processing your question.\n\n{e}",
+                    body,
                     MessageType.ERROR,
                     "",
                     my_question,
@@ -1314,7 +1364,7 @@ def normal_message_flow(my_question: str):
             logger.exception("Failed to persist friendly error message")
             try:
                 with st.chat_message(RoleType.ASSISTANT.value):
-                    render_friendly_error(str(e))
+                    render_friendly_error(body)
             except Exception:
                 logger.exception("Failed to render fallback friendly error")
         try:

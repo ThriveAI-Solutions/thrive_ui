@@ -156,3 +156,102 @@ def test_build_model_ollama_per_model_miss_falls_back_to_global(monkeypatch):
     )
     model = build_model()
     assert model.settings == {"extra_body": {"reasoning_effort": "none"}}
+
+
+# --- Issue #198: model client retry config -----------------------------------
+
+
+def _ollama_underlying_openai_client(model):
+    """Drill into the OpenAIChatModel returned by build_model and surface the
+    AsyncOpenAI instance underneath. Keeps the retry-config tests independent
+    of how pydantic-ai wires its `_client` attribute on a given version."""
+    # OpenAIChatModel -> Provider -> AsyncOpenAI via `.client`
+    return model.client
+
+
+def test_build_model_ollama_sets_default_max_retries(monkeypatch):
+    """Default raises the SDK floor from 2 to 3 — absorbs one transient
+    Ollama hiccup without runaway latency. See agent/models._DEFAULT_MODEL_MAX_RETRIES."""
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {
+            "ai_keys": {"provider": "ollama", "ollama_model": "qwen3.6:27b"},
+        },
+    )
+    model = build_model()
+    client = _ollama_underlying_openai_client(model)
+    assert client.max_retries == 3
+
+
+def test_build_model_ollama_max_retries_overridable_via_secrets(monkeypatch):
+    """Ops can override the default via `[agent].model_max_retries` without
+    touching code — matches the existing `max_tool_calls` / `max_wall_clock_s` pattern."""
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {
+            "ai_keys": {"provider": "ollama", "ollama_model": "qwen3.6:27b"},
+            "agent": {"model_max_retries": 5},
+        },
+    )
+    model = build_model()
+    client = _ollama_underlying_openai_client(model)
+    assert client.max_retries == 5
+
+
+def test_build_model_ollama_max_retries_invalid_falls_back_to_default(monkeypatch):
+    """A misconfigured secret (e.g. a string) must not crash startup."""
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {
+            "ai_keys": {"provider": "ollama", "ollama_model": "qwen3.6:27b"},
+            "agent": {"model_max_retries": "not a number"},
+        },
+    )
+    model = build_model()
+    assert _ollama_underlying_openai_client(model).max_retries == 3
+
+
+def test_build_model_ollama_max_retries_negative_clamped_to_zero(monkeypatch):
+    """Negative is meaningless; clamp to 0 (no retries) rather than letting
+    the underlying SDK barf on a contract violation."""
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {
+            "ai_keys": {"provider": "ollama", "ollama_model": "qwen3.6:27b"},
+            "agent": {"model_max_retries": -1},
+        },
+    )
+    model = build_model()
+    assert _ollama_underlying_openai_client(model).max_retries == 0
+
+
+def test_build_model_anthropic_sets_default_max_retries(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {
+            "ai_keys": {
+                "provider": "anthropic",
+                "anthropic_api_key": "sk-test",
+                "anthropic_model": "claude-sonnet-4-6",
+            },
+        },
+    )
+    model = build_model()
+    # AnthropicModel -> Provider.client is an AsyncAnthropic instance.
+    assert model.client.max_retries == 3
+
+
+def test_build_model_anthropic_max_retries_overridable(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {
+            "ai_keys": {
+                "provider": "anthropic",
+                "anthropic_api_key": "sk-test",
+                "anthropic_model": "claude-sonnet-4-6",
+            },
+            "agent": {"model_max_retries": 1},
+        },
+    )
+    model = build_model()
+    assert model.client.max_retries == 1
