@@ -135,7 +135,8 @@ SCHEMA_DOCS: List[_Doc] = [
         "view": "federated_adt_v",
         "kind": "schema",
         "text": (
-            "federated_adt_v: admit/discharge/transfer events. Columns: source_id, "
+            "federated_adt_v: admit/discharge/transfer events. Columns: patient_id "
+            "(no source_id — join internal_source_reference_v at empi_rank=1), "
             "event_date, event_location, location_type, clean_setting (normalized "
             "setting: INPATIENT, OUTPATIENT, EMERGENCY, LONG TERM CARE, SNF), "
             "status, admit_from, discharge_disposition, discharge_location. "
