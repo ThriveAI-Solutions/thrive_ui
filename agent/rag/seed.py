@@ -252,6 +252,22 @@ EXAMPLES_DOCS: List[_Doc] = [
         "view": "",
         "kind": "examples",
         "text": (
+            "Q: 'What was the reason for patient X's most recent admission?'\n"
+            "Tool sequence: (1) get_patient_clinical_data({domain:'admissions'}) — "
+            "items are ordered event_date DESC, so items[0] is the most recent; "
+            "(2) get_patient_clinical_data({domain:'diagnoses', date_range:{start:"
+            "<admission_date - 1 day>, end:<admission_date + 1 day>}}) to surface "
+            "diagnoses recorded around the admission. federated_adt_v has no "
+            "principal-diagnosis column, so reason is INFERRED from problems near "
+            "the admission date — say so in the answer. If "
+            "data_availability='no_records_found', say explicitly that the patient "
+            "has no admission records — do NOT phrase it as 'patient was not admitted'."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
             "Q: 'Did patient have imaging done last year?'\n"
             "Tool sequence: get_patient_clinical_data({domain:'imaging', "
             "date_range:{...}}). The result will set notes_to_agent reminding you "

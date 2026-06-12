@@ -20,6 +20,7 @@ import zstandard as zstd
 from scripts.sample_db.dump_writer import write_dump
 from scripts.sample_db.transformers.base import TransformContext
 from scripts.sample_db.transformers.claims import transform_claims
+from scripts.sample_db.transformers.adt import transform_adt
 from scripts.sample_db.transformers.documents import transform_documents
 from scripts.sample_db.transformers.encounters import transform_encounters
 from scripts.sample_db.transformers.identity import transform_identity
@@ -109,6 +110,16 @@ def run_etl_in_memory(inputs: dict[str, pd.DataFrame], seed: int = 42) -> dict[s
     transform_documents(encounters, source_map, ctx)
     transform_claims(claims, encounters, procedures, source_map, ctx)
 
+    # ADT events derive from inpatient/emergency encounters and need the
+    # integer patient_id (federated_adt_v's only identity column). Build
+    # the synthea_id → patient_id map from the source-reference output and
+    # run AFTER transform_identity so the input is populated.
+    src_to_pid_for_adt = _build_patient_id_map(ctx.output["dw.internal_source_reference_v"])
+    synthea_to_pid = {
+        syn_id: src_to_pid_for_adt[src_id] for syn_id, src_id in source_map.items() if src_id in src_to_pid_for_adt
+    }
+    transform_adt(encounters, synthea_to_pid, ctx)
+
     # Build rollup auxiliary maps and call.
     src_to_pid = _build_patient_id_map(ctx.output["dw.internal_source_reference_v"])
     src_to_practice = _build_practice_map(ctx.output["dw.internal_source_reference_v"])
@@ -137,6 +148,7 @@ def _expected_tables() -> list[str]:
             "federated_vaccination_v",
             "federated_vitals_v",
             "federated_documents_v",
+            "federated_adt_v",
             "federated_claims_icd_diagnosis_detail_v",
             "federated_claims_icd_procedure_detail_v",
             "federated_claims_medical_facility_detail_v",
