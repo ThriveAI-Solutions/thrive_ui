@@ -1,0 +1,84 @@
+# Eval question set — the analysts' 10 representative questions.
+# Same questions as tests/agent/regression/representative_questions.yaml,
+# phrased for live multi-turn use. Placeholders {date_start} {date_end}
+# {vaccine} {disease} are bound from evals/roster.yaml at run time.
+questions:
+  - id: Q1
+    title: Invasive procedures in date range
+    prompt: "Has this patient had any invasive procedures or surgeries between {date_start} and {date_end}?"
+    followups:
+      - "What date was each procedure performed?"
+      - "What facility performed each procedure?"
+      - "What procedure was done?"
+      - "What provider performed each procedure?"
+
+  - id: Q2
+    title: Negative hepatitis results in date range
+    prompt: "Has this patient had any negative Hepatitis results between {date_start} and {date_end}?"
+    followups:
+      - "What date was the lab drawn?"
+      - "What lab performed the testing?"
+      - "What was the reason for the study?"
+
+  - id: Q3
+    title: Measles/Rubeola IgM/IgG testing ever
+    prompt: "Has this patient ever had Measles or Rubeola IgM/IgG testing done?"
+    followups:
+      - "What was the reason for testing?"
+
+  - id: Q4
+    title: Diabetes history and latest A1C
+    prompt: "Does this patient have a history of diabetes?"
+    followups:
+      - "What is the most recent A1C value?"
+
+  - id: Q5
+    title: Facility admissions in date range
+    prompt: "Has this patient been admitted to a long-term care facility, hospital, or other healthcare facility between {date_start} and {date_end}?"
+    followups:
+      - "Which facilities?"
+      - "What were the admission and discharge dates for each facility?"
+
+  - id: Q6
+    title: Specified vaccine history
+    prompt: "Has this patient ever received the {vaccine} vaccine?"
+    followups:
+      - "What were the administration dates?"
+      - "Exactly which vaccine product was given?"
+      - "What facility vaccinated the patient?"
+
+  - id: Q7
+    title: Disease history in notes
+    prompt: "Does this patient have a history of {disease}?"
+    followups:
+      - "When was this last mentioned in notes?"
+      - "Who diagnosed or mentioned it?"
+
+  - id: Q8
+    title: Imaging in date range
+    prompt: "Did this patient have imaging done between {date_start} and {date_end}?"
+    followups:
+      - "What type of imaging?"
+      - "What location on the body was imaged?"
+      - "Where was the imaging performed?"
+      - "What was the impression?"
+
+  - id: Q9
+    title: Gonorrhea/Chlamydia antibiotic treatment
+    prompt: "Has this patient been treated with antibiotics on or after {date_start} for Gonorrhea or Chlamydia?"
+    followups:
+      - "Which medications were prescribed?"
+      - "What was the dosage and duration of each medication prescribed?"
+      - "Who prescribed the medication?"
+      - "Was the patient pregnant at the time of the positive test?"
+      - "Was expedited partner therapy (EPT) offered to the patient to treat their sexual contacts?"
+
+  - id: Q10
+    title: Hep B maternal records
+    prompt: "For this patient's Hep B maternal records: what is the patient's gravida and para, the delivery dates and outcomes of previous pregnancies, and the medical record numbers for living children?"
+    followups: []
+    reviewer_note: >-
+      Obstetric history is not in the warehouse. The correct behavior is an
+      honest decline ("not available in this warehouse"), not fabricated
+      gravida/para values. Mark Correct if the agent declined honestly;
+      mark Incorrect if it fabricated data.
