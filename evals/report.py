@@ -125,7 +125,8 @@ var MARKS_KEY = "evalmarks:" + DATA.run_id;
 
 function esc(s) {
   return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
+    .replace(/`/g, "&#96;");
 }
 function loadMarks() {
   try { return JSON.parse(localStorage.getItem(MARKS_KEY)) || {}; } catch (e) { return {}; }
@@ -262,9 +263,10 @@ function badge(turn, convo) {
 
 function judgeChip(turn) {
   if (!turn.judge) return '<div class="judge">Judge: unavailable</div>';
-  var cls = { looks_correct: "ok", looks_wrong: "bad", unsure: "meh" }[turn.judge.suggestion] || "meh";
+  var sug = turn.judge.suggestion || "unsure";
+  var cls = { looks_correct: "ok", looks_wrong: "bad", unsure: "meh" }[sug] || "meh";
   return '<div class="judge"><span class="badge ' + cls + '">judge: ' +
-    esc(turn.judge.suggestion.replace("_", " ")) + "</span> " + esc(turn.judge.reason) + "</div>";
+    esc(sug.replace("_", " ")) + "</span> " + esc(turn.judge.reason || "") + "</div>";
 }
 
 function traceDetails(turn) {
@@ -349,6 +351,8 @@ function exportVerdicts() {
   });
   download(DATA.run_id + "-verdicts.json",
     JSON.stringify({ run_id: DATA.run_id, marks: marks, rows: rows }, null, 2), "application/json");
+  // CSV deliberately omits the prompt column: prompts can carry PHI and
+  // embedded newlines; the JSON export retains them for tooling.
   var csv = "card_id,question_id,patient_source_id,turn_index,verdict,judge_suggestion\n" +
     rows.map(function (r) {
       return [r.card_id, r.question_id, r.patient_source_id, r.turn_index, r.verdict, r.judge_suggestion]
