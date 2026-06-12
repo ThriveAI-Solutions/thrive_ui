@@ -19,6 +19,7 @@ import zstandard as zstd
 
 from scripts.sample_db.dump_writer import write_dump
 from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.allergies import transform_allergies
 from scripts.sample_db.transformers.claims import transform_claims
 from scripts.sample_db.transformers.documents import transform_documents
 from scripts.sample_db.transformers.encounters import transform_encounters
@@ -45,6 +46,11 @@ _REQUIRED_FILES = [
     "providers.csv",
     "organizations.csv",
     "claims.csv",
+]
+
+# Optional inputs — older Synthea outputs may pre-date these CSVs.
+_OPTIONAL_FILES = [
+    "allergies.csv",
 ]
 
 
@@ -108,6 +114,9 @@ def run_etl_in_memory(inputs: dict[str, pd.DataFrame], seed: int = 42) -> dict[s
     transform_vitals(observations, source_map, ctx)
     transform_documents(encounters, source_map, ctx)
     transform_claims(claims, encounters, procedures, source_map, ctx)
+    allergies = inputs.get("allergies.csv")
+    if allergies is not None:
+        transform_allergies(allergies, source_map, ctx)
 
     # Build rollup auxiliary maps and call.
     src_to_pid = _build_patient_id_map(ctx.output["dw.internal_source_reference_v"])
@@ -137,6 +146,7 @@ def _expected_tables() -> list[str]:
             "federated_vaccination_v",
             "federated_vitals_v",
             "federated_documents_v",
+            "federated_allergies_v",
             "federated_claims_icd_diagnosis_detail_v",
             "federated_claims_icd_procedure_detail_v",
             "federated_claims_medical_facility_detail_v",
@@ -164,6 +174,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: missing {path}", file=sys.stderr)
             return 1
         inputs[f] = pd.read_csv(path)
+    for f in _OPTIONAL_FILES:
+        path = args.synthea_dir / f
+        if path.exists():
+            inputs[f] = pd.read_csv(path)
+        else:
+            print(f"NOTE: {path} not found — skipping (table will be empty in dump)")
 
     print(f"Running ETL on {sum(len(d) for d in inputs.values())} input rows...")
     output = run_etl_in_memory(inputs, seed=args.seed)

@@ -1754,5 +1754,69 @@
       ],
       "codes": ["80061"]
     }
+  },
+  "snomed": {
+    "drug allergy": {
+      "synonyms": [
+        "medication allergy",
+        "drug allergies",
+        "medication allergies",
+        "rx allergy"
+      ],
+      "codes": [
+        "91936005",
+        "91937001",
+        "294505008",
+        "293584003",
+        "293586001"
+      ]
+    },
+    "food allergy": {
+      "synonyms": [
+        "food allergies",
+        "food sensitivity"
+      ],
+      "codes": [
+        "91934008",
+        "91935009",
+        "300913006",
+        "417532002",
+        "91938006",
+        "91930004",
+        "300915002"
+      ]
+    },
+    "environmental allergy": {
+      "synonyms": [
+        "environmental allergies",
+        "hay fever",
+        "allergic rhinitis",
+        "pollen allergy",
+        "seasonal allergies"
+      ],
+      "codes": [
+        "232347008",
+        "446096008",
+        "367498001",
+        "232353008",
+        "418689008"
+      ]
+    },
+    "penicillin allergy": {
+      "synonyms": [
+        "pcn allergy",
+        "allergic to penicillin",
+        "penicillin sensitivity"
+      ],
+      "codes": ["91936005", "294505008"]
+    },
+    "sulfa allergy": {
+      "synonyms": [
+        "sulfonamide allergy",
+        "sulfa drugs allergy",
+        "allergic to sulfa"
+      ],
+      "codes": ["91937001"]
+    }
   }
 }

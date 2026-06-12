@@ -17,7 +17,7 @@ from agent.deps import AgentDeps
 class CodeSearchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    vocabulary: Literal["icd10", "loinc", "cvx", "rxnorm", "cpt"]
+    vocabulary: Literal["icd10", "loinc", "cvx", "rxnorm", "cpt", "snomed"]
     query: str
     limit: int = Field(default=20, le=50)
 

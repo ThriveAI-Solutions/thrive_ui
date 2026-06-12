@@ -1,0 +1,22 @@
+[
+    {"code": "91936005", "display_name": "Allergy to penicillin (finding)", "is_active": true},
+    {"code": "91937001", "display_name": "Allergy to sulfonamide (finding)", "is_active": true},
+    {"code": "294505008", "display_name": "Allergy to amoxicillin (finding)", "is_active": true},
+    {"code": "293584003", "display_name": "Allergy to aspirin (finding)", "is_active": true},
+    {"code": "293586001", "display_name": "Allergy to non-steroidal anti-inflammatory agent (finding)", "is_active": true},
+    {"code": "91934008", "display_name": "Allergy to peanut (finding)", "is_active": true},
+    {"code": "91935009", "display_name": "Allergy to nut (finding)", "is_active": true},
+    {"code": "300913006", "display_name": "Allergy to seafood (finding)", "is_active": true},
+    {"code": "417532002", "display_name": "Allergy to fish (finding)", "is_active": true},
+    {"code": "91938006", "display_name": "Allergy to dairy product (finding)", "is_active": true},
+    {"code": "91930004", "display_name": "Allergy to eggs (finding)", "is_active": true},
+    {"code": "300915002", "display_name": "Allergy to wheat (finding)", "is_active": true},
+    {"code": "232347008", "display_name": "Allergic rhinitis due to pollen (disorder)", "is_active": true},
+    {"code": "446096008", "display_name": "Perennial allergic rhinitis (disorder)", "is_active": true},
+    {"code": "367498001", "display_name": "Seasonal allergic rhinitis (disorder)", "is_active": true},
+    {"code": "232353008", "display_name": "Perennial allergic rhinitis with seasonal variation (disorder)", "is_active": true},
+    {"code": "418689008", "display_name": "Allergy to grass pollen (finding)", "is_active": true},
+    {"code": "300916003", "display_name": "Allergy to latex (finding)", "is_active": true},
+    {"code": "241929008", "display_name": "Acute allergic reaction (disorder)", "is_active": true},
+    {"code": "39579001", "display_name": "Anaphylaxis (disorder)", "is_active": true}
+]

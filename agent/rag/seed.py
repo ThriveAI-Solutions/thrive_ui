@@ -157,6 +157,18 @@ SCHEMA_DOCS: List[_Doc] = [
         ),
     },
     {
+        "view": "federated_allergies_v",
+        "kind": "schema",
+        "text": (
+            "federated_allergies_v: allergy records. Columns: source_id, code "
+            "(SNOMED), code_type, allergy, type (Drug/Food/Adverse Reaction/"
+            "Environmental/Contact), severity, status, onset_date, status_datetime, "
+            "reaction. Use get_patient_clinical_data domain='allergies'; NKA "
+            "surfaces via the result's negative_assertion flag, drug-med conflicts "
+            "via notes_to_agent. Uncoded allergies in notes are NOT captured."
+        ),
+    },
+    {
         "view": "metric_federated_data_v",
         "kind": "schema",
         "text": (
@@ -233,6 +245,31 @@ EXAMPLES_DOCS: List[_Doc] = [
             "Q: 'Has patient ever had MMR vaccine?'\n"
             "Tool sequence: search_codes(vocabulary='cvx', query='mmr') → "
             "get_patient_clinical_data({domain:'immunizations', cvx_codes:['03']})."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'What is this patient allergic to?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'allergies'}). "
+            "Default returns active allergies. If the result has "
+            "negative_assertion=True, the patient has explicitly asserted NO "
+            "KNOWN ALLERGIES — say that, do not say 'I don't know'. If "
+            "notes_to_agent contains a drug-allergy advisory, surface it as a "
+            "soft flag for clinician review (NOT clinical decision support)."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Is it safe to give this patient penicillin?'\n"
+            "Tool sequence: search_codes(vocabulary='snomed', query='penicillin "
+            "allergy') → get_patient_clinical_data({domain:'allergies', "
+            "snomed_codes:['91936005']}). Note: the agent reports recorded "
+            "allergens only; coverage is limited to allergies captured in "
+            "federated_allergies_v. Do not present a clinical safety verdict."
         ),
     },
     {

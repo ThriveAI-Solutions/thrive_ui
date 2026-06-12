@@ -16,6 +16,7 @@ def test_schema_docs_cover_whitelist():
         "federated_vaccination_v",
         "federated_vitals_v",
         "federated_documents_v",
+        "federated_allergies_v",
         "metric_federated_data_v",
     }
     covered = {d["view"] for d in SCHEMA_DOCS}
@@ -48,6 +49,7 @@ def test_examples_docs_cover_each_representative_domain():
         "procedures",
         "imaging",
         "medications",
+        "allergies",
         "list_patient_documents",
         "search_codes",
     ):

@@ -23,6 +23,7 @@ WHITELIST = [
     "federated_vaccination_v",
     "federated_vitals_v",
     "federated_documents_v",
+    "federated_allergies_v",
     "federated_claims_icd_diagnosis_detail_v",
     "federated_claims_icd_procedure_detail_v",
     "federated_claims_medical_facility_detail_v",
