@@ -9,6 +9,7 @@ from __future__ import annotations
 import string
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
@@ -34,7 +35,7 @@ class RosterPatient:
 
 @dataclass
 class PlannedTurn:
-    role: str  # "main" | "followup"
+    role: Literal["main", "followup"]
     prompt: str
 
 
@@ -78,6 +79,9 @@ def load_roster(path: Path) -> tuple[dict, list[RosterPatient]]:
         if not entry.get("source_id"):
             raise ValueError("Every roster patient needs a source_id")
         overrides = {k: str(v) for k, v in entry.items() if k in ALLOWED_PARAMS}
+        unknown_keys = set(entry) - {"source_id", "label", "questions"} - ALLOWED_PARAMS
+        if unknown_keys:
+            raise ValueError(f"Unknown keys on roster patient {entry['source_id']!r}: {sorted(unknown_keys)}")
         patients.append(
             RosterPatient(
                 source_id=str(entry["source_id"]),
@@ -88,6 +92,9 @@ def load_roster(path: Path) -> tuple[dict, list[RosterPatient]]:
         )
     if not patients:
         raise ValueError(f"Roster {path} has no patients")
+    ids = [p.source_id for p in patients]
+    if len(ids) != len(set(ids)):
+        raise ValueError(f"Duplicate patient source_ids in {path}")
     return defaults, patients
 
 
@@ -111,7 +118,7 @@ def build_matrix(
     matrix: list[PlannedConversation] = []
     for patient in patients:
         wanted = patient.questions or [q.id for q in questions]
-        if only:
+        if only is not None:
             wanted = [qid for qid in wanted if qid in only]
         params = {**defaults, **patient.overrides}
         for qid in wanted:

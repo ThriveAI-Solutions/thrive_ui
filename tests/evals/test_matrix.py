@@ -89,3 +89,22 @@ def test_unknown_question_id_raises(questions, tmp_path):
     defaults, patients = load_roster(p)
     with pytest.raises(ValueError, match="Q99"):
         build_matrix(questions, defaults, patients)
+
+
+def test_only_empty_list_selects_nothing(questions, roster):
+    defaults, patients = roster
+    assert build_matrix(questions, defaults, patients, only=[]) == []
+
+
+def test_unknown_patient_key_raises(tmp_path):
+    p = tmp_path / "roster.yaml"
+    p.write_text('defaults:\n  date_start: "2024-01-01"\npatients:\n  - source_id: "src-a"\n    typo_vaccine: "Tdap"\n')
+    with pytest.raises(ValueError, match="typo_vaccine"):
+        load_roster(p)
+
+
+def test_duplicate_source_id_raises(tmp_path):
+    p = tmp_path / "roster.yaml"
+    p.write_text('defaults:\n  date_start: "2024-01-01"\npatients:\n  - source_id: "src-a"\n  - source_id: "src-a"\n')
+    with pytest.raises(ValueError, match="Duplicate patient source_ids"):
+        load_roster(p)
