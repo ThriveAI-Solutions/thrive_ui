@@ -1,7 +1,12 @@
-"""search_codes — vocabulary lookup for ICD-10 / LOINC / CVX / RxNorm / CPT.
+"""search_codes — vocabulary lookup for ICD-10 / LOINC / CVX / RxNorm / CPT / SNOMED.
 
 Per spec §7.4: backed by embedded code reference tables (see
 agent/codes/data/*.json).
+
+SNOMED coverage in this build is currently allergy-focused (Epic #203);
+the curated category buckets live in agent/codes/allergies.py and are
+reachable via `synonyms.json` entries like "penicillin allergy",
+"peanut allergy", and "any food allergy".
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ from agent.deps import AgentDeps
 class CodeSearchInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    vocabulary: Literal["icd10", "loinc", "cvx", "rxnorm", "cpt"]
+    vocabulary: Literal["icd10", "loinc", "cvx", "rxnorm", "cpt", "snomed"]
     query: str
     limit: int = Field(default=20, le=50)
 
