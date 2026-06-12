@@ -55,5 +55,7 @@ async def judge_turn(judge, question: str, answer: str, tool_summaries: list[str
         result = await judge.run(render_judge_prompt(question, answer, tool_summaries))
         return result.output.model_dump()
     except Exception as exc:
-        logger.warning("judge failed: %s", exc)
+        # Log only the exception type: pydantic-ai error messages can embed
+        # the judged answer text, and this log channel must stay PHI-free.
+        logger.warning("judge failed: %s", type(exc).__name__)
         return None
