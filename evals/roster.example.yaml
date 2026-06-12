@@ -1,0 +1,18 @@
+# Copy to evals/roster.yaml (gitignored — real source_ids are PHI pointers)
+# and fill in real patients. Run with:
+#   uv run python scripts/agent_eval_harness.py --dry-run
+# to preview the resolved question×patient matrix before a live run.
+defaults:
+  date_start: "2024-01-01"
+  date_end: "2026-06-11"
+  vaccine: "MMR"
+  disease: "diabetes"
+patients:
+  - source_id: "src-example-1"
+    label: "demo patient"
+  - source_id: "src-example-2"
+    label: "Hep B maternal case"
+    questions: [Q2, Q10]      # subset; omit to run all 10
+    date_start: "2025-01-01"  # per-patient overrides
+    vaccine: "Hepatitis B"
+    disease: "hepatitis B"
