@@ -520,6 +520,12 @@ def _render_audit_question_dialog(item: dict) -> None:
     _render_audit_question_dialog_body(item)
 
 
+# DEPRECATED for the Admin → Audit umbrella as of Epic #190 — replaced by
+# views.admin_audit_queries. Still wired into the legacy Admin → Analytics →
+# "Audit Trail" tab (line 1586 below) and the "Latest Questions" preview KPI
+# on the Overview tab; both will be retired in a follow-up that lives outside
+# Epic #190's scope. Do not extend this function — point new audit work at
+# views/admin_audit_queries.py instead.
 def _render_audit_trail_tab(days_int: int):
     """Render the Question Audit Trail tab (#135)."""
     import datetime as _dt

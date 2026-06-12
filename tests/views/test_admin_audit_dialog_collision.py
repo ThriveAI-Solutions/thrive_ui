@@ -2,26 +2,27 @@
 
 Background
 ----------
-``views/admin_audit.py:render`` builds an inner ``st.tabs`` with three child
-audit tabs (Questions, Admin Actions, User Activity). Epic #169 / #170
-swapped each tab's trigger primitive from
-``st.dataframe(on_select=..., selection_mode='single-row')`` to
-``st.data_editor`` + a leading labeled ``View`` ``CheckboxColumn`` that
-auto-opens the detail dialog when exactly one row is ticked.
-``st.tabs`` still evaluates *every* tab body on every rerun, and
-Streamlit still forbids more than one ``st.dialog`` call per script run
-— so the cross-tab claim guard remains as defense in depth.
+``views/admin_audit.py:render`` builds an inner ``st.tabs``. The inner tab
+list is (post-#190): Queries, By Patient, Admin Actions, User Activity.
+Each existing tab wires its grid as ``st.data_editor`` + a leading labeled
+``View`` ``CheckboxColumn`` that auto-opens the detail dialog when exactly
+one row is ticked. ``st.tabs`` still evaluates *every* tab body on every
+rerun, and Streamlit still forbids more than one ``st.dialog`` call per
+script run — so the cross-tab claim guard remains as defense in depth.
 
 The per-rerun guard, ``_audit_dialog_claimed_this_rerun``:
 
 * ``views/admin_audit.py:render`` resets the flag to ``False`` at the top of
   every rerun, before ``st.tabs`` is created.
-* Each of the three tab dialog branches checks-and-sets the flag *inside*
-  the auto-open-on-tick branch, so at most one tab opens a dialog per
-  rerun.
+* Each tab dialog branch checks-and-sets the flag *inside* the
+  auto-open-on-tick branch, so at most one tab opens a dialog per rerun.
 
 These tests pin both behaviours under the new (data_editor + auto-open)
-flow.
+flow. Epic #190 / Phase 4 retired the Questions tab from the umbrella;
+tests that previously used the Questions dialog as the "first tab that
+fires" now use the Admin Actions dialog (still in the umbrella) as the
+auto-open evidence. The behaviour under test — guard reset, external
+dialog detection — is unchanged.
 """
 
 from __future__ import annotations
@@ -438,24 +439,25 @@ class TestCrossTabCollision:
     def test_guard_resets_per_rerun(self):
         """The cross-tab claim guard must be cleared at the top of every
         rerun. Two consecutive ``render`` calls in which the user ticks
-        the Questions tab's ``View`` checkbox on a different row each
+        the Admin Actions tab's ``View`` checkbox on a different row each
         time must each fire exactly one dialog. (If the guard leaked
         across reruns, the second rerun would silently drop the dialog.)
         """
         from views import admin_audit
 
-        # Two distinct Questions items across the two reruns. Same
-        # data_editor key, different ``user_message_id``s — so the
-        # per-tab ``open_id`` gate naturally allows the second rerun's
-        # dialog to fire (different id → different gate value).
-        q_item_1 = _make_question_item(user_message_id=111)
-        q_item_2 = _make_question_item(user_message_id=222)
+        # Two distinct Admin Actions items across the two reruns. Same
+        # data_editor key, different ``id``s — so the per-tab
+        # ``audit_actions_dialog_open_id`` gate naturally allows the
+        # second rerun's dialog to fire (different id → different gate
+        # value).
+        a_item_1 = _make_admin_action_item(id=111)
+        a_item_2 = _make_admin_action_item(id=222)
 
         # A single shared stub across both reruns so session_state persists,
         # just like real Streamlit. Row 0 is ticked in both reruns; the
-        # second rerun's row has a different ``user_message_id``.
+        # second rerun's row has a different ``id``.
         stub = _SharedSessionStub(
-            per_key_view_checked={"audit_dataframe": [True]},
+            per_key_view_checked={"audit_actions_dataframe": [True]},
         )
 
         # ---- Rerun 1 -----------------------------------------------------
@@ -483,14 +485,14 @@ class TestCrossTabCollision:
             stack.enter_context(
                 patch(
                     "orm.logging_functions.get_question_audit_page",
-                    return_value={"items": [q_item_1], "total": 1},
+                    return_value={"items": [], "total": 0},
                 )
             )
             stack.enter_context(patch("orm.functions.get_all_users", return_value=[]))
             stack.enter_context(
                 patch(
                     "orm.logging_functions.get_admin_actions_page",
-                    return_value={"items": [], "total": 0},
+                    return_value={"items": [a_item_1], "total": 1},
                 )
             )
             stack.enter_context(
@@ -522,8 +524,8 @@ class TestCrossTabCollision:
 
             admin_audit.render(30)
 
-        assert (len(q1), len(a1), len(u1)) == (1, 0, 0), (
-            f"Rerun 1 must open exactly one Questions dialog; got Q={len(q1)} A={len(a1)} U={len(u1)}"
+        assert (len(q1), len(a1), len(u1)) == (0, 1, 0), (
+            f"Rerun 1 must open exactly one Admin Actions dialog; got Q={len(q1)} A={len(a1)} U={len(u1)}"
         )
 
         # ---- Rerun 2 -----------------------------------------------------
@@ -548,14 +550,14 @@ class TestCrossTabCollision:
             stack.enter_context(
                 patch(
                     "orm.logging_functions.get_question_audit_page",
-                    return_value={"items": [q_item_2], "total": 1},
+                    return_value={"items": [], "total": 0},
                 )
             )
             stack.enter_context(patch("orm.functions.get_all_users", return_value=[]))
             stack.enter_context(
                 patch(
                     "orm.logging_functions.get_admin_actions_page",
-                    return_value={"items": [], "total": 0},
+                    return_value={"items": [a_item_2], "total": 1},
                 )
             )
             stack.enter_context(
@@ -587,8 +589,8 @@ class TestCrossTabCollision:
 
             admin_audit.render(30)
 
-        assert (len(q2), len(a2), len(u2)) == (1, 0, 0), (
-            f"Rerun 2 must also open exactly one Questions dialog (guard reset per rerun); "
+        assert (len(q2), len(a2), len(u2)) == (0, 1, 0), (
+            f"Rerun 2 must also open exactly one Admin Actions dialog (guard reset per rerun); "
             f"got Q={len(q2)} A={len(a2)} U={len(u2)}"
         )
 
@@ -600,10 +602,10 @@ class TestCrossTabCollision:
         """
         from views import admin_audit
 
-        q_item = _make_question_item(user_message_id=1)
+        a_item = _make_admin_action_item(id=1)
 
         stub = _SharedSessionStub(
-            per_key_view_checked={"audit_dataframe": [True]},
+            per_key_view_checked={"audit_actions_dataframe": [True]},
             initial_session={"_audit_dialog_claimed_this_rerun": True},
         )
 
@@ -613,8 +615,8 @@ class TestCrossTabCollision:
 
         patchers = _patches_for_render(
             stub=stub,
-            questions_items=[q_item],
-            actions_items=[],
+            questions_items=[],
+            actions_items=[a_item],
             activity_items=[],
             spy_q=q_calls.append,
             spy_a=a_calls.append,
@@ -628,11 +630,11 @@ class TestCrossTabCollision:
                 stack.enter_context(p)
             admin_audit.render(30)
 
-        # If the guard had not been reset, the Questions dialog would have
-        # been silently dropped.
-        assert len(q_calls) == 1, (
+        # If the guard had not been reset, the Admin Actions dialog would
+        # have been silently dropped.
+        assert len(a_calls) == 1, (
             f"render() must reset _audit_dialog_claimed_this_rerun before tabs evaluate; "
-            f"saw {len(q_calls)} Q dialog call(s) (expected 1)"
+            f"saw {len(a_calls)} A dialog call(s) (expected 1)"
         )
 
 
@@ -800,8 +802,7 @@ class TestExternalDialogCollision:
             admin_audit.render(30)
 
         assert q_calls == [], (
-            f"Questions auto-open must defer to an already-claimed dialog slot; "
-            f"saw {len(q_calls)} Q dialog call(s)"
+            f"Questions auto-open must defer to an already-claimed dialog slot; saw {len(q_calls)} Q dialog call(s)"
         )
         assert a_calls == []
         assert u_calls == []
@@ -813,10 +814,10 @@ class TestExternalDialogCollision:
         happy path."""
         from views import admin_audit
 
-        q_item = _make_question_item(user_message_id=42)
+        a_item = _make_admin_action_item(id=42)
 
         stub = _SharedSessionStub(
-            per_key_view_checked={"audit_dataframe": [True]},
+            per_key_view_checked={"audit_actions_dataframe": [True]},
         )
 
         q_calls: list = []
@@ -825,8 +826,8 @@ class TestExternalDialogCollision:
 
         patchers = _patches_for_render(
             stub=stub,
-            questions_items=[q_item],
-            actions_items=[],
+            questions_items=[],
+            actions_items=[a_item],
             activity_items=[],
             spy_q=q_calls.append,
             spy_a=a_calls.append,
@@ -850,9 +851,8 @@ class TestExternalDialogCollision:
             )
             admin_audit.render(30)
 
-        assert len(q_calls) == 1, (
-            f"With no external dialog claimed, Questions auto-open must still "
-            f"fire exactly once; saw {len(q_calls)}"
+        assert len(a_calls) == 1, (
+            f"With no external dialog claimed, Admin Actions auto-open must still fire exactly once; saw {len(a_calls)}"
         )
 
     def test_missing_script_run_ctx_does_not_crash(self):
@@ -861,10 +861,10 @@ class TestExternalDialogCollision:
         must treat that as "no claim" and not crash."""
         from views import admin_audit
 
-        q_item = _make_question_item(user_message_id=7)
+        a_item = _make_admin_action_item(id=7)
 
         stub = _SharedSessionStub(
-            per_key_view_checked={"audit_dataframe": [True]},
+            per_key_view_checked={"audit_actions_dataframe": [True]},
         )
 
         q_calls: list = []
@@ -873,8 +873,8 @@ class TestExternalDialogCollision:
 
         patchers = _patches_for_render(
             stub=stub,
-            questions_items=[q_item],
-            actions_items=[],
+            questions_items=[],
+            actions_items=[a_item],
             activity_items=[],
             spy_q=q_calls.append,
             spy_a=a_calls.append,
@@ -897,4 +897,4 @@ class TestExternalDialogCollision:
 
         # With ctx=None the guard treats it as "no external dialog", so the
         # normal auto-open path runs.
-        assert len(q_calls) == 1
+        assert len(a_calls) == 1

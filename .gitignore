@@ -228,3 +228,4 @@ scripts/synthea/output/
 .vscode/
 .claude/
 mempalace.yaml
+.verify-evidence/
