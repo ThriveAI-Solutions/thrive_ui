@@ -634,3 +634,267 @@ class TestCrossTabCollision:
             f"render() must reset _audit_dialog_claimed_this_rerun before tabs evaluate; "
             f"saw {len(q_calls)} Q dialog call(s) (expected 1)"
         )
+
+
+# ---------------------------------------------------------------------------
+# (2) External-dialog collision: another tab opened a dialog before ours
+# ---------------------------------------------------------------------------
+
+
+class TestExternalDialogCollision:
+    """Regression for: opening an audit dialog, clicking outside to dismiss, then
+    going to Admin -> Users and clicking Export Users caused the Export dialog
+    to flash and then be replaced by the audit dialog.
+
+    Root cause: ``st.tabs`` evaluates every tab body on every rerun. ``admin.py``
+    runs ``admin_users.render`` before ``admin_audit.render``. When the Users
+    tab's button handler invokes ``export_users_dialog()``, Streamlit sets
+    ``script_run_ctx.has_dialog_opened = True`` (the single-dialog-per-script-run
+    flag). The Export body then writes a ``USER_EXPORT`` row via
+    ``log_admin_action``, which shifts the ``thrive_admin_action`` page so the
+    sticky ``edited_rows[0][View] = True`` from the previous rerun now points
+    at the new top row. The Admin Actions tab's per-tab ``open_id`` gate then
+    sees a mismatch and tries to fire ``_render_admin_action_dialog`` — but
+    Streamlit allows only one dialog per run, so it raises and the frontend
+    ends up showing the wrong dialog.
+
+    Fix: ``admin_audit.render`` checks ``has_dialog_opened`` and pre-claims
+    ``_audit_dialog_claimed_this_rerun`` so every inner-tab gate skips
+    auto-open. These tests pin that behavior.
+    """
+
+    @staticmethod
+    def _patch_dialog_opened(monkeypatch_stack, *, opened: bool):
+        """Patch get_script_run_ctx to return a stub ctx with has_dialog_opened set.
+
+        Uses contextlib.ExitStack so each test can compose this with the other
+        patchers it needs.
+        """
+        import contextlib
+        from unittest.mock import MagicMock, patch
+
+        ctx_stub = MagicMock()
+        ctx_stub.has_dialog_opened = opened
+
+        # The fix imports get_script_run_ctx inside the try block at render-time,
+        # so patch the source module — that import resolves dynamically per call.
+        cm = patch(
+            "streamlit.runtime.scriptrunner_utils.script_run_context.get_script_run_ctx",
+            return_value=ctx_stub,
+        )
+        return cm if not isinstance(monkeypatch_stack, contextlib.ExitStack) else monkeypatch_stack.enter_context(cm)
+
+    def test_external_dialog_already_open_blocks_admin_actions_auto_open(self):
+        """Production repro: an earlier tab (Admin -> Users) already opened
+        Export Users in this rerun, AND ``log_admin_action`` from that export
+        shifted the Admin Actions audit table so the still-ticked checkbox
+        now points to a different row. Without the fix, the audit code would
+        try to call ``_render_admin_action_dialog`` for the new row and
+        Streamlit would raise. With the fix, the audit code sees
+        ``has_dialog_opened == True`` and skips."""
+        from views import admin_audit
+
+        # Original row the user ticked (id=271). After Export logs USER_EXPORT,
+        # this row is now at index 1; index 0 is the new USER_EXPORT entry (id=999).
+        new_top_after_shift = _make_admin_action_item(id=999)
+        original_ticked = _make_admin_action_item(id=271)
+
+        stub = _SharedSessionStub(
+            # The checkbox at row 0 is still sticky-True from the prior rerun
+            # when the user ticked the (then-top) original row.
+            per_key_view_checked={"audit_actions_dataframe": [True, False]},
+            # The gate already records that we opened the dialog for id=271.
+            initial_session={"audit_actions_dialog_open_id": 271},
+        )
+
+        q_calls: list = []
+        a_calls: list = []
+        u_calls: list = []
+
+        patchers = _patches_for_render(
+            stub=stub,
+            questions_items=[],
+            # Items shifted: new USER_EXPORT row at index 0, original at index 1.
+            actions_items=[new_top_after_shift, original_ticked],
+            activity_items=[],
+            spy_q=q_calls.append,
+            spy_a=a_calls.append,
+            spy_u=u_calls.append,
+        )
+
+        import contextlib
+        from unittest.mock import MagicMock, patch
+
+        ctx_stub = MagicMock()
+        ctx_stub.has_dialog_opened = True
+
+        with contextlib.ExitStack() as stack:
+            for p in patchers:
+                stack.enter_context(p)
+            stack.enter_context(
+                patch(
+                    "streamlit.runtime.scriptrunner_utils.script_run_context.get_script_run_ctx",
+                    return_value=ctx_stub,
+                )
+            )
+            admin_audit.render(30)
+
+        assert a_calls == [], (
+            f"When script_run_ctx.has_dialog_opened is True, the Admin Actions "
+            f"auto-open gate MUST skip — otherwise Streamlit raises and the "
+            f"frontend shows the audit dialog over the external one. "
+            f"Saw {len(a_calls)} call(s)."
+        )
+        # And no other audit tab should fire either.
+        assert q_calls == []
+        assert u_calls == []
+
+    def test_external_dialog_already_open_blocks_questions_auto_open(self):
+        """Same scenario but the user originally ticked a row on the Questions
+        tab. Even without items shifting (Questions table is more stable —
+        clicks don't log question audit entries), the guard should still skip
+        any dialog open if Streamlit reports a dialog has already been
+        claimed in this script run."""
+        from views import admin_audit
+
+        q_item = _make_question_item(user_message_id=314)
+
+        stub = _SharedSessionStub(
+            per_key_view_checked={"audit_dataframe": [True]},
+            # Notably, open_id does NOT match the currently-ticked row — this
+            # simulates the items-shift case for Questions too (e.g., a new
+            # question logged by a concurrent user). Without the fix, the
+            # gate would try to fire and collide with the external dialog.
+            initial_session={"audit_dialog_open_user_message_id": 999},
+        )
+
+        q_calls: list = []
+        a_calls: list = []
+        u_calls: list = []
+
+        patchers = _patches_for_render(
+            stub=stub,
+            questions_items=[q_item],
+            actions_items=[],
+            activity_items=[],
+            spy_q=q_calls.append,
+            spy_a=a_calls.append,
+            spy_u=u_calls.append,
+        )
+
+        import contextlib
+        from unittest.mock import MagicMock, patch
+
+        ctx_stub = MagicMock()
+        ctx_stub.has_dialog_opened = True
+
+        with contextlib.ExitStack() as stack:
+            for p in patchers:
+                stack.enter_context(p)
+            stack.enter_context(
+                patch(
+                    "streamlit.runtime.scriptrunner_utils.script_run_context.get_script_run_ctx",
+                    return_value=ctx_stub,
+                )
+            )
+            admin_audit.render(30)
+
+        assert q_calls == [], (
+            f"Questions auto-open must defer to an already-claimed dialog slot; "
+            f"saw {len(q_calls)} Q dialog call(s)"
+        )
+        assert a_calls == []
+        assert u_calls == []
+
+    def test_no_external_dialog_preserves_normal_auto_open(self):
+        """Sanity check: when no other dialog has claimed the slot, the audit
+        gate still fires normally. Pins that the new guard ONLY suppresses
+        when ``has_dialog_opened`` is True — it doesn't silently break the
+        happy path."""
+        from views import admin_audit
+
+        q_item = _make_question_item(user_message_id=42)
+
+        stub = _SharedSessionStub(
+            per_key_view_checked={"audit_dataframe": [True]},
+        )
+
+        q_calls: list = []
+        a_calls: list = []
+        u_calls: list = []
+
+        patchers = _patches_for_render(
+            stub=stub,
+            questions_items=[q_item],
+            actions_items=[],
+            activity_items=[],
+            spy_q=q_calls.append,
+            spy_a=a_calls.append,
+            spy_u=u_calls.append,
+        )
+
+        import contextlib
+        from unittest.mock import MagicMock, patch
+
+        ctx_stub = MagicMock()
+        ctx_stub.has_dialog_opened = False
+
+        with contextlib.ExitStack() as stack:
+            for p in patchers:
+                stack.enter_context(p)
+            stack.enter_context(
+                patch(
+                    "streamlit.runtime.scriptrunner_utils.script_run_context.get_script_run_ctx",
+                    return_value=ctx_stub,
+                )
+            )
+            admin_audit.render(30)
+
+        assert len(q_calls) == 1, (
+            f"With no external dialog claimed, Questions auto-open must still "
+            f"fire exactly once; saw {len(q_calls)}"
+        )
+
+    def test_missing_script_run_ctx_does_not_crash(self):
+        """Defensive: outside a Streamlit script run (e.g., direct invocation
+        in a test runner) ``get_script_run_ctx()`` returns None. The guard
+        must treat that as "no claim" and not crash."""
+        from views import admin_audit
+
+        q_item = _make_question_item(user_message_id=7)
+
+        stub = _SharedSessionStub(
+            per_key_view_checked={"audit_dataframe": [True]},
+        )
+
+        q_calls: list = []
+        a_calls: list = []
+        u_calls: list = []
+
+        patchers = _patches_for_render(
+            stub=stub,
+            questions_items=[q_item],
+            actions_items=[],
+            activity_items=[],
+            spy_q=q_calls.append,
+            spy_a=a_calls.append,
+            spy_u=u_calls.append,
+        )
+
+        import contextlib
+        from unittest.mock import patch
+
+        with contextlib.ExitStack() as stack:
+            for p in patchers:
+                stack.enter_context(p)
+            stack.enter_context(
+                patch(
+                    "streamlit.runtime.scriptrunner_utils.script_run_context.get_script_run_ctx",
+                    return_value=None,
+                )
+            )
+            admin_audit.render(30)
+
+        # With ctx=None the guard treats it as "no external dialog", so the
+        # normal auto-open path runs.
+        assert len(q_calls) == 1
