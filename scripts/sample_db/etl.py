@@ -19,6 +19,7 @@ import zstandard as zstd
 
 from scripts.sample_db.dump_writer import write_dump
 from scripts.sample_db.transformers.base import TransformContext
+from scripts.sample_db.transformers.allergies import transform_allergies
 from scripts.sample_db.transformers.claims import transform_claims
 from scripts.sample_db.transformers.adt import transform_adt
 from scripts.sample_db.transformers.documents import transform_documents
@@ -46,6 +47,11 @@ _REQUIRED_FILES = [
     "providers.csv",
     "organizations.csv",
     "claims.csv",
+]
+
+# Optional inputs — older Synthea outputs may pre-date these CSVs.
+_OPTIONAL_FILES = [
+    "allergies.csv",
 ]
 
 
@@ -109,6 +115,9 @@ def run_etl_in_memory(inputs: dict[str, pd.DataFrame], seed: int = 42) -> dict[s
     transform_vitals(observations, source_map, ctx)
     transform_documents(encounters, source_map, ctx)
     transform_claims(claims, encounters, procedures, source_map, ctx)
+    allergies = inputs.get("allergies.csv")
+    if allergies is not None:
+        transform_allergies(allergies, source_map, ctx)
 
     # ADT events derive from inpatient/emergency encounters and need the
     # integer patient_id (federated_adt_v's only identity column). Build
@@ -126,7 +135,7 @@ def run_etl_in_memory(inputs: dict[str, pd.DataFrame], seed: int = 42) -> dict[s
     claim_to_source = _build_claim_to_source(claims, source_map)
     transform_rollup(src_to_pid, src_to_practice, ctx, claim_to_source=claim_to_source)
 
-    # Ensure all 17 expected tables exist (some may be empty).
+    # Ensure all expected tables exist (some may be empty).
     for t in _expected_tables():
         ctx.output.setdefault(t, [])
     return ctx.output
@@ -149,6 +158,7 @@ def _expected_tables() -> list[str]:
             "federated_vitals_v",
             "federated_documents_v",
             "federated_adt_v",
+            "federated_allergies_v",
             "federated_claims_icd_diagnosis_detail_v",
             "federated_claims_icd_procedure_detail_v",
             "federated_claims_medical_facility_detail_v",
@@ -176,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: missing {path}", file=sys.stderr)
             return 1
         inputs[f] = pd.read_csv(path)
+    for f in _OPTIONAL_FILES:
+        path = args.synthea_dir / f
+        if path.exists():
+            inputs[f] = pd.read_csv(path)
+        else:
+            print(f"NOTE: {path} not found — skipping (table will be empty in dump)")
 
     print(f"Running ETL on {sum(len(d) for d in inputs.values())} input rows...")
     output = run_etl_in_memory(inputs, seed=args.seed)

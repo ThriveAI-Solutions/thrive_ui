@@ -13,6 +13,7 @@ def test_etl_runs_against_fixtures(
     immunizations_csv,
     providers_csv,
     organizations_csv,
+    allergies_csv,
     claims_csv,
 ):
     """Run all transformers on fixture data; assert every table has rows."""
@@ -26,6 +27,7 @@ def test_etl_runs_against_fixtures(
         "immunizations.csv": immunizations_csv,
         "providers.csv": providers_csv,
         "organizations.csv": organizations_csv,
+        "allergies.csv": allergies_csv,
         "claims.csv": claims_csv,
     }
     out = run_etl_in_memory(inputs, seed=42)
@@ -44,6 +46,7 @@ def test_etl_runs_against_fixtures(
         "dw.federated_vitals_v",
         "dw.federated_documents_v",
         "dw.federated_adt_v",
+        "dw.federated_allergies_v",
         "dw.federated_claims_icd_diagnosis_detail_v",
         "dw.federated_claims_icd_procedure_detail_v",
         "dw.federated_claims_medical_facility_detail_v",
@@ -55,6 +58,7 @@ def test_etl_runs_against_fixtures(
     assert len(out["dw.internal_patient_profile_v"]) == 3
     assert len(out["dw.federated_encounters_v"]) == 3
     assert len(out["dw.federated_problems_v"]) >= 3
+    assert len(out["dw.federated_allergies_v"]) == 2
     # The conftest encounters fixture has exactly one inpatient encounter
     # (enc-002, pat-002). Ambulatory rows produce no ADT events.
     assert len(out["dw.federated_adt_v"]) == 1
@@ -62,6 +66,37 @@ def test_etl_runs_against_fixtures(
     assert adt_row["clean_setting"] == "INPATIENT"
     # patient_id is the integer warehouse-internal id, NOT the source_id.
     assert isinstance(adt_row["patient_id"], int)
+
+
+def test_etl_emits_empty_allergies_table_when_csv_absent(
+    patients_csv,
+    encounters_csv,
+    conditions_csv,
+    observations_csv,
+    medications_csv,
+    procedures_csv,
+    immunizations_csv,
+    providers_csv,
+    organizations_csv,
+    claims_csv,
+):
+    """allergies.csv is optional in run_etl_in_memory so older Synthea
+    fixtures keep working. The table still ships (empty) in the dump."""
+    inputs = {
+        "patients.csv": patients_csv,
+        "encounters.csv": encounters_csv,
+        "conditions.csv": conditions_csv,
+        "observations.csv": observations_csv,
+        "medications.csv": medications_csv,
+        "procedures.csv": procedures_csv,
+        "immunizations.csv": immunizations_csv,
+        "providers.csv": providers_csv,
+        "organizations.csv": organizations_csv,
+        "claims.csv": claims_csv,
+    }
+    out = run_etl_in_memory(inputs, seed=42)
+    assert "dw.federated_allergies_v" in out
+    assert out["dw.federated_allergies_v"] == []
 
 
 def test_etl_is_deterministic(
@@ -74,6 +109,7 @@ def test_etl_is_deterministic(
     immunizations_csv,
     providers_csv,
     organizations_csv,
+    allergies_csv,
     claims_csv,
 ):
     inputs = {
@@ -86,6 +122,7 @@ def test_etl_is_deterministic(
         "immunizations.csv": immunizations_csv,
         "providers.csv": providers_csv,
         "organizations.csv": organizations_csv,
+        "allergies.csv": allergies_csv,
         "claims.csv": claims_csv,
     }
     a = run_etl_in_memory(inputs, seed=42)

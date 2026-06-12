@@ -1,7 +1,7 @@
 [
     {"code": "91936005", "display_name": "Allergy to penicillin (finding)", "is_active": true},
-    {"code": "294505008", "display_name": "Allergy to amoxicillin (finding)", "is_active": true},
     {"code": "91937001", "display_name": "Allergy to sulfonamide (finding)", "is_active": true},
+    {"code": "294505008", "display_name": "Allergy to amoxicillin (finding)", "is_active": true},
     {"code": "293584003", "display_name": "Allergy to aspirin (finding)", "is_active": true},
     {"code": "293586001", "display_name": "Allergy to non-steroidal anti-inflammatory agent (finding)", "is_active": true},
     {"code": "91934008", "display_name": "Allergy to peanut (finding)", "is_active": true},

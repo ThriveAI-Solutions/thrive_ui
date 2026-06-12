@@ -1,15 +1,19 @@
-"""Curated allergy SNOMED code allow-list, grouped by clinical category.
+"""Curated allergy SNOMED code allow-list and drug-allergy conflict crosswalk.
 
 This module is the shared source of truth for allergy SNOMED codes used
-across the agent. It backs two consumers:
+across the agent. It backs three consumers:
 
 1. `search_codes` — the allergy-intent shortcut (e.g., "penicillin allergy",
    "any food allergy") routes through `synonyms.json` for the `snomed`
    vocabulary to the curated subsets defined here.
-2. Future allergy-domain tooling on `get_patient_clinical_data` and the
-   `federated_problems_v` fallback path (Epic #201) — when the dedicated
+2. The `federated_problems_v` fallback path on the allergies domain of
+   `get_patient_clinical_data` (Epic #201) — when the dedicated
    `federated_allergies_v` view is unavailable, the agent identifies
-   allergies in the problem list via this allow-list.
+   allergies in the problem list via this allow-list + `ALLERGY_TEXT_PATTERNS`.
+3. The soft drug-allergy conflict advisory — `DRUG_ALLERGY_CONFLICTS` pairs
+   each curated allergen with the RxNorm code set of conflicting drug
+   classes; the allergies tool emits a `notes_to_agent` advisory when an
+   active med overlaps. Explicitly advisory, NOT a CDS verdict.
 
 The categories follow Epic #203:
 
@@ -26,7 +30,8 @@ completeness.
 
 from __future__ import annotations
 
-from typing import Final
+from dataclasses import dataclass
+from typing import Final, List
 
 
 ALLERGY_SNOMED_BY_CATEGORY: Final[dict[str, list[str]]] = {
@@ -82,3 +87,107 @@ def codes_for_category(category: str) -> list[str]:
 def all_allergy_codes() -> list[str]:
     """Return every curated allergy SNOMED code, in category order."""
     return [code for codes in ALLERGY_SNOMED_BY_CATEGORY.values() for code in codes]
+
+
+# Free-text allergen substrings used by the federated_problems_v fallback
+# path. Hits trigger an allergy classification when no SNOMED code matches.
+ALLERGY_TEXT_PATTERNS: list[str] = [
+    "allerg",
+    "hypersensitiv",
+    "intoleran",
+    "anaphyla",
+]
+
+
+@dataclass(frozen=True)
+class DrugAllergyClass:
+    """A class of drugs that conflict with a specific allergen."""
+
+    allergen_label: str
+    rxnorm_codes: List[str]
+    text_match: str  # case-insensitive substring on the allergy text
+
+
+# Allergen SNOMED code → conflicting RxNorm drug-class codes. Curated, NOT
+# pharmacologically exhaustive. Add entries as concrete clinical scenarios
+# surface during eval rather than guessing at completeness.
+DRUG_ALLERGY_CONFLICTS: dict[str, DrugAllergyClass] = {
+    "91936005": DrugAllergyClass(
+        allergen_label="Penicillin",
+        rxnorm_codes=["723", "7980", "1665", "2191"],  # amox, pen G, ampicillin, augmentin
+        text_match="penicillin",
+    ),
+    "294505008": DrugAllergyClass(
+        allergen_label="Amoxicillin",
+        rxnorm_codes=["723", "2191"],
+        text_match="amoxicillin",
+    ),
+    "91937001": DrugAllergyClass(
+        allergen_label="Sulfonamide",
+        rxnorm_codes=["10180", "10829", "1840"],  # sulfamethoxazole, trimethoprim, sulfasalazine
+        text_match="sulfa",
+    ),
+    "293584003": DrugAllergyClass(
+        allergen_label="Aspirin",
+        rxnorm_codes=["1191"],  # aspirin
+        text_match="aspirin",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class DrugAllergyConflict:
+    allergen_label: str
+    conflicting_med_name: str
+    conflicting_rxnorm: str
+
+
+def find_drug_allergy_conflicts(
+    *,
+    allergies: list[dict],
+    medications: list[dict],
+) -> List[DrugAllergyConflict]:
+    """Pair each drug allergy against the active med list. Returns soft
+    conflicts only — does not encode reactivity-graph nuance.
+
+    Match strategy:
+    1. Exact SNOMED code match (allergen.code → DrugAllergyClass)
+    2. Text fallback (allergen text contains the class.text_match substring)
+    """
+    if not allergies or not medications:
+        return []
+
+    # Build the candidate classes for this patient's allergies.
+    candidate_classes: list[tuple[str, DrugAllergyClass]] = []
+    for allergy in allergies:
+        code = (allergy.get("code") or "").strip()
+        text = (allergy.get("allergy") or "").lower()
+
+        # 1. Code-driven match.
+        if code in DRUG_ALLERGY_CONFLICTS:
+            candidate_classes.append(
+                (allergy.get("allergy") or DRUG_ALLERGY_CONFLICTS[code].allergen_label, DRUG_ALLERGY_CONFLICTS[code])
+            )
+            continue
+        # 2. Text fallback — first class whose text_match appears in the allergy text.
+        for klass in DRUG_ALLERGY_CONFLICTS.values():
+            if klass.text_match in text:
+                candidate_classes.append((allergy.get("allergy") or klass.allergen_label, klass))
+                break
+
+    if not candidate_classes:
+        return []
+
+    conflicts: list[DrugAllergyConflict] = []
+    for allergen_label, klass in candidate_classes:
+        for med in medications:
+            rxnorm = (med.get("rxnorm_code") or "").strip()
+            if rxnorm and rxnorm in klass.rxnorm_codes:
+                conflicts.append(
+                    DrugAllergyConflict(
+                        allergen_label=allergen_label,
+                        conflicting_med_name=med.get("med_name") or "(unnamed)",
+                        conflicting_rxnorm=rxnorm,
+                    )
+                )
+    return conflicts
