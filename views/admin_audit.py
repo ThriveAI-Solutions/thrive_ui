@@ -1,21 +1,32 @@
-"""Admin → Audit sub-tab (Epic #144 / #148).
+"""Admin → Audit umbrella (Epic #144 / #148; per-query rewrite Epic #190).
 
-Consolidates three audit-flavored surfaces into one umbrella:
-- Questions — the question audit trail introduced by Epic #133 / Feature #135
-- Admin Actions — the admin action audit log (was Admin Analytics → Admin Audit)
-- User Activity — the user activity log (was Admin Analytics → User Activity,
-  minus the Activity Type pie chart cut by Epic #144 / #147)
+Inner tab list:
+- **Queries** — per-query unit view (one row per legacy assistant SQL or per
+  agentic ToolCall). Owned by ``views/admin_audit_queries.py``. Replaces the
+  pre-#190 "Questions" tab; the unified view supports both Grouped and Flat
+  modes, scope/pipeline filters, scrubbed/disabled mode banners, and CSV
+  export.
+- **By Patient** — patient-pivot view (one or more patients → every query
+  that touched them). Owned by ``views/admin_audit_by_patient.py``.
+- **Admin Actions** — admin action audit log (was Admin Analytics → Admin
+  Audit; consolidated here by Epic #144 / #148).
+- **User Activity** — user activity log (was Admin Analytics → User Activity;
+  Activity Type pie chart cut by Epic #144 / #147).
 
-All cross-Epic deep-link contracts (`audit_trail_pref_user_id` from #133,
-the `View question audit for <username> →` button from Feature #136, and
-the `View all in audit →` link from Feature #142) target this sub-tab via
-st.switch_page("views/admin.py") — the outer Admin tab labelled "Audit" is
-selected client-side by JS shim in the chat-input / Manage Users surfaces.
+All cross-Epic deep-link contracts (``audit_trail_pref_user_id`` from #133,
+the ``View question audit for <username> →`` button from Feature #136, and
+the ``View all in audit →`` link from Feature #142) target this sub-tab via
+``st.switch_page("views/admin.py")`` — the outer Admin tab labelled "Audit"
+is selected client-side by a JS shim in the chat-input / Manage Users
+surfaces. The shim doesn't pick an inner tab, so deep-links land on the
+first inner tab ("Queries"), which now hosts the deep-link prefill that the
+old Questions tab used to own.
 """
 
 import streamlit as st
 
-from views.admin_analytics import _render_activity_tab, _render_audit_tab, _render_audit_trail_tab
+from views import admin_audit_by_patient, admin_audit_queries
+from views.admin_analytics import _render_activity_tab, _render_audit_tab
 
 
 def render(days_int: int) -> None:
@@ -35,7 +46,7 @@ def render(days_int: int) -> None:
     # log_admin_action, the next get_admin_actions_page reorders items, and the
     # data_editor's index-keyed sticky tick now points to the new top row, so the
     # per-tab open_id gate sees a mismatch and tries to fire. Mark the slot claimed
-    # here so all three inner-tab gates skip.
+    # here so all inner-tab gates skip.
     try:
         from streamlit.runtime.scriptrunner_utils.script_run_context import (
             get_script_run_ctx,
@@ -49,10 +60,12 @@ def render(days_int: int) -> None:
         # revert to the audit-vs-audit-only behavior that existed before.
         pass
 
-    inner = st.tabs(["Questions", "Admin Actions", "User Activity"])
+    inner = st.tabs(["Queries", "By Patient", "Admin Actions", "User Activity"])
     with inner[0]:
-        _render_audit_trail_tab(days_int)
+        admin_audit_queries.render(days_int)
     with inner[1]:
-        _render_audit_tab(days_int)
+        admin_audit_by_patient.render(days_int)
     with inner[2]:
+        _render_audit_tab(days_int)
+    with inner[3]:
         _render_activity_tab(days_int)

@@ -674,6 +674,9 @@ class AgentPatientAccess(Base):
         Index("ix_thrive_agent_patient_access_tool_call", "tool_call_id"),
         Index("ix_thrive_agent_patient_access_created", "created_at"),
         Index("ix_thrive_agent_patient_access_type", "access_type"),
+        # Backs Epic #190's per-query patient pivot. Matching migration:
+        # 9a4c12e7b001.
+        Index("ix_thrive_agent_patient_access_source_run", "source_id", "run_id"),
     )
 
     id = Column(Integer, primary_key=True)
