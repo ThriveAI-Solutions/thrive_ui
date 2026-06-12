@@ -218,6 +218,17 @@ class AnalyticsDbAdapter:
         url = analytics.get("url")
         if not url:
             raise RuntimeError("secrets.analytics_db.url is required (postgres:// or redshift://)")
-        engine = create_engine(url)
+        # Redshift (and the AWS ELB in front of it) close idle TCP sockets
+        # well before SQLAlchemy's pool decides a connection is stale. Without
+        # pool_pre_ping we hand the dead socket to the next caller, and the
+        # very first statement after checkout — SET statement_timeout in
+        # fetch_all/run_arbitrary_sql — raises "SSL connection has been
+        # closed unexpectedly". pool_recycle bounds the worst case by
+        # forcing periodic reconnects under the typical idle cutoff.
+        engine_kwargs: dict = {}
+        if dialect in ("postgres", "redshift"):
+            engine_kwargs["pool_pre_ping"] = True
+            engine_kwargs["pool_recycle"] = 1800
+        engine = create_engine(url, **engine_kwargs)
         schema = analytics.get("schema", "") or ""
         return cls(engine=engine, dialect=dialect, schema=schema)
