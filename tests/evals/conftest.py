@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 
+# parents[1] is tests/ — the synthetic warehouse DDL lives in tests/agent/.
 _SYNTHETIC_SQL = Path(__file__).resolve().parents[1] / "agent/redshift_synthetic.sql"
 
 

@@ -11,6 +11,8 @@ from datetime import date, datetime
 
 from agent.deps import SelectedPatient
 
+# Unlike find_patient_sql, no empi_rank filter: source_id is a unique row
+# key in internal_source_reference_v, so direct lookup + LIMIT 1 suffices.
 _RESOLVE_SQL = """
 SELECT
     ipp.full_name AS display_name,
