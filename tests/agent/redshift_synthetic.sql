@@ -231,8 +231,11 @@ CREATE TABLE federated_vitals_v (
 INSERT INTO federated_vitals_v VALUES
     ('src-john-1962', '8480-6', 'LOINC', 'Systolic BP', '128', '128', 'mmHg', '2026-04-01 09:30');
 
+-- Production federated_adt_v exposes patient_id only (no source_id, unlike
+-- every other federated_*_v view). Identity is resolved by joining
+-- internal_source_reference_v at empi_rank = 1.
 CREATE TABLE federated_adt_v (
-    source_id TEXT,
+    patient_id INTEGER,
     event_date TIMESTAMP,
     event_location TEXT,
     location_type TEXT,
@@ -242,12 +245,14 @@ CREATE TABLE federated_adt_v (
     discharge_disposition TEXT,
     discharge_location TEXT
 );
+-- patient_id 1 maps to source_id 'src-john-1962' (empi_rank=1) per
+-- internal_source_reference_v above. patient_id 2 maps to 'src-john-1971'.
 INSERT INTO federated_adt_v VALUES
-    ('src-john-1962', '2026-01-10 08:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home'),
-    ('src-john-1962', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Emergency Dept', 'Discharged to SNF', 'Sunrise SNF'),
-    ('src-john-1962', '2025-06-20 10:00', 'Sunrise SNF', 'Skilled Nursing', 'SNF', 'Discharged', 'Buffalo General Hospital', 'Discharged to home', 'Home'),
-    ('src-john-1962', '2024-11-05 14:00', 'ECMC Emergency', 'Emergency', 'EMERGENCY', 'Discharged', 'Self', 'Discharged to home', 'Home'),
-    ('src-john-1971', '2026-03-15 14:00', 'Kaleida Methodist', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home');
+    (1, '2026-01-10 08:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home'),
+    (1, '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Emergency Dept', 'Discharged to SNF', 'Sunrise SNF'),
+    (1, '2025-06-20 10:00', 'Sunrise SNF', 'Skilled Nursing', 'SNF', 'Discharged', 'Buffalo General Hospital', 'Discharged to home', 'Home'),
+    (1, '2024-11-05 14:00', 'ECMC Emergency', 'Emergency', 'EMERGENCY', 'Discharged', 'Self', 'Discharged to home', 'Home'),
+    (2, '2026-03-15 14:00', 'Kaleida Methodist', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home');
 
 CREATE TABLE metric_federated_data_v (
     patient_id INTEGER,
