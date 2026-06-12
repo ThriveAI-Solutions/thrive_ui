@@ -14,6 +14,7 @@ Per spec §7.7 the adapter is read-only. Three layers of enforcement:
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -152,12 +153,16 @@ class AnalyticsDbAdapter:
     def fetch_all(self, sql: str, params: Optional[dict] = None) -> list[dict]:
         if _FORBIDDEN_RE.search(sql):
             raise ValueError("Adapter is read-only; statement contains write keyword.")
-        self.sql_log.append({"sql": sql, "params": dict(params or {})})
+        entry = {"sql": sql, "params": dict(params or {}), "db_elapsed_ms": None}
+        self.sql_log.append(entry)
         with self.engine.connect() as conn:
             if self.dialect in ("postgres", "redshift"):
                 conn.exec_driver_sql(f"SET statement_timeout = {int(self._CURATED_QUERY_TIMEOUT_S * 1000)}")
+            started = time.perf_counter()
             result = conn.execute(text(sql), params or {})
-            return [dict(row._mapping) for row in result]
+            rows = [dict(row._mapping) for row in result]
+            entry["db_elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+            return rows
 
     def run_arbitrary_sql(
         self,
@@ -185,14 +190,17 @@ class AnalyticsDbAdapter:
             raise ValueError("Adapter is read-only; statement contains write keyword.")
 
         bounded_sql = _inject_limit(sql, row_cap)
-        self.sql_log.append({"sql": bounded_sql, "params": {}})
+        entry = {"sql": bounded_sql, "params": {}, "db_elapsed_ms": None}
+        self.sql_log.append(entry)
 
         with self.engine.connect() as conn:
             if self.dialect in ("postgres", "redshift"):
                 conn.exec_driver_sql(f"SET statement_timeout = {int(timeout_s * 1000)}")
+            started = time.perf_counter()
             cursor_result = conn.execute(text(bounded_sql))
             columns = list(cursor_result.keys())
             raw_rows = [list(row) for row in cursor_result.fetchall()]
+            entry["db_elapsed_ms"] = int((time.perf_counter() - started) * 1000)
 
         if len(raw_rows) > row_cap:
             return columns, raw_rows[:row_cap], True
