@@ -55,3 +55,71 @@ def test_adapter_sqlite_engine_rejects_write_inside_explicit_transaction(tmp_pat
     with engine.connect() as conn:
         rows = conn.execute(_text("SELECT COUNT(*) FROM t")).scalar()
     assert rows == 1
+
+
+def _capture_engine_kwargs(dialect: str, url: str, monkeypatch) -> dict:
+    """Patch create_engine + streamlit.secrets to capture how
+    from_streamlit_secrets configures the SQLAlchemy engine for `dialect`."""
+    import sqlalchemy as _sqla
+
+    real_create_engine = _sqla.create_engine  # bind BEFORE patching to avoid recursion
+    captured: dict = {}
+
+    def fake_create_engine(passed_url, **kwargs):
+        captured["url"] = passed_url
+        captured["kwargs"] = kwargs
+        # Return a SQLite engine so AnalyticsDbAdapter.__post_init__ can
+        # install its guards without needing a live Postgres/Redshift.
+        return real_create_engine("sqlite:///:memory:")
+
+    fake_secrets = {"analytics_db": {"dialect": dialect, "url": url, "schema": "dw"}}
+
+    class _FakeSt:
+        secrets = fake_secrets
+
+    monkeypatch.setattr("sqlalchemy.create_engine", fake_create_engine)
+    import sys
+
+    monkeypatch.setitem(sys.modules, "streamlit", _FakeSt)
+
+    # Force the sqlite branch in __post_init__ regardless of the captured
+    # dialect — we're only testing how from_streamlit_secrets wires the pool,
+    # not the dialect-specific session guards (covered elsewhere). Without
+    # this, dialect="postgres" would try SET SESSION CHARACTERISTICS against
+    # our in-memory SQLite stand-in.
+    original_init = AnalyticsDbAdapter.__post_init__
+
+    def fake_init(self):
+        self.dialect = "sqlite"
+        original_init(self)
+
+    monkeypatch.setattr(AnalyticsDbAdapter, "__post_init__", fake_init)
+
+    AnalyticsDbAdapter.from_streamlit_secrets()
+    return captured
+
+
+def test_from_streamlit_secrets_enables_pool_pre_ping_for_redshift(monkeypatch):
+    """Regression: Redshift idle-killed sockets must be detected before use,
+    or the first SET statement_timeout after pool checkout dies with
+    'SSL connection has been closed unexpectedly'."""
+    captured = _capture_engine_kwargs(
+        "redshift", "redshift+psycopg2://u:p@h:5439/db", monkeypatch
+    )
+    assert captured["kwargs"].get("pool_pre_ping") is True
+    assert captured["kwargs"].get("pool_recycle") == 1800
+
+
+def test_from_streamlit_secrets_enables_pool_pre_ping_for_postgres(monkeypatch):
+    captured = _capture_engine_kwargs(
+        "postgres", "postgresql+psycopg2://u:p@h:5432/db", monkeypatch
+    )
+    assert captured["kwargs"].get("pool_pre_ping") is True
+    assert captured["kwargs"].get("pool_recycle") == 1800
+
+
+def test_from_streamlit_secrets_skips_pool_kwargs_for_sqlite(monkeypatch):
+    """SQLite has no remote connection to drop; pool flags would be noise."""
+    captured = _capture_engine_kwargs("sqlite", "sqlite:///:memory:", monkeypatch)
+    assert "pool_pre_ping" not in captured["kwargs"]
+    assert "pool_recycle" not in captured["kwargs"]
