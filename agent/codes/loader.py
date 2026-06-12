@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import List
 
 
-_VOCABS = ("loinc", "cvx", "rxnorm", "icd10", "cpt")
+_VOCABS = ("loinc", "cvx", "rxnorm", "icd10", "cpt", "snomed")
 _DATA_DIR = Path(__file__).parent / "data"
 
 
