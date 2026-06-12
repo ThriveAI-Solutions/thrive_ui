@@ -227,3 +227,7 @@ scripts/synthea/output/
 .idea/
 .vscode/
 .claude/
+
+# agentic eval harness — real roster source_ids and run results are PHI
+/evals/roster.yaml
+/evals/results/
