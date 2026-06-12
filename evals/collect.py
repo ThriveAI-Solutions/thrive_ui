@@ -46,12 +46,18 @@ async def run_turn(
             if target is None:
                 target = {"tool_name": evt.tool_name, "arguments": {}}
                 tool_calls.append(target)
+            # `completed` stays in the dict on purpose: downstream consumers
+            # (judge summaries, report badges) distinguish finished calls from
+            # ones interrupted by caps/crashes. result_payload is deliberately
+            # NOT copied — it can carry full result rows and would bloat the
+            # results JSON; result_summary + sql_executed are enough.
             target.update(
                 completed=True,
                 result_summary=evt.result_summary,
                 success=evt.success,
                 elapsed_ms=evt.elapsed_ms,
                 error=evt.error,
+                reliability_note=evt.reliability_note,
                 sql_executed=list(evt.sql_executed or []),
             )
         elif isinstance(evt, ThinkingCompletedEvent):
