@@ -41,4 +41,5 @@ def test_only_known_placeholders():
 def test_q10_is_decline_check():
     q10 = [q for q in _load() if q["id"] == "Q10"][0]
     assert q10["followups"] == []
-    assert "reviewer_note" in q10
+    note = q10.get("reviewer_note")
+    assert isinstance(note, str) and note.strip(), "Q10 reviewer_note must be a non-empty string"

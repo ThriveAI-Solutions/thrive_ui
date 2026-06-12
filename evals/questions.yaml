@@ -72,6 +72,11 @@ questions:
       - "Who prescribed the medication?"
       - "Was the patient pregnant at the time of the positive test?"
       - "Was expedited partner therapy (EPT) offered to the patient to treat their sexual contacts?"
+    reviewer_note: >-
+      This question intentionally has no end date — any qualifying antibiotic
+      treatment on or after the start date is in scope, so a wide result span
+      is not over-retrieval. The pregnancy and EPT follow-ups are expected
+      regardless of how many records are returned.
 
   - id: Q10
     title: Hep B maternal records
