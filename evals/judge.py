@@ -8,10 +8,13 @@ it never fails the harness run.
 
 from __future__ import annotations
 
+import logging
 from typing import Literal, Optional
 
 from pydantic import BaseModel
 from pydantic_ai import Agent
+
+logger = logging.getLogger(__name__)
 
 JUDGE_INSTRUCTIONS = """\
 You are a careful clinical-data QA reviewer. You are given a question that
@@ -51,5 +54,6 @@ async def judge_turn(judge, question: str, answer: str, tool_summaries: list[str
     try:
         result = await judge.run(render_judge_prompt(question, answer, tool_summaries))
         return result.output.model_dump()
-    except Exception:
+    except Exception as exc:
+        logger.warning("judge failed: %s", exc)
         return None

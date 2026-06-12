@@ -2,7 +2,7 @@ import asyncio
 
 from pydantic_ai.models.test import TestModel
 
-from evals.judge import JudgeVerdict, build_judge, judge_turn, render_judge_prompt  # noqa: F401
+from evals.judge import JudgeVerdict, build_judge, judge_turn, render_judge_prompt
 
 
 def test_prompt_includes_question_answer_and_evidence():
@@ -22,6 +22,7 @@ def test_judge_turn_returns_verdict_dict():
     assert out is not None
     assert out["suggestion"] in {"looks_correct", "looks_wrong", "unsure"}
     assert isinstance(out["reason"], str)
+    JudgeVerdict(**out)  # dict round-trips back into the model
 
 
 def test_judge_turn_swallows_failures():
