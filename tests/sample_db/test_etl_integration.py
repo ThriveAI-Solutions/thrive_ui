@@ -43,6 +43,7 @@ def test_etl_runs_against_fixtures(
         "dw.federated_vaccination_v",
         "dw.federated_vitals_v",
         "dw.federated_documents_v",
+        "dw.federated_adt_v",
         "dw.federated_claims_icd_diagnosis_detail_v",
         "dw.federated_claims_icd_procedure_detail_v",
         "dw.federated_claims_medical_facility_detail_v",
@@ -54,6 +55,13 @@ def test_etl_runs_against_fixtures(
     assert len(out["dw.internal_patient_profile_v"]) == 3
     assert len(out["dw.federated_encounters_v"]) == 3
     assert len(out["dw.federated_problems_v"]) >= 3
+    # The conftest encounters fixture has exactly one inpatient encounter
+    # (enc-002, pat-002). Ambulatory rows produce no ADT events.
+    assert len(out["dw.federated_adt_v"]) == 1
+    adt_row = out["dw.federated_adt_v"][0]
+    assert adt_row["clean_setting"] == "INPATIENT"
+    # patient_id is the integer warehouse-internal id, NOT the source_id.
+    assert isinstance(adt_row["patient_id"], int)
 
 
 def test_etl_is_deterministic(
