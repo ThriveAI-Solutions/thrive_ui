@@ -25,8 +25,12 @@ def test_handles_missing_timing_fields():
         {},
     ]
     out = attribute_latency(1000, tool_calls)
-    assert out["redshift_ms"] == 0
-    assert out["llm_ms"] == 1000
+    assert out == {
+        "total_ms": 1000,
+        "redshift_ms": 0,
+        "tool_overhead_ms": 0,
+        "llm_ms": 1000,
+    }
 
 
 def test_never_negative():
