@@ -693,6 +693,538 @@ def get_question_audit_export(filters: dict) -> list[dict]:
         return []
 
 
+# ============== Per-Query Audit (Epic #190) ==============
+#
+# The legacy ``_question_audit_base_query`` produces one row per user question
+# even when that question kicked off an agentic run with N tool calls — the
+# only SQL surfaced is whichever assistant ``Message`` of type ``SQL`` happened
+# to be written. Per Epic #190 we expose one row per *query unit* instead:
+#   * Legacy question → 1 row (the assistant SQL Message).
+#   * Agentic question → 1 row per ``ToolCall`` for the run (0–N SQL statements
+#     decoded from ``ToolCall.sql_executed_json`` per row).
+#
+# Implementation is a SQL UNION ALL of two halves so ``COUNT(*)`` and
+# ``OFFSET/LIMIT`` stay honest under pagination. View-layer integration lives
+# in Phases 2–4 of Epic #190.
+
+# Sentinel surfaced to the view layer for agentic rows whose AgentRun was
+# logged in ``[agent_logging].mode = "disabled"``. The view renders this
+# verbatim under the SQL column.
+_DISABLED_LOGGING_SENTINEL = "(logging disabled)"
+
+# Pipeline labels — kept narrow so callers can ``in`` against a known set.
+PIPELINE_LEGACY = "legacy"
+PIPELINE_AGENTIC = "agentic"
+ALL_PIPELINES: tuple[str, ...] = (PIPELINE_LEGACY, PIPELINE_AGENTIC)
+
+# Keys present on every dict returned by ``get_per_query_audit_page`` /
+# ``get_per_query_audit_export``. Re-exported so callers and tests can sanity
+# check shape without duplicating the list.
+PER_QUERY_ROW_KEYS: tuple[str, ...] = (
+    "asked_at",
+    "user_id",
+    "username",
+    "organization",
+    "question",
+    "user_message_id",
+    "scope",
+    "pipeline",
+    "run_id",
+    "logging_mode",
+    "tool_call_id",
+    "tool_name",
+    "call_index",
+    "sql_statements",
+    "non_sql_summary",
+    "elapsed_ms",
+    "success",
+    "error",
+    "patients_touched",
+)
+
+
+def _per_query_base_subquery(session, filters: dict):
+    """Build the UNION ALL subquery underpinning the per-query audit view.
+
+    The returned object is a SQLAlchemy ``.subquery()`` so callers can both
+    ``SELECT COUNT(*)`` against it (for pagination) and ``SELECT`` the page
+    against the same shape.
+
+    Filter dict accepts every key ``_question_audit_base_query`` supports
+    (``days`` / ``usernames`` / ``orgs`` / ``search`` / ``scopes``) plus:
+      * ``pipelines``: list[str] — restrict to ``["legacy"]`` / ``["agentic"]``
+        / both (default).
+      * ``source_ids``: list[str] — restrict agentic rows to runs that touched
+        any of these patient ``source_id``s (via ``AgentPatientAccess``).
+        Legacy rows are excluded entirely when this filter is active (the
+        legacy pipeline has no structured patient-touch record).
+      * ``tool_names``: list[str] — restrict agentic rows to specific tool
+        names. Legacy rows pass through (subject to ``pipelines``).
+    """
+    from sqlalchemy import Boolean, Integer, String, case, exists, literal, or_
+    from sqlalchemy.orm import aliased
+
+    from orm.models import AgentPatientAccess, AgentRun, Message, ToolCall, User
+    from utils.enums import MessageType, RoleType
+
+    days = int(filters.get("days") or 30)
+    usernames = filters.get("usernames") or []
+    orgs = filters.get("orgs") or []
+    search = filters.get("search") or None
+    scopes = filters.get("scopes") or None
+    pipelines = filters.get("pipelines") or None
+    source_ids = filters.get("source_ids") or None
+    tool_names = filters.get("tool_names") or None
+
+    since = datetime.utcnow() - timedelta(days=days)
+
+    include_legacy = (not pipelines) or (PIPELINE_LEGACY in pipelines)
+    include_agentic = (not pipelines) or (PIPELINE_AGENTIC in pipelines)
+    # source_ids is a patient-touch filter sourced from AgentPatientAccess —
+    # legacy questions have no structured touch record so they cannot match.
+    if source_ids:
+        include_legacy = False
+    if tool_names:
+        # tool_names filter is a per-tool-call filter; legacy rows have no
+        # tool_call. Exclude legacy so the filter's intent is unambiguous.
+        include_legacy = False
+
+    # Reused per-run tool-family aggregate (matches _question_audit_base_query
+    # so per-row Patient/Pop Health classification stays consistent with the
+    # per-question view).
+    tool_agg_sq = (
+        session.query(
+            ToolCall.run_id.label("run_id"),
+            func.max(case((ToolCall.tool_name.in_(_PATIENT_INTENT_TOOLS), 1), else_=0)).label("has_patient_tool"),
+            func.max(case((ToolCall.tool_name.in_(_POP_HEALTH_TOOLS), 1), else_=0)).label("has_pop_tool"),
+        )
+        .filter(ToolCall.run_id.isnot(None))
+        .group_by(ToolCall.run_id)
+        .subquery()
+    )
+
+    # Same precedence as scope_case in _question_audit_base_query but without
+    # the Legacy branch — this CASE only fires on the agentic half.
+    scope_case_agentic = case(
+        (
+            or_(
+                AgentRun.selected_patient_source_id.isnot(None),
+                tool_agg_sq.c.has_patient_tool == 1,
+            ),
+            SCOPE_PATIENT,
+        ),
+        (tool_agg_sq.c.has_pop_tool == 1, SCOPE_POP_HEALTH),
+        else_=SCOPE_OTHER,
+    )
+
+    # ---- Common filters reused by both halves ----
+    common_filters = [
+        Message.role == RoleType.USER.value,
+        Message.created_at >= since,
+    ]
+    if usernames:
+        common_filters.append(User.username.in_(usernames))
+    if orgs:
+        org_clauses = []
+        concrete = [o for o in orgs if o != _NO_ORG_SENTINEL]
+        if _NO_ORG_SENTINEL in orgs:
+            org_clauses.append(User.organization.is_(None))
+            org_clauses.append(User.organization == "")
+        if concrete:
+            org_clauses.append(User.organization.in_(concrete))
+        if org_clauses:
+            common_filters.append(or_(*org_clauses))
+    if search:
+        s = f"%{search.lower()}%"
+        SqlMsg = aliased(Message)
+        sql_exists = exists().where(
+            (SqlMsg.role == RoleType.ASSISTANT.value)
+            & (SqlMsg.type == MessageType.SQL.value)
+            & (SqlMsg.question == Message.content)
+            & (SqlMsg.user_id == Message.user_id)
+            & (SqlMsg.content.ilike(s))
+        )
+        common_filters.append(or_(Message.content.ilike(s), sql_exists))
+
+    parts = []
+
+    # ---- Legacy half: one row per user-Message with no AgentRun ----
+    if include_legacy:
+        legacy_q = (
+            session.query(
+                Message.id.label("user_message_id"),
+                Message.content.label("question"),
+                Message.created_at.label("asked_at"),
+                User.id.label("user_id"),
+                User.username.label("username"),
+                User.organization.label("organization"),
+                literal(SCOPE_LEGACY).label("scope"),
+                literal(PIPELINE_LEGACY).label("pipeline"),
+                literal(None, String()).label("run_id"),
+                literal(None, String()).label("logging_mode"),
+                literal(None, Integer()).label("tool_call_pk"),
+                literal(None, String()).label("tool_call_uid"),
+                literal(None, String()).label("tool_name"),
+                literal(None, Integer()).label("call_index"),
+                literal(None, String()).label("sql_executed_json"),
+                literal(None, String()).label("non_sql_summary"),
+                literal(None, Integer()).label("elapsed_ms"),
+                literal(None, Boolean()).label("tool_success"),
+                literal(None, String()).label("tool_error"),
+            )
+            .join(User, User.id == Message.user_id)
+            .outerjoin(AgentRun, AgentRun.user_message_id == Message.id)
+            .filter(*common_filters, AgentRun.id.is_(None))
+        )
+        if scopes:
+            wanted = {s for s in scopes if s in ALL_SCOPES}
+            if SCOPE_LEGACY not in wanted:
+                # Drop this half entirely without producing rows.
+                legacy_q = legacy_q.filter(literal(False))
+        parts.append(legacy_q)
+
+    # ---- Agentic half: one row per ToolCall (outer join so zero-tool-call
+    # runs still produce a carrier row) ----
+    if include_agentic:
+        agentic_q = (
+            session.query(
+                Message.id.label("user_message_id"),
+                Message.content.label("question"),
+                Message.created_at.label("asked_at"),
+                User.id.label("user_id"),
+                User.username.label("username"),
+                User.organization.label("organization"),
+                scope_case_agentic.label("scope"),
+                literal(PIPELINE_AGENTIC).label("pipeline"),
+                AgentRun.run_id.label("run_id"),
+                AgentRun.logging_mode.label("logging_mode"),
+                ToolCall.id.label("tool_call_pk"),
+                ToolCall.tool_call_id.label("tool_call_uid"),
+                ToolCall.tool_name.label("tool_name"),
+                ToolCall.call_index.label("call_index"),
+                ToolCall.sql_executed_json.label("sql_executed_json"),
+                ToolCall.result_summary.label("non_sql_summary"),
+                ToolCall.elapsed_ms.label("elapsed_ms"),
+                ToolCall.success.label("tool_success"),
+                ToolCall.error.label("tool_error"),
+            )
+            .join(User, User.id == Message.user_id)
+            .join(AgentRun, AgentRun.user_message_id == Message.id)
+            .outerjoin(ToolCall, ToolCall.run_id == AgentRun.run_id)
+            .outerjoin(tool_agg_sq, tool_agg_sq.c.run_id == AgentRun.run_id)
+            .filter(*common_filters)
+        )
+        if scopes:
+            wanted = {s for s in scopes if s in ALL_SCOPES}
+            # Legacy/Unknown never matches the agentic CASE; filtering on the
+            # other three buckets is the correct intent.
+            agentic_wanted = wanted - {SCOPE_LEGACY}
+            if agentic_wanted:
+                agentic_q = agentic_q.filter(scope_case_agentic.in_(agentic_wanted))
+            else:
+                agentic_q = agentic_q.filter(literal(False))
+        if source_ids:
+            agentic_q = agentic_q.filter(
+                exists().where(
+                    (AgentPatientAccess.run_id == AgentRun.run_id) & (AgentPatientAccess.source_id.in_(source_ids))
+                )
+            )
+        if tool_names:
+            agentic_q = agentic_q.filter(ToolCall.tool_name.in_(tool_names))
+        parts.append(agentic_q)
+
+    if not parts:
+        # Both pipelines excluded — return an empty subquery of the right shape.
+        # We build one by reusing the legacy projection and filtering to False.
+        empty = (
+            session.query(
+                Message.id.label("user_message_id"),
+                Message.content.label("question"),
+                Message.created_at.label("asked_at"),
+                User.id.label("user_id"),
+                User.username.label("username"),
+                User.organization.label("organization"),
+                literal(SCOPE_LEGACY).label("scope"),
+                literal(PIPELINE_LEGACY).label("pipeline"),
+                literal(None, String()).label("run_id"),
+                literal(None, String()).label("logging_mode"),
+                literal(None, Integer()).label("tool_call_pk"),
+                literal(None, String()).label("tool_call_uid"),
+                literal(None, String()).label("tool_name"),
+                literal(None, Integer()).label("call_index"),
+                literal(None, String()).label("sql_executed_json"),
+                literal(None, String()).label("non_sql_summary"),
+                literal(None, Integer()).label("elapsed_ms"),
+                literal(None, Boolean()).label("tool_success"),
+                literal(None, String()).label("tool_error"),
+            )
+            .join(User, User.id == Message.user_id)
+            .filter(literal(False))
+        )
+        return empty.subquery()
+
+    if len(parts) == 1:
+        return parts[0].subquery()
+    return parts[0].union_all(parts[1]).subquery()
+
+
+def _decorate_per_query_rows(session, rows: list) -> list[dict]:
+    """Decode JSON, fetch legacy SQL Messages, attach patients_touched.
+
+    Batched so the cost is O(1) round-trips regardless of page size.
+    """
+    from orm.models import AgentPatientAccess, Message
+    from utils.enums import MessageType, RoleType
+
+    if not rows:
+        return []
+
+    # ---- Batched legacy enrichment: assistant SQL + assistant ERROR per
+    # (user_id, question) ----
+    legacy_keys: set[tuple[int, str]] = {(r.user_id, r.question) for r in rows if r.pipeline == PIPELINE_LEGACY}
+    legacy_sql_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+    legacy_err_by_key: dict[tuple[int, str], str] = {}
+    if legacy_keys:
+        user_ids = {k[0] for k in legacy_keys}
+        contents = {k[1] for k in legacy_keys}
+        assistant_rows = (
+            session.query(
+                Message.user_id,
+                Message.question,
+                Message.type,
+                Message.content,
+                Message.created_at,
+                Message.elapsed_time,
+            )
+            .filter(
+                Message.role == RoleType.ASSISTANT.value,
+                Message.user_id.in_(user_ids),
+                Message.question.in_(contents),
+                Message.type.in_({MessageType.SQL.value, MessageType.ERROR.value}),
+            )
+            .order_by(Message.created_at.desc())
+            .all()
+        )
+        for ar in assistant_rows:
+            key = (ar.user_id, ar.question)
+            if ar.type == MessageType.SQL.value and key not in legacy_sql_by_key:
+                legacy_sql_by_key[key] = {
+                    "content": ar.content,
+                    "elapsed_time": ar.elapsed_time,
+                }
+            elif ar.type == MessageType.ERROR.value and key not in legacy_err_by_key:
+                legacy_err_by_key[key] = ar.content
+
+    # ---- Batched patient access lookup ----
+    # AgentPatientAccess.tool_call_id is the *string* tool_call_id (matches
+    # ToolCall.tool_call_id, not the PK). Fetch by tool_call_uid when present;
+    # otherwise fall back to run-level grouping for zero-tool-call carrier rows.
+    uids = {r.tool_call_uid for r in rows if r.tool_call_uid}
+    runs_without_uid = {r.run_id for r in rows if r.pipeline == PIPELINE_AGENTIC and r.run_id and not r.tool_call_uid}
+
+    patients_by_uid: dict[str, list[dict]] = {}
+    patients_by_run: dict[str, list[dict]] = {}
+    if uids:
+        pa_rows = (
+            session.query(
+                AgentPatientAccess.tool_call_id,
+                AgentPatientAccess.source_id,
+                AgentPatientAccess.display_name,
+            )
+            .filter(AgentPatientAccess.tool_call_id.in_(uids))
+            .order_by(AgentPatientAccess.id.asc())
+            .all()
+        )
+        seen_by_uid: dict[str, set[str]] = {}
+        for pa in pa_rows:
+            bucket = patients_by_uid.setdefault(pa.tool_call_id, [])
+            seen = seen_by_uid.setdefault(pa.tool_call_id, set())
+            if pa.source_id in seen:
+                continue
+            seen.add(pa.source_id)
+            bucket.append({"source_id": pa.source_id, "display_name": pa.display_name})
+    if runs_without_uid:
+        pa_rows = (
+            session.query(
+                AgentPatientAccess.run_id,
+                AgentPatientAccess.source_id,
+                AgentPatientAccess.display_name,
+            )
+            .filter(AgentPatientAccess.run_id.in_(runs_without_uid))
+            .order_by(AgentPatientAccess.id.asc())
+            .all()
+        )
+        seen_by_run: dict[str, set[str]] = {}
+        for pa in pa_rows:
+            bucket = patients_by_run.setdefault(pa.run_id, [])
+            seen = seen_by_run.setdefault(pa.run_id, set())
+            if pa.source_id in seen:
+                continue
+            seen.add(pa.source_id)
+            bucket.append({"source_id": pa.source_id, "display_name": pa.display_name})
+
+    items: list[dict] = []
+    for r in rows:
+        is_legacy = r.pipeline == PIPELINE_LEGACY
+        is_disabled = (r.logging_mode == "disabled") if not is_legacy else False
+        sql_statements: list[str]
+        non_sql_summary: str | None
+        elapsed_ms: int | None
+        success: bool | None
+        error: str | None
+
+        if is_legacy:
+            key = (r.user_id, r.question)
+            sql_row = legacy_sql_by_key.get(key)
+            err_text = legacy_err_by_key.get(key)
+            sql_statements = [sql_row["content"]] if sql_row and sql_row["content"] else []
+            non_sql_summary = None
+            # Legacy elapsed_time is seconds (Decimal). Normalise to int ms so
+            # the column type matches the agentic half.
+            if sql_row and sql_row["elapsed_time"] is not None:
+                try:
+                    elapsed_ms = int(float(sql_row["elapsed_time"]) * 1000)
+                except (TypeError, ValueError):
+                    elapsed_ms = None
+            else:
+                elapsed_ms = None
+            success = (err_text is None) if (sql_row or err_text) else None
+            error = err_text
+        elif is_disabled:
+            # Logging disabled — agentic rows still surface (so admins know
+            # something ran) but payload columns are sentinelled, not crashed.
+            sql_statements = []
+            non_sql_summary = _DISABLED_LOGGING_SENTINEL
+            elapsed_ms = r.elapsed_ms
+            success = r.tool_success
+            error = r.tool_error
+        else:
+            sql_statements = _decode_sql_executed_json(r.sql_executed_json, run_id=r.run_id)
+            non_sql_summary = None if sql_statements else r.non_sql_summary
+            elapsed_ms = r.elapsed_ms
+            success = r.tool_success
+            error = r.tool_error
+
+        # Patient touch list — per-tool-call when we have a uid, else run-level.
+        if is_legacy:
+            patients_touched: list[dict] = []
+        elif r.tool_call_uid:
+            patients_touched = list(patients_by_uid.get(r.tool_call_uid, ()))
+        elif r.run_id:
+            patients_touched = list(patients_by_run.get(r.run_id, ()))
+        else:
+            patients_touched = []
+
+        items.append(
+            {
+                "asked_at": r.asked_at,
+                "user_id": r.user_id,
+                "username": r.username,
+                "organization": r.organization,
+                "question": r.question,
+                "user_message_id": r.user_message_id,
+                "scope": r.scope or SCOPE_LEGACY,
+                "pipeline": r.pipeline,
+                "run_id": r.run_id,
+                "logging_mode": r.logging_mode,
+                "tool_call_id": r.tool_call_pk,
+                "tool_name": r.tool_name,
+                "call_index": r.call_index,
+                "sql_statements": sql_statements,
+                "non_sql_summary": non_sql_summary,
+                "elapsed_ms": elapsed_ms,
+                "success": success,
+                "error": error,
+                "patients_touched": patients_touched,
+            }
+        )
+    return items
+
+
+def _decode_sql_executed_json(raw: str | None, *, run_id: str | None = None) -> list[str]:
+    """Decode ``ToolCall.sql_executed_json`` (a JSON array of strings).
+
+    Defensive: returns ``[]`` on missing / malformed input and logs a warning
+    so audit surfaces never crash on a single bad row.
+    """
+    if raw is None or raw == "":
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError) as e:
+        logger.warning("_decode_sql_executed_json: malformed JSON for run_id=%s: %s", run_id, e)
+        return []
+    if not isinstance(parsed, list):
+        logger.warning(
+            "_decode_sql_executed_json: expected list, got %s for run_id=%s",
+            type(parsed).__name__,
+            run_id,
+        )
+        return []
+    return [str(x) for x in parsed]
+
+
+def get_per_query_audit_page(filters: dict, page: int = 1, page_size: int = 50) -> dict:
+    """Paginated per-query audit (Epic #190). Returns ``{"items": [...], "total": int}``.
+
+    Each item is one *query unit*: a legacy assistant SQL Message, or one
+    agentic ``ToolCall`` (0–N SQL statements decoded inline). See
+    ``PER_QUERY_ROW_KEYS`` for the dict shape.
+    """
+    try:
+        with SessionLocal() as session:
+            sub = _per_query_base_subquery(session, filters)
+            total = session.query(func.count()).select_from(sub).scalar() or 0
+            offset = max(0, (int(page) - 1) * int(page_size))
+            rows = (
+                session.query(sub)
+                .order_by(
+                    sub.c.asked_at.desc(),
+                    sub.c.user_message_id.desc(),
+                    sub.c.run_id.asc(),
+                    sub.c.call_index.asc(),
+                    sub.c.tool_call_pk.asc(),
+                )
+                .offset(offset)
+                .limit(int(page_size))
+                .all()
+            )
+            items = _decorate_per_query_rows(session, rows)
+            return {"items": items, "total": int(total)}
+    except Exception as e:
+        logger.warning("get_per_query_audit_page failed: %s", e)
+        return {"items": [], "total": 0}
+
+
+def get_per_query_audit_export(filters: dict) -> list[dict]:
+    """Full filtered set with no pagination, capped at ``MAX_AUDIT_EXPORT_ROWS``."""
+    try:
+        with SessionLocal() as session:
+            sub = _per_query_base_subquery(session, filters)
+            rows = (
+                session.query(sub)
+                .order_by(
+                    sub.c.asked_at.desc(),
+                    sub.c.user_message_id.desc(),
+                    sub.c.run_id.asc(),
+                    sub.c.call_index.asc(),
+                    sub.c.tool_call_pk.asc(),
+                )
+                .limit(MAX_AUDIT_EXPORT_ROWS + 1)
+                .all()
+            )
+            if len(rows) > MAX_AUDIT_EXPORT_ROWS:
+                logger.warning(
+                    "get_per_query_audit_export hit MAX_AUDIT_EXPORT_ROWS=%s; truncating",
+                    MAX_AUDIT_EXPORT_ROWS,
+                )
+                rows = rows[:MAX_AUDIT_EXPORT_ROWS]
+            return _decorate_per_query_rows(session, rows)
+    except Exception as e:
+        logger.warning("get_per_query_audit_export failed: %s", e)
+        return []
+
+
 # ============== Error Logging ==============
 
 

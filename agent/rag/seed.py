@@ -135,7 +135,8 @@ SCHEMA_DOCS: List[_Doc] = [
         "view": "federated_adt_v",
         "kind": "schema",
         "text": (
-            "federated_adt_v: admit/discharge/transfer events. Columns: source_id, "
+            "federated_adt_v: admit/discharge/transfer events. Columns: patient_id "
+            "(no source_id — join internal_source_reference_v at empi_rank=1), "
             "event_date, event_location, location_type, clean_setting (normalized "
             "setting: INPATIENT, OUTPATIENT, EMERGENCY, LONG TERM CARE, SNF), "
             "status, admit_from, discharge_disposition, discharge_location. "
@@ -153,6 +154,18 @@ SCHEMA_DOCS: List[_Doc] = [
             "place_of_service, location_name. Note bodies live in HEALTHeLINK / source "
             "EHRs, not the warehouse. Use list_patient_documents to surface what's "
             "available; never claim the agent has read the note text."
+        ),
+    },
+    {
+        "view": "federated_allergies_v",
+        "kind": "schema",
+        "text": (
+            "federated_allergies_v: allergy records. Columns: source_id, code "
+            "(SNOMED), code_type, allergy, type (Drug/Food/Adverse Reaction/"
+            "Environmental/Contact), severity, status, onset_date, status_datetime, "
+            "reaction. Use get_patient_clinical_data domain='allergies'; NKA "
+            "surfaces via the result's negative_assertion flag, drug-med conflicts "
+            "via notes_to_agent. Uncoded allergies in notes are NOT captured."
         ),
     },
     {
@@ -238,6 +251,31 @@ EXAMPLES_DOCS: List[_Doc] = [
         "view": "",
         "kind": "examples",
         "text": (
+            "Q: 'What is this patient allergic to?'\n"
+            "Tool sequence: get_patient_clinical_data({domain:'allergies'}). "
+            "Default returns active allergies. If the result has "
+            "negative_assertion=True, the patient has explicitly asserted NO "
+            "KNOWN ALLERGIES — say that, do not say 'I don't know'. If "
+            "notes_to_agent contains a drug-allergy advisory, surface it as a "
+            "soft flag for clinician review (NOT clinical decision support)."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'Is it safe to give this patient penicillin?'\n"
+            "Tool sequence: search_codes(vocabulary='snomed', query='penicillin "
+            "allergy') → get_patient_clinical_data({domain:'allergies', "
+            "snomed_codes:['91936005']}). Note: the agent reports recorded "
+            "allergens only; coverage is limited to allergies captured in "
+            "federated_allergies_v. Do not present a clinical safety verdict."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
             "Q: 'Has patient been admitted to a long-term care facility in 2026?'\n"
             "Tool sequence: get_patient_clinical_data({domain:'admissions', "
             "facility_type:'ltc', date_range:{start:'2026-01-01', end:'2026-12-31'}}). "
@@ -245,6 +283,22 @@ EXAMPLES_DOCS: List[_Doc] = [
             "facility type and date range. For visit history without ADT detail, use "
             "get_patient_clinical_data({domain:'encounters', facility_type:'ltc', "
             "date_range:{...}}) instead."
+        ),
+    },
+    {
+        "view": "",
+        "kind": "examples",
+        "text": (
+            "Q: 'What was the reason for patient X's most recent admission?'\n"
+            "Tool sequence: (1) get_patient_clinical_data({domain:'admissions'}) — "
+            "items are ordered event_date DESC, so items[0] is the most recent; "
+            "(2) get_patient_clinical_data({domain:'diagnoses', date_range:{start:"
+            "<admission_date - 1 day>, end:<admission_date + 1 day>}}) to surface "
+            "diagnoses recorded around the admission. federated_adt_v has no "
+            "principal-diagnosis column, so reason is INFERRED from problems near "
+            "the admission date — say so in the answer. If "
+            "data_availability='no_records_found', say explicitly that the patient "
+            "has no admission records — do NOT phrase it as 'patient was not admitted'."
         ),
     },
     {

@@ -20,6 +20,8 @@ from agent.db.queries.immunizations import immunizations_sql
 from agent.db.queries.imaging import imaging_sql
 from agent.db.queries.documents import documents_sql
 from agent.db.queries.procedures import procedures_sql
+from agent.db.queries.adt import admissions_sql
+from agent.db.queries.allergies import allergies_sql
 
 
 # (label, callable, expected_views_referenced)
@@ -82,6 +84,16 @@ _CASES = [
             "federated_problems_v",
             "federated_claims_icd_procedure_detail_v",
         },
+    ),
+    (
+        "admissions",
+        lambda **kw: admissions_sql(source_id="x", **kw),
+        {"federated_adt_v", "internal_source_reference_v"},
+    ),
+    (
+        "allergies",
+        lambda **kw: allergies_sql(source_id="x", **kw),
+        {"federated_allergies_v"},
     ),
 ]
 

@@ -231,3 +231,5 @@ scripts/synthea/output/
 # agentic eval harness — real roster source_ids and run results are PHI
 /evals/roster.yaml
 /evals/results/
+mempalace.yaml
+.verify-evidence/

@@ -91,6 +91,155 @@ def test_can_find_metformin_users():
 
 
 @pytest.mark.sample_db
+def test_admissions_table_present_with_inpatient_rows():
+    """Per epic #173 AC: federated_adt_v is part of the V1 whitelist and the
+    sample DB must carry rows for inpatient + ED encounters so the
+    admissions domain on get_patient_clinical_data can be exercised."""
+    eng = _engine_or_skip()
+    with eng.connect() as conn:
+        # Table must exist.
+        n_rows = conn.execute(sa.text("SELECT COUNT(*) FROM dw.federated_adt_v")).scalar()
+        assert n_rows is not None and n_rows >= 1, (
+            f"federated_adt_v should be populated from inpatient/ED encounters; got {n_rows}"
+        )
+        # At least one inpatient row — otherwise the admissions tool's
+        # facility_type='inpatient' query has nothing to verify against.
+        n_inpatient = conn.execute(
+            sa.text("SELECT COUNT(*) FROM dw.federated_adt_v WHERE clean_setting = 'INPATIENT'")
+        ).scalar()
+        assert n_inpatient is not None and n_inpatient >= 1
+
+
+@pytest.mark.sample_db
+def test_admissions_tool_returns_data_for_admitted_patient():
+    """Per epic #173 AC: 'Was patient X admitted? When?' must work end-to-end
+    against the sample DB for a patient that has admission records."""
+    from datetime import datetime
+    from unittest.mock import MagicMock
+    from agent.deps import AgentDeps, SelectedPatient
+    from agent.db.analytics_adapter import AnalyticsDbAdapter
+    from agent.tools.get_patient_clinical_data import (
+        AdmissionsQuery,
+        get_patient_clinical_data,
+    )
+
+    eng = _engine_or_skip()
+    # Pick the first patient that actually has an INPATIENT ADT row.
+    with eng.connect() as conn:
+        row = conn.execute(
+            sa.text(
+                """
+                SELECT isr.source_id
+                FROM dw.federated_adt_v adt
+                JOIN dw.internal_source_reference_v isr
+                  ON isr.patient_id = adt.patient_id
+                WHERE adt.clean_setting = 'INPATIENT' AND isr.empi_rank = 1
+                LIMIT 1
+                """
+            )
+        ).fetchone()
+        if not row:
+            pytest.skip("No admitted patient available in loaded sample DB")
+        admitted_source_id = row[0]
+
+    adapter = AnalyticsDbAdapter(engine=eng, dialect="postgresql", schema_prefix="dw.")
+    deps = AgentDeps(
+        user_id=1,
+        user_role=MagicMock(value=1),
+        session_id="s1",
+        selected_patient=SelectedPatient(
+            source_id=admitted_source_id,
+            display_name="(sample patient)",
+            dob=None,
+            selected_at=datetime.now(),
+            selection_origin="user_click",
+        ),
+        last_dataframe=None,
+        last_sql=None,
+        last_query_meta=None,
+        analytics_db=adapter,
+        rag=None,
+        sqlite_session=None,
+        run_logger=MagicMock(),
+    )
+    ctx = MagicMock()
+    ctx.deps = deps
+
+    result = get_patient_clinical_data(ctx, AdmissionsQuery(facility_type="inpatient"))
+    assert result.domain == "admissions"
+    assert result.data_availability == "data_present"
+    assert len(result.items) >= 1
+    item = result.items[0]
+    assert item.event_date is not None
+    assert (item.setting or "").upper() == "INPATIENT"
+
+
+@pytest.mark.sample_db
+def test_admissions_tool_distinguishes_no_records_from_no_admissions():
+    """Per epic #173 AC: when no admission records exist, the tool must
+    explicitly signal that — not silently return [] that looks like 'no
+    admissions occurred'. This is the meeting-transcript failure mode."""
+    from datetime import datetime
+    from unittest.mock import MagicMock
+    from agent.deps import AgentDeps, SelectedPatient
+    from agent.db.analytics_adapter import AnalyticsDbAdapter
+    from agent.tools.get_patient_clinical_data import (
+        AdmissionsQuery,
+        get_patient_clinical_data,
+    )
+
+    eng = _engine_or_skip()
+    with eng.connect() as conn:
+        # Pick a patient with NO inpatient/ED rows in federated_adt_v.
+        row = conn.execute(
+            sa.text(
+                """
+                SELECT isr.source_id
+                FROM dw.internal_source_reference_v isr
+                WHERE isr.empi_rank = 1
+                  AND NOT EXISTS (
+                      SELECT 1 FROM dw.federated_adt_v adt
+                      WHERE adt.patient_id = isr.patient_id
+                  )
+                LIMIT 1
+                """
+            )
+        ).fetchone()
+        if not row:
+            pytest.skip("Every patient in sample has admissions — cannot test the no-records branch")
+        non_admitted_source_id = row[0]
+
+    adapter = AnalyticsDbAdapter(engine=eng, dialect="postgresql", schema_prefix="dw.")
+    deps = AgentDeps(
+        user_id=1,
+        user_role=MagicMock(value=1),
+        session_id="s1",
+        selected_patient=SelectedPatient(
+            source_id=non_admitted_source_id,
+            display_name="(sample patient)",
+            dob=None,
+            selected_at=datetime.now(),
+            selection_origin="user_click",
+        ),
+        last_dataframe=None,
+        last_sql=None,
+        last_query_meta=None,
+        analytics_db=adapter,
+        rag=None,
+        sqlite_session=None,
+        run_logger=MagicMock(),
+    )
+    ctx = MagicMock()
+    ctx.deps = deps
+
+    result = get_patient_clinical_data(ctx, AdmissionsQuery())
+    assert result.domain == "admissions"
+    # Critical: explicit "no records" signal, not silent empty data_present.
+    assert result.data_availability == "no_records_found"
+    assert result.items == []
+
+
+@pytest.mark.sample_db
 def test_polyglot_code_types_present_in_problems():
     """Spec §6.3 #1 — multiple spelling variants of the same code system."""
     eng = _engine_or_skip()

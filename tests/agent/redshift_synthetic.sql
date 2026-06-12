@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS federated_orders_v;
 DROP TABLE IF EXISTS federated_vaccination_v;
 DROP TABLE IF EXISTS federated_vitals_v;
 DROP TABLE IF EXISTS federated_documents_v;
+DROP TABLE IF EXISTS federated_allergies_v;
 DROP TABLE IF EXISTS federated_claims_icd_procedure_detail_v;
 DROP TABLE IF EXISTS metric_federated_data_v;
 
@@ -146,7 +147,10 @@ CREATE TABLE federated_meds_v (
 );
 INSERT INTO federated_meds_v VALUES
     ('src-john-1962', '00093-1054-01', '6809', 'Metformin', '2026-03-15 10:00', '1234567890', '500', 'mg', 'Tab', 'Take 1 tab BID', 90, 3),
-    ('src-john-1962', '00093-7146-56', '18631', 'Azithromycin', '2026-04-02 14:00', '1234567890', '250', 'mg', 'Tab', 'Take 2 tabs day 1, 1 tab daily x4', 5, 0);
+    ('src-john-1962', '00093-7146-56', '18631', 'Azithromycin', '2026-04-02 14:00', '1234567890', '250', 'mg', 'Tab', 'Take 2 tabs day 1, 1 tab daily x4', 5, 0),
+    -- src-mary-1956 has a Sulfa allergy (federated_allergies_v below) plus an
+    -- active sulfamethoxazole prescription → drug-allergy conflict signal test.
+    ('src-mary-1956', '49281-0790-15', '10180', 'Sulfamethoxazole', '2026-05-01 09:00', '0987654321', '800', 'mg', 'Tab', 'Take 1 tab BID x10', 10, 0);
 
 CREATE TABLE federated_orders_v (
     source_id TEXT,
@@ -231,8 +235,11 @@ CREATE TABLE federated_vitals_v (
 INSERT INTO federated_vitals_v VALUES
     ('src-john-1962', '8480-6', 'LOINC', 'Systolic BP', '128', '128', 'mmHg', '2026-04-01 09:30');
 
+-- Production federated_adt_v exposes patient_id only (no source_id, unlike
+-- every other federated_*_v view). Identity is resolved by joining
+-- internal_source_reference_v at empi_rank = 1.
 CREATE TABLE federated_adt_v (
-    source_id TEXT,
+    patient_id INTEGER,
     event_date TIMESTAMP,
     event_location TEXT,
     location_type TEXT,
@@ -242,12 +249,45 @@ CREATE TABLE federated_adt_v (
     discharge_disposition TEXT,
     discharge_location TEXT
 );
+-- patient_id 1 maps to source_id 'src-john-1962' (empi_rank=1) per
+-- internal_source_reference_v above. patient_id 2 maps to 'src-john-1971'.
 INSERT INTO federated_adt_v VALUES
-    ('src-john-1962', '2026-01-10 08:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home'),
-    ('src-john-1962', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Emergency Dept', 'Discharged to SNF', 'Sunrise SNF'),
-    ('src-john-1962', '2025-06-20 10:00', 'Sunrise SNF', 'Skilled Nursing', 'SNF', 'Discharged', 'Buffalo General Hospital', 'Discharged to home', 'Home'),
-    ('src-john-1962', '2024-11-05 14:00', 'ECMC Emergency', 'Emergency', 'EMERGENCY', 'Discharged', 'Self', 'Discharged to home', 'Home'),
-    ('src-john-1971', '2026-03-15 14:00', 'Kaleida Methodist', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home');
+    (1, '2026-01-10 08:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home'),
+    (1, '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Emergency Dept', 'Discharged to SNF', 'Sunrise SNF'),
+    (1, '2025-06-20 10:00', 'Sunrise SNF', 'Skilled Nursing', 'SNF', 'Discharged', 'Buffalo General Hospital', 'Discharged to home', 'Home'),
+    (1, '2024-11-05 14:00', 'ECMC Emergency', 'Emergency', 'EMERGENCY', 'Discharged', 'Self', 'Discharged to home', 'Home'),
+    (2, '2026-03-15 14:00', 'Kaleida Methodist', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home');
+
+-- federated_allergies_v: dedicated allergies view per epic #201. Schema
+-- inferred from the dev-warehouse evaluation set (allergy / type / severity
+-- columns confirmed) plus the federated_problems_v shape. Verify columns
+-- against production before shipping.
+CREATE TABLE federated_allergies_v (
+    source_id TEXT,
+    code TEXT,
+    code_type TEXT,
+    allergy TEXT,
+    type TEXT,
+    severity TEXT,
+    status TEXT,
+    onset_date DATE,
+    status_datetime TIMESTAMP,
+    reaction TEXT,
+    comments TEXT
+);
+-- src-john-1962: Penicillin (Drug, Severe, Active) + Peanuts (Food, Mild, Active)
+-- + Latex (Adverse Reaction, Moderate, Resolved). Tests default-active filter,
+-- include_inactive, category filter, text filter, snomed code filter, and
+-- drug-allergy conflict signal (paired with amoxicillin med below).
+-- src-john-1971: 'NO KNOWN ALLERGIES' negative assertion.
+-- src-mary-1956: Sulfa drugs (Drug, Moderate, Active).
+-- src-jane-1985: no rows → data_availability=no_records_found.
+INSERT INTO federated_allergies_v VALUES
+    ('src-john-1962', '91936005', 'SNOMED', 'Penicillin', 'Drug allergy', 'Severe', 'Active', '2010-05-01', '2010-05-01', 'Hives', NULL),
+    ('src-john-1962', '91934008', 'SNOMED', 'Peanuts', 'Food allergy', 'Mild', 'Active', '2018-03-01', '2018-03-01', 'Rash', NULL),
+    ('src-john-1962', '300916003', 'SNOMED', 'Latex', 'Adverse Reaction', 'Moderate', 'Resolved', '2015-01-01', '2020-06-01', 'Contact dermatitis', NULL),
+    ('src-john-1971', NULL, NULL, 'NO KNOWN ALLERGIES', NULL, NULL, 'Active', NULL, '2024-01-15', NULL, NULL),
+    ('src-mary-1956', '91937001', 'SNOMED', 'Sulfa drugs', 'Drug allergy', 'Moderate', 'Active', '2015-09-10', '2015-09-10', 'Rash', NULL);
 
 CREATE TABLE metric_federated_data_v (
     patient_id INTEGER,

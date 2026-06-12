@@ -25,7 +25,9 @@ from agent.db.queries.procedures import procedures_sql
 from agent.db.queries.surgeries import surgeries_sql
 from agent.db.queries.imaging import imaging_sql
 from agent.db.queries.adt import admissions_sql
+from agent.db.queries.allergies import allergies_sql
 from agent.code_normalizer import normalize_token, variants_for
+from agent.codes.allergies import find_drug_allergy_conflicts
 from agent.dataframe_adapters import clinical_result_to_df
 
 
@@ -129,6 +131,17 @@ class AdmissionsQuery(BaseModel):
     include_discharge_details: bool = True
 
 
+class AllergiesQuery(BaseModel):
+    model_config = _STRICT
+
+    domain: Literal["allergies"] = "allergies"
+    snomed_codes: Optional[List[str]] = None
+    allergen_text: Optional[str] = None
+    category: Optional[Literal["drug", "food", "environmental", "contact", "anaphylaxis"]] = None
+    include_inactive: bool = False
+    date_range: Optional[DateRange] = None
+
+
 PatientClinicalQuery = Annotated[
     Union[
         DemographicsQuery,
@@ -141,6 +154,7 @@ PatientClinicalQuery = Annotated[
         SurgeriesQuery,
         ImagingQuery,
         AdmissionsQuery,
+        AllergiesQuery,
     ],
     Field(discriminator="domain"),
 ]
@@ -290,6 +304,25 @@ class AdmissionItem(BaseModel):
     discharge_location: Optional[str] = None
 
 
+class AllergyItem(BaseModel):
+    item_type: Literal["allergy"] = "allergy"
+    source_id: str
+    allergy: Optional[str] = None
+    code: Optional[str] = None
+    code_type: Optional[str] = None
+    # Category is normalized from the warehouse `type` column (e.g.,
+    # 'Drug allergy' → 'drug'); raw value preserved in `type_raw` for callers
+    # that need the original wording.
+    category: Optional[Literal["drug", "food", "environmental", "contact", "anaphylaxis", "other"]] = None
+    type_raw: Optional[str] = None
+    severity: Optional[str] = None
+    status: Optional[str] = None
+    onset_date: Optional[str] = None
+    event_datetime: Optional[str] = None
+    reaction: Optional[str] = None
+    comments: Optional[str] = None
+
+
 ClinicalItem = Annotated[
     Union[
         DemographicsItem,
@@ -302,6 +335,7 @@ ClinicalItem = Annotated[
         SurgeryItem,
         ImagingItem,
         AdmissionItem,
+        AllergyItem,
     ],
     Field(discriminator="item_type"),
 ]
@@ -315,6 +349,9 @@ class ClinicalResult(CompactingListResult):
     data_availability: DataAvailability
     notes_to_agent: Optional[str] = None
     reliability_note: Optional[str] = None
+    # First-class flag for 'NO KNOWN ALLERGIES'. Only meaningful on
+    # allergies-domain results; left False everywhere else.
+    negative_assertion: bool = False
 
 
 # --- Per-domain helpers ---------------------------------------------
@@ -623,9 +660,7 @@ def _build_procedures_result(
     )
 
 
-def _build_surgeries_result(
-    adapter: Any, source_id: str, schema_prefix: str, query: SurgeriesQuery
-) -> ClinicalResult:
+def _build_surgeries_result(adapter: Any, source_id: str, schema_prefix: str, query: SurgeriesQuery) -> ClinicalResult:
     dr = query.date_range
     db_dialect = getattr(adapter, "dialect", "sqlite")
     sql, params = surgeries_sql(
@@ -775,6 +810,129 @@ def _build_admissions_result(
     )
 
 
+_TYPE_TO_CATEGORY = {
+    "drug allergy": "drug",
+    "food allergy": "food",
+    "environmental allergy": "environmental",
+    "contact allergy": "contact",
+    "adverse reaction": "anaphylaxis",
+}
+
+
+_ALLERGIES_RELIABILITY = (
+    "Source: federated_allergies_v (dedicated allergies view). Captures "
+    "structured allergens, severity, and category. Uncoded allergies that "
+    "live only in clinical notes are NOT included."
+)
+
+
+def _normalize_category(type_raw: Optional[str]) -> Optional[str]:
+    if not type_raw:
+        return None
+    return _TYPE_TO_CATEGORY.get(type_raw.strip().lower(), "other")
+
+
+def _build_allergies_result(adapter: Any, source_id: str, schema_prefix: str, query: AllergiesQuery) -> ClinicalResult:
+    dr = query.date_range
+    sql, params = allergies_sql(
+        source_id=source_id,
+        snomed_codes=query.snomed_codes,
+        allergen_text=query.allergen_text,
+        category=query.category,
+        include_inactive=query.include_inactive,
+        start_date=dr.start.isoformat() if dr and dr.start else None,
+        end_date=dr.end.isoformat() if dr and dr.end else None,
+        schema_prefix=schema_prefix,
+    )
+    rows = adapter.fetch_all(sql, params)
+
+    # No rows at all = no allergy assertion of any kind for this patient.
+    if not rows:
+        return ClinicalResult(
+            domain="allergies",
+            items=[],
+            data_availability="no_records_found",
+            reliability_note=_ALLERGIES_RELIABILITY,
+        )
+
+    # Separate NKA rows from real allergy rows. NKA is a first-class
+    # negative assertion, not an item.
+    real_rows = [r for r in rows if (r.get("allergy") or "").upper() != "NO KNOWN ALLERGIES"]
+    has_nka = len(real_rows) < len(rows)
+
+    if not real_rows and has_nka:
+        # Pure NKA — patient asserts no known allergies.
+        return ClinicalResult(
+            domain="allergies",
+            items=[],
+            data_availability="data_present",
+            negative_assertion=True,
+            reliability_note=_ALLERGIES_RELIABILITY,
+        )
+
+    items = [
+        AllergyItem(
+            source_id=r["source_id"],
+            allergy=r.get("allergy"),
+            code=r.get("code"),
+            code_type=r.get("code_type"),
+            category=_normalize_category(r.get("type")),
+            type_raw=r.get("type"),
+            severity=r.get("severity"),
+            status=r.get("status"),
+            onset_date=str(r["onset_date"]) if r.get("onset_date") else None,
+            event_datetime=str(r["event_datetime"]) if r.get("event_datetime") else None,
+            reaction=r.get("reaction"),
+            comments=r.get("comments"),
+        )
+        for r in real_rows
+    ]
+
+    # Drug-allergy soft conflict signal. Only meaningful when there's at
+    # least one drug allergy AND an active medication list. The check is a
+    # second SQL fetch — adds <1 round-trip; well under tool-call budget.
+    notes_to_agent = _maybe_drug_allergy_signal(adapter, source_id, schema_prefix, real_rows)
+
+    return ClinicalResult(
+        domain="allergies",
+        items=items,
+        data_availability="data_present",
+        notes_to_agent=notes_to_agent,
+        reliability_note=_ALLERGIES_RELIABILITY,
+    )
+
+
+def _maybe_drug_allergy_signal(
+    adapter: Any, source_id: str, schema_prefix: str, allergy_rows: list[dict]
+) -> Optional[str]:
+    """Returns an advisory string when a recorded allergen overlaps an active
+    med. Returns None when there's no overlap (or the meds fetch fails)."""
+    if not allergy_rows:
+        return None
+    has_drug_concern = any(
+        (r.get("type") or "").lower() == "drug allergy" or _normalize_category(r.get("type")) == "drug"
+        for r in allergy_rows
+    )
+    if not has_drug_concern:
+        return None
+    try:
+        med_sql, med_params = medications_sql(source_id=source_id, schema_prefix=schema_prefix)
+        meds = adapter.fetch_all(med_sql, med_params)
+    except Exception:
+        return None
+    conflicts = find_drug_allergy_conflicts(allergies=allergy_rows, medications=meds)
+    if not conflicts:
+        return None
+    pairs = "; ".join(
+        f"{c.allergen_label} allergy ↔ active {c.conflicting_med_name} (RxNorm {c.conflicting_rxnorm})"
+        for c in conflicts
+    )
+    return (
+        f"Drug-allergy advisory: {pairs}. This is a soft signal for "
+        "clinician review only — not a clinical decision-support verdict."
+    )
+
+
 # --- Tool implementation --------------------------------------------
 
 
@@ -810,6 +968,8 @@ def get_patient_clinical_data(
         result = _build_imaging_result(adapter, source_id, schema_prefix, query)
     elif isinstance(query, AdmissionsQuery):
         result = _build_admissions_result(adapter, source_id, schema_prefix, query)
+    elif isinstance(query, AllergiesQuery):
+        result = _build_allergies_result(adapter, source_id, schema_prefix, query)
     else:
         raise ModelRetry(f"Unknown clinical query variant: {type(query).__name__}")
 

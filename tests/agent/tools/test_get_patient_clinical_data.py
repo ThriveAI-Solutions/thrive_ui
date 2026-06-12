@@ -295,6 +295,115 @@ def test_surgeries_date_range_filters(synthetic_db):
     assert "27447" in codes
 
 
+def test_allergies_returns_active_for_john_1962(synthetic_db):
+    from agent.tools.get_patient_clinical_data import AllergiesQuery
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, AllergiesQuery())
+    assert result.domain == "allergies"
+    assert result.data_availability == "data_present"
+    assert {i.allergy for i in result.items} == {"Penicillin", "Peanuts"}
+    # severity/type/code carried through
+    pen = next(i for i in result.items if i.allergy == "Penicillin")
+    assert pen.category == "drug"
+    assert pen.severity == "Severe"
+    assert pen.code == "91936005"
+
+
+def test_allergies_include_inactive_returns_resolved(synthetic_db):
+    from agent.tools.get_patient_clinical_data import AllergiesQuery
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, AllergiesQuery(include_inactive=True))
+    assert {i.allergy for i in result.items} == {"Penicillin", "Peanuts", "Latex"}
+
+
+def test_allergies_nka_is_first_class_negative_assertion(synthetic_db):
+    """Per epic #201: NO KNOWN ALLERGIES rows are surfaced as a
+    negative_assertion flag on the result envelope, NOT as a regular item."""
+    from agent.tools.get_patient_clinical_data import AllergiesQuery
+
+    nka_patient = SelectedPatient(
+        source_id="src-john-1971",
+        display_name="John Smith",
+        dob=date(1971, 8, 12),
+        selected_at=datetime.now(),
+        selection_origin="user_click",
+    )
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, nka_patient)
+    result = get_patient_clinical_data(ctx, AllergiesQuery())
+    assert result.data_availability == "data_present"
+    assert result.negative_assertion is True
+    assert result.items == []
+
+
+def test_allergies_no_records_found_when_patient_has_no_allergy_rows(synthetic_db):
+    from agent.tools.get_patient_clinical_data import AllergiesQuery
+
+    no_allergy_patient = SelectedPatient(
+        source_id="src-jane-1985",
+        display_name="Jane Smith",
+        dob=date(1985, 2, 20),
+        selected_at=datetime.now(),
+        selection_origin="user_click",
+    )
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, no_allergy_patient)
+    result = get_patient_clinical_data(ctx, AllergiesQuery())
+    assert result.data_availability == "no_records_found"
+    assert result.negative_assertion is False
+    assert result.items == []
+
+
+def test_allergies_drug_med_conflict_emits_notes_to_agent(synthetic_db):
+    """Per epic #201: when the patient has active medications and known
+    drug allergens, the result emits a soft notes_to_agent flag describing
+    potential overlap. Advisory only — not a CDS verdict."""
+    from agent.tools.get_patient_clinical_data import AllergiesQuery
+
+    sulfa_patient = SelectedPatient(
+        source_id="src-mary-1956",
+        display_name="Mary Jones",
+        dob=date(1956, 3, 10),
+        selected_at=datetime.now(),
+        selection_origin="user_click",
+    )
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, sulfa_patient)
+    result = get_patient_clinical_data(ctx, AllergiesQuery())
+    assert result.notes_to_agent is not None
+    # Soft signal must name the allergen AND the conflicting med.
+    note = result.notes_to_agent.lower()
+    assert "sulfa" in note
+    assert "sulfamethoxazole" in note
+    # Must explicitly disclaim CDS to keep the agent from over-promising.
+    assert "advisory" in note or "not a clinical" in note or "not clinical" in note
+
+
+def test_allergies_no_conflict_signal_when_meds_dont_overlap(synthetic_db):
+    """John 1962 has Penicillin/Peanuts/Latex allergies but only Metformin +
+    Azithromycin on the med list — neither is a beta-lactam, so no signal."""
+    from agent.tools.get_patient_clinical_data import AllergiesQuery
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, AllergiesQuery())
+    assert result.notes_to_agent is None
+
+
+def test_allergies_reliability_note_names_source(synthetic_db):
+    from agent.tools.get_patient_clinical_data import AllergiesQuery
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, AllergiesQuery())
+    assert result.reliability_note is not None
+    assert "federated_allergies_v" in result.reliability_note
+
+
 def test_clinical_tool_sets_last_dataframe_on_deps(synthetic_db):
     """After get_patient_clinical_data returns, ctx.deps.last_dataframe
     should hold a pandas DataFrame of the result items."""

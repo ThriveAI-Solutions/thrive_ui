@@ -18,6 +18,8 @@ import json
 from typing import Any, Literal
 
 import httpx
+from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -27,6 +29,25 @@ from pydantic_ai.providers.bedrock import BedrockProvider
 
 
 ModelProvider = Literal["ollama", "anthropic", "bedrock"]
+
+
+# Default 2 in both the openai and anthropic SDKs. Bumped to 3 to absorb one
+# more transient blip from a busy Ollama / Anthropic endpoint without
+# letting wall-clock balloon — see issue #198 for the production timeout
+# pattern (14 user runs killed by a single API timeout each in one week).
+# Overridable via `agent.model_max_retries` in secrets.toml for ops tuning.
+_DEFAULT_MODEL_MAX_RETRIES = 3
+
+
+def _model_max_retries(secrets: dict) -> int:
+    """Read `agent.model_max_retries` from secrets, defaulting to 3."""
+    agent_cfg = secrets.get("agent", {}) or {}
+    raw = agent_cfg.get("model_max_retries", _DEFAULT_MODEL_MAX_RETRIES)
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_MODEL_MAX_RETRIES
+    return max(0, n)
 
 
 def _read_secrets() -> dict:
@@ -142,21 +163,32 @@ def build_model() -> Any:
             think_enabled = bool(agent_cfg.get("ollama_think", True))
         reasoning_effort = "high" if think_enabled else "none"
         settings = OpenAIChatModelSettings(extra_body={"reasoning_effort": reasoning_effort})
+        # Build the AsyncOpenAI client directly so we can pass max_retries —
+        # OpenAIProvider's (base_url, http_client) path leaves the SDK on its
+        # default of 2. Ollama doesn't authenticate /v1, but the SDK requires
+        # *some* api_key to construct the client.
+        openai_client = AsyncOpenAI(
+            base_url=f"{host.rstrip('/')}/v1",
+            api_key="api-key-not-set",
+            http_client=_ollama_http_client(),
+            max_retries=_model_max_retries(secrets),
+        )
         return OpenAIChatModel(
             model_name,
-            provider=OpenAIProvider(
-                base_url=f"{host.rstrip('/')}/v1",
-                http_client=_ollama_http_client(),
-            ),
+            provider=OpenAIProvider(openai_client=openai_client),
             settings=settings,
         )
 
     if provider == "anthropic":
         api_key = ai_keys.get("anthropic_api_key") or ai_keys.get("anthropic_api")
         model_name = ai_keys.get("anthropic_model", "claude-sonnet-4-6")
+        anthropic_client = AsyncAnthropic(
+            api_key=api_key,
+            max_retries=_model_max_retries(secrets),
+        )
         return AnthropicModel(
             model_name,
-            provider=AnthropicProvider(api_key=api_key),
+            provider=AnthropicProvider(anthropic_client=anthropic_client),
         )
 
     if provider == "bedrock":

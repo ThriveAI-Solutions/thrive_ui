@@ -574,3 +574,103 @@ def test_new_question_after_error_clears_pending_state(monkeypatch):
     assert fake_st.session_state.get("pending_sql_error") is False
     assert fake_st.session_state.get("last_failed_sql") in (None, "")
     assert fake_st.session_state.get("last_run_sql_error") in (None, "")
+
+
+
+# --- Issue #198: model-timeout error UX --------------------------------------
+
+
+def test_looks_like_model_timeout_by_class_name():
+    """Direct class-name match for each backend SDK's timeout/transport
+    exception. Class-name comparison (not isinstance) lets the helper stay
+    decoupled from pydantic_ai/openai/anthropic — the legacy Vanna flow
+    pulls chat_bot_helper without those installed."""
+    import utils.chat_bot_helper as cbh
+
+    cases = [
+        ("ModelAPIError", "Request timed out."),
+        ("APITimeoutError", "Request timed out."),
+        ("APIConnectionError", "Connection error."),
+        ("AnthropicAPITimeoutError", "Request timed out."),
+        ("ReadTimeout", "timed out"),
+        ("ConnectTimeout", "timed out"),
+        ("TimeoutException", "timed out"),
+    ]
+    for klass_name, msg in cases:
+        # Dynamic class with the matching name; inherits Exception so the
+        # safety-net path (which checks `isinstance(e, Exception)`) is happy.
+        exc = type(klass_name, (Exception,), {})(msg)
+        assert cbh.looks_like_model_timeout(exc), f"expected match for {klass_name}"
+
+
+def test_looks_like_model_timeout_walks_exception_chain():
+    """ModelAPIError wraps APITimeoutError via `raise ... from err`; we need
+    to recognize it even when the outer exception's class is generic."""
+    import utils.chat_bot_helper as cbh
+
+    inner = type("APITimeoutError", (Exception,), {})("Request timed out.")
+    try:
+        try:
+            raise inner
+        except Exception as e:
+            raise RuntimeError("wrapped") from e
+    except RuntimeError as e:
+        outer = e
+
+    assert cbh.looks_like_model_timeout(outer)
+
+
+def test_looks_like_model_timeout_string_fallback():
+    """A re-raise pattern that lost the original class still gets recognized
+    by message substring — last-resort defense."""
+    import utils.chat_bot_helper as cbh
+
+    assert cbh.looks_like_model_timeout(RuntimeError("Request timed out."))
+
+
+def test_looks_like_model_timeout_negative():
+    """Unrelated exceptions must NOT be misclassified — otherwise every
+    bug gets the 'model is slow' message and the user can't tell when
+    something is actually broken."""
+    import utils.chat_bot_helper as cbh
+
+    assert not cbh.looks_like_model_timeout(ValueError("bad arg"))
+    assert not cbh.looks_like_model_timeout(KeyError("missing"))
+    assert not cbh.looks_like_model_timeout(RuntimeError("kaboom from generate_sql"))
+
+
+class _RaisesModelAPIError:
+    """Mock VannaService that raises a pydantic-ai-shaped timeout."""
+
+    def is_sql_valid(self, sql):
+        return True
+
+    def generate_sql(self, question):
+        raise type("ModelAPIError", (Exception,), {})("Request timed out.")
+
+
+def test_safety_net_renders_model_slow_message_for_timeout(monkeypatch):
+    """The 14-of-15 ModelAPIErrors in the last week's logs were the user
+    re-sending after a single timeout dropped the first attempt — the
+    generic 'Something went wrong' message gave no signal to wait. The
+    new copy must explicitly call out the model server."""
+    import utils.chat_bot_helper as cbh
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+    monkeypatch.setattr(cbh, "get_vn", lambda: _RaisesModelAPIError())
+
+    cbh.set_question("Q timing out", render=False)
+    cbh.normal_message_flow("Q timing out")  # must not raise
+
+    error_msgs = [m for m in fake_st.session_state["messages"] if getattr(m, "type", None) == "error"]
+    assert error_msgs, "expected a friendly ERROR message"
+    body = error_msgs[-1].content
+    assert "model" in body.lower() and "try again" in body.lower(), (
+        f"timeout error body should call out the model + ask user to retry; got: {body!r}"
+    )
+    # Must NOT leak the raw exception text into the user-facing message —
+    # the whole point is to replace "Request timed out." with actionable copy.
+    assert "Request timed out" not in body

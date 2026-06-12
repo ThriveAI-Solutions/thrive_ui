@@ -202,6 +202,60 @@ def get_tool_breakdown(days: int = 30) -> list[dict]:
         return []
 
 
+def get_patient_audit_autocomplete(
+    days: int = 30,
+    limit: int = 500,
+    query: str | None = None,
+) -> list[dict]:
+    """Distinct ``(source_id, display_name)`` pairs touched by an agentic run.
+
+    Aggregates ``AgentPatientAccess`` rows within the last ``days`` and
+    returns one entry per distinct ``(source_id, display_name)`` ordered by
+    most-recently-touched first. The optional ``query`` argument is a
+    case-insensitive substring match against either ``source_id`` or
+    ``display_name`` — backs the By-Patient audit tab's autocomplete picker
+    (Epic #190, Phase 3).
+
+    Returns:
+        ``[{"source_id": str, "display_name": str | None,
+            "last_touched_at": datetime, "access_count": int}, ...]``
+    """
+    since = datetime.now() - timedelta(days=days)
+    try:
+        with SessionLocal() as s:
+            q = (
+                s.query(
+                    AgentPatientAccess.source_id.label("source_id"),
+                    AgentPatientAccess.display_name.label("display_name"),
+                    sqla_func.max(AgentPatientAccess.created_at).label("last_touched_at"),
+                    sqla_func.count(AgentPatientAccess.id).label("access_count"),
+                )
+                .filter(AgentPatientAccess.created_at >= since)
+                .group_by(AgentPatientAccess.source_id, AgentPatientAccess.display_name)
+            )
+            if query:
+                like = f"%{query.lower()}%"
+                # NULL display_name is fine — ``ilike`` against NULL returns
+                # NULL/false so we don't accidentally match every unnamed row.
+                q = q.filter(
+                    sqla_func.lower(AgentPatientAccess.source_id).like(like)
+                    | sqla_func.lower(AgentPatientAccess.display_name).like(like)
+                )
+            rows = q.order_by(sqla_func.max(AgentPatientAccess.created_at).desc()).limit(limit).all()
+            return [
+                {
+                    "source_id": r.source_id,
+                    "display_name": r.display_name,
+                    "last_touched_at": r.last_touched_at,
+                    "access_count": int(r.access_count),
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        logger.warning("get_patient_audit_autocomplete failed: %s", e)
+        return []
+
+
 def get_patient_access(
     source_id: str | None = None, user_id: int | None = None, days: int = 30, limit: int = 200
 ) -> list[dict]:
