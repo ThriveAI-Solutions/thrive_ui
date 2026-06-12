@@ -217,7 +217,7 @@ class AnalyticsDbAdapter:
         dialect = analytics.get("dialect", "postgres")
         url = analytics.get("url")
         if not url:
-            raise RuntimeError("secrets.analytics_db.url is required (postgres:// or redshift://)")
+            raise RuntimeError("secrets.analytics_db.url is required (postgresql:// or redshift://)")
         # Redshift (and the AWS ELB in front of it) close idle TCP sockets
         # well before SQLAlchemy's pool decides a connection is stale. Without
         # pool_pre_ping we hand the dead socket to the next caller, and the

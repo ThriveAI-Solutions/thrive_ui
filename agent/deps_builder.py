@@ -42,9 +42,12 @@ def _rag():
     """Lazy import to avoid Streamlit picking up Chroma at module load."""
     from agent.rag.chroma_adapter import ChromaRagAdapter
     import chromadb
+    from chromadb.config import Settings
 
     chroma_path = st.secrets.get("rag_model", {}).get("chroma_path", "./chromadb")
-    return ChromaRagAdapter(chromadb.PersistentClient(path=chroma_path))
+    return ChromaRagAdapter(
+        chromadb.PersistentClient(path=chroma_path, settings=Settings(anonymized_telemetry=False))
+    )
 
 
 def _selected_patient_from_session() -> Optional[SelectedPatient]:
