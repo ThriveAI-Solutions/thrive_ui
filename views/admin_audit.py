@@ -26,6 +26,29 @@ def render(days_int: int) -> None:
     # so a new rerun starts with a clean slot.
     st.session_state["_audit_dialog_claimed_this_rerun"] = False
 
+    # Audit-vs-external guard: admin.py renders Users -> Training -> Analytics ->
+    # Audit -> Feedback in order. If an earlier tab already opened a dialog
+    # (Export Users / Create User / Bulk Import / Set Password / confirm_destructive),
+    # the dialog slot is gone. Calling a second @st.dialog raises and produces the
+    # "external dialog flashes, audit dialog reappears" symptom. The Admin Actions
+    # table is the worst case: Export Users writes a USER_EXPORT row via
+    # log_admin_action, the next get_admin_actions_page reorders items, and the
+    # data_editor's index-keyed sticky tick now points to the new top row, so the
+    # per-tab open_id gate sees a mismatch and tries to fire. Mark the slot claimed
+    # here so all three inner-tab gates skip.
+    try:
+        from streamlit.runtime.scriptrunner_utils.script_run_context import (
+            get_script_run_ctx,
+        )
+
+        ctx = get_script_run_ctx()
+        if ctx is not None and getattr(ctx, "has_dialog_opened", False):
+            st.session_state["_audit_dialog_claimed_this_rerun"] = True
+    except Exception:
+        # If Streamlit moves these internals we just lose the extra guard and
+        # revert to the audit-vs-audit-only behavior that existed before.
+        pass
+
     inner = st.tabs(["Questions", "Admin Actions", "User Activity"])
     with inner[0]:
         _render_audit_trail_tab(days_int)
