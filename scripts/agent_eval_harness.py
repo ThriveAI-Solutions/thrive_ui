@@ -169,6 +169,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print the resolved matrix; no LLM/DB")
     parser.add_argument("--suggest-patients", action="store_true", help="Print roster candidates from the warehouse")
     parser.add_argument("--skip-judge", action="store_true")
+    parser.add_argument("--limit-patients", type=int, default=None, help="Run only the first N roster patients")
     args = parser.parse_args()
 
     questions = load_questions(args.questions)
@@ -188,6 +189,8 @@ def main() -> int:
         print(f"error: {args.roster} not found — copy evals/roster.example.yaml and fill in source_ids")
         return 2
     defaults, patients = load_roster(args.roster)
+    if args.limit_patients is not None:
+        patients = patients[: args.limit_patients]
     matrix = build_matrix(questions, defaults, patients, only=args.only)
 
     if args.dry_run:

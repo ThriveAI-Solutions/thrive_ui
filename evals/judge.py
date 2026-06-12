@@ -1,9 +1,10 @@
 """Local-LLM judge — triage only, never the verdict.
 
-Uses the same provider/model as the agent (agent.models.build_model), so
-on prod this runs against the local Ollama server and no PHI leaves the
-network. A judge failure degrades to None (card shows "judge unavailable");
-it never fails the harness run.
+Uses the same provider/model as the agent (agent.models.build_model) — the
+judge sees no broader data exposure than the agent already has. On prod
+(Ollama provider) that means no PHI leaves the network. A judge failure
+degrades to None (card shows "judge unavailable"); it never fails the harness
+run.
 """
 
 from __future__ import annotations
