@@ -353,6 +353,45 @@ def _render_overview_tab(days_int: int):
 
     st.divider()
 
+    # Per-user and per-organization question totals (restored from pre-#147 Overview,
+    # plus a new Organization row). Chart on the left, grid on the right; both rows
+    # honor the page-level Time Range control.
+    user_top_df, user_stats_df, org_top_df, org_stats_df = _read_user_org_question_stats(days_int)
+
+    st.subheader("Top Users by Questions")
+    u_chart_col, u_grid_col = st.columns(2)
+    with u_chart_col:
+        if not user_top_df.empty:
+            u_bar = px.bar(user_top_df, x="Questions", y="User", orientation="h")
+            u_bar.update_layout(margin=dict(l=0, r=0, t=10, b=0), yaxis=dict(autorange="reversed"))
+            st.plotly_chart(u_bar, width="stretch")
+        else:
+            st.info("No user activity in the selected time range.")
+    with u_grid_col:
+        if not user_stats_df.empty:
+            st.dataframe(user_stats_df, width="stretch", hide_index=True)
+        else:
+            st.info("No users on file.")
+
+    st.divider()
+
+    st.subheader("Top Organizations by Questions")
+    o_chart_col, o_grid_col = st.columns(2)
+    with o_chart_col:
+        if not org_top_df.empty:
+            o_bar = px.bar(org_top_df, x="Questions", y="Organization", orientation="h")
+            o_bar.update_layout(margin=dict(l=0, r=0, t=10, b=0), yaxis=dict(autorange="reversed"))
+            st.plotly_chart(o_bar, width="stretch")
+        else:
+            st.info("No organization activity in the selected time range.")
+    with o_grid_col:
+        if not org_stats_df.empty:
+            st.dataframe(org_stats_df, width="stretch", hide_index=True)
+        else:
+            st.info("No organizations on file.")
+
+    st.divider()
+
     # Latest Questions — compact preview that links to the canonical Audit Trail tab (#136).
     st.subheader("Latest Questions")
     from orm.logging_functions import get_question_audit_page
@@ -401,6 +440,84 @@ def _render_overview_tab(days_int: int):
         """,
         height=60,
     )
+
+
+@st.cache_data(ttl=ANALYTICS_CACHE_TTL_SECONDS, show_spinner=False)
+def _read_user_org_question_stats(days_int: int):
+    """Per-user and per-organization question/activity totals for the Overview tab.
+
+    Both groupings respect the page-level time range. Returns four DataFrames:
+    (user_top, user_stats, org_top, org_stats) — top tables are pre-sorted by
+    Questions desc and capped at 10 rows for the bar charts; stats tables hold
+    the full population with the same five activity counts as the legacy
+    "All Users Stats" / "All Orgs Stats" tables.
+    """
+    chart_types = [
+        MessageType.PLOTLY_CHART.value,
+        MessageType.ST_LINE_CHART.value,
+        MessageType.ST_BAR_CHART.value,
+        MessageType.ST_AREA_CHART.value,
+        MessageType.ST_SCATTER_CHART.value,
+    ]
+    since = dt.datetime.now() - dt.timedelta(days=days_int)
+
+    with SessionLocal() as session:
+        user_rows = (
+            session.query(
+                User.username.label("entity"),
+                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
+                func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
+                func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
+            )
+            .join(Message, Message.user_id == User.id, isouter=True)
+            .filter((Message.created_at >= since) | (Message.id.is_(None)))
+            .group_by(User.username)
+            .all()
+        )
+
+        org_rows = (
+            session.query(
+                User.organization.label("entity"),
+                func.sum(case((Message.role == RoleType.USER.value, 1), else_=0)).label("questions"),
+                func.sum(case((Message.type == MessageType.DATAFRAME.value, 1), else_=0)).label("dataframes"),
+                func.sum(case((Message.type == MessageType.SUMMARY.value, 1), else_=0)).label("summaries"),
+                func.sum(case((Message.type.in_(chart_types), 1), else_=0)).label("charts"),
+                func.sum(case((Message.type == MessageType.ERROR.value, 1), else_=0)).label("errors"),
+            )
+            .join(Message, Message.user_id == User.id, isouter=True)
+            .filter((Message.created_at >= since) | (Message.id.is_(None)))
+            .group_by(User.organization)
+            .all()
+        )
+
+    def _to_stats_df(rows, label):
+        return pd.DataFrame(
+            [
+                {
+                    label: r.entity,
+                    "Questions": int(r.questions or 0),
+                    "DataFrames": int(r.dataframes or 0),
+                    "Summaries": int(r.summaries or 0),
+                    "Charts": int(r.charts or 0),
+                    "Errors": int(r.errors or 0),
+                }
+                for r in rows
+            ]
+        )
+
+    user_stats = _to_stats_df(user_rows, "User").sort_values(
+        ["Questions", "Errors"], ascending=[False, True], ignore_index=True
+    )
+    org_stats = _to_stats_df(org_rows, "Organization").sort_values(
+        ["Questions", "Errors"], ascending=[False, True], ignore_index=True
+    )
+
+    user_top = user_stats[user_stats["Questions"] > 0][["User", "Questions"]].head(10).reset_index(drop=True)
+    org_top = org_stats[org_stats["Questions"] > 0][["Organization", "Questions"]].head(10).reset_index(drop=True)
+
+    return user_top, user_stats, org_top, org_stats
 
 
 @st.cache_data(ttl=ANALYTICS_CACHE_TTL_SECONDS, show_spinner=False)
