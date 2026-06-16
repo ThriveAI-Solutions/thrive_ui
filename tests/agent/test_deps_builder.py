@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from agent.deps import AgentDeps
 from orm.models import RoleTypeEnum
+from utils.enums import RoleType
 
 
 @patch("agent.deps_builder._analytics_db")
@@ -100,3 +101,81 @@ def test_build_deps_run_logger_none_when_disabled(monkeypatch):
 
     deps = build_agent_deps(session)
     assert deps.run_logger is None
+
+
+@patch("agent.deps_builder._analytics_db")
+@patch("agent.deps_builder._rag")
+def test_user_message_id_from_latest_user_message(rag_mock, db_mock):
+    """deps.user_message_id picks up the id of the most recent USER message
+    in session_state. Without this, AgentRun.user_message_id stays NULL and
+    the per-query audit view falls through to its legacy branch for every
+    row (see views/admin_audit_queries.py).
+    """
+    db_mock.return_value = MagicMock()
+    rag_mock.return_value = MagicMock()
+
+    older_user = MagicMock(id=10, role=RoleType.USER.value)
+    assistant = MagicMock(id=11, role=RoleType.ASSISTANT.value)
+    latest_user = MagicMock(id=12, role=RoleType.USER.value)
+
+    fake_session_state = {
+        "user_id": 1,
+        "user_role": RoleTypeEnum.DOCTOR.value,
+        "messages": [older_user, assistant, latest_user],
+    }
+    sqlite = MagicMock()
+
+    with patch("agent.deps_builder.st") as st:
+        st.session_state = fake_session_state
+        from agent.deps_builder import build_agent_deps
+
+        deps = build_agent_deps(sqlite)
+
+    assert deps.user_message_id == 12
+
+
+@patch("agent.deps_builder._analytics_db")
+@patch("agent.deps_builder._rag")
+def test_user_message_id_none_when_no_user_message(rag_mock, db_mock):
+    """No USER message in session_state → deps.user_message_id is None."""
+    db_mock.return_value = MagicMock()
+    rag_mock.return_value = MagicMock()
+
+    assistant_only = MagicMock(id=11, role=RoleType.ASSISTANT.value)
+
+    fake_session_state = {
+        "user_id": 1,
+        "user_role": RoleTypeEnum.DOCTOR.value,
+        "messages": [assistant_only],
+    }
+    sqlite = MagicMock()
+
+    with patch("agent.deps_builder.st") as st:
+        st.session_state = fake_session_state
+        from agent.deps_builder import build_agent_deps
+
+        deps = build_agent_deps(sqlite)
+
+    assert deps.user_message_id is None
+
+
+@patch("agent.deps_builder._analytics_db")
+@patch("agent.deps_builder._rag")
+def test_user_message_id_none_when_messages_missing(rag_mock, db_mock):
+    """No 'messages' key in session_state at all → deps.user_message_id is None."""
+    db_mock.return_value = MagicMock()
+    rag_mock.return_value = MagicMock()
+
+    fake_session_state = {
+        "user_id": 1,
+        "user_role": RoleTypeEnum.DOCTOR.value,
+    }
+    sqlite = MagicMock()
+
+    with patch("agent.deps_builder.st") as st:
+        st.session_state = fake_session_state
+        from agent.deps_builder import build_agent_deps
+
+        deps = build_agent_deps(sqlite)
+
+    assert deps.user_message_id is None

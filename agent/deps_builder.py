@@ -30,6 +30,7 @@ from agent.run_logger import AgentRunLogger
 from agent.logging_config import AgentLoggingConfig
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from orm.models import RoleTypeEnum
+from utils.enums import RoleType
 
 
 @st.cache_resource
@@ -99,6 +100,20 @@ def _user_id_from_session() -> int:
     )
 
 
+def _latest_user_message_id() -> Optional[int]:
+    """Return the id of the most recent USER-role Message in session state.
+
+    Links the AgentRun to the user question that triggered it so the per-query
+    audit view's join (``AgentRun.user_message_id == Message.id``) populates
+    the agentic half of its UNION ALL instead of falling through to legacy.
+    """
+    messages = st.session_state.get("messages") or []
+    for msg in reversed(messages):
+        if getattr(msg, "role", None) == RoleType.USER.value:
+            return getattr(msg, "id", None)
+    return None
+
+
 def _user_role_from_session() -> RoleTypeEnum:
     """Read user_role (int) from session and convert to enum.
 
@@ -147,7 +162,7 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
         sqlite_session=sqlite_session,
         run_logger=run_logger,
         group_id=group_id,
-        user_message_id=None,
+        user_message_id=_latest_user_message_id(),
         parent_run_id=st.session_state.get("agent_parent_run_id"),
         resume_reason=st.session_state.get("agent_resume_reason"),
     )
