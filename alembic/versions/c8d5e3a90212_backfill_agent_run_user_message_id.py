@@ -14,9 +14,10 @@ This data-only migration retroactively wires each ``AgentRun`` with a NULL
 ``(user_id, question)`` whose ``created_at`` is at-or-before the run's own
 ``created_at``. The USER message is always written by ``set_question`` in
 ``utils/chat_bot_helper.py`` immediately before the rerun lands in
-``agent/runtime.run_agentic_flow`` — so the gap is normally sub-second; we
-allow up to one hour as a safety margin without bounding the lookback
-unrealistically.
+``agent/runtime.run_agentic_flow``, so in practice the gap is sub-second.
+The lookback is intentionally unbounded — every historical row is fair
+game — so the audit view's per-query labels populate for the full table,
+not just rows recent enough to land in some ad-hoc window.
 
 Idempotent: re-running upgrade only touches rows whose ``user_message_id``
 is still NULL, so a previously-backfilled row is never reassigned. Already
@@ -44,8 +45,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 # Match an AgentRun to the most recent USER message with the same content,
-# owned by the same user, written at-or-before the run's created_at and
-# within a 1-hour lookback. Correlated subquery for SQLite compatibility.
+# owned by the same user, written at-or-before the run's created_at —
+# unbounded lookback so the whole table is backfilled. Correlated subquery
+# for SQLite compatibility.
 _BACKFILL_SQL = """
 UPDATE thrive_agent_run
 SET user_message_id = (
@@ -55,7 +57,6 @@ SET user_message_id = (
       AND m.role = 'user'
       AND m.content = thrive_agent_run.question
       AND m.created_at <= thrive_agent_run.created_at
-      AND m.created_at >= datetime(thrive_agent_run.created_at, '-1 hour')
     ORDER BY m.created_at DESC, m.id DESC
     LIMIT 1
 )

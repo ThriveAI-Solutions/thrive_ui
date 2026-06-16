@@ -227,6 +227,31 @@ def test_backfill_ignores_messages_from_other_users(tmp_path):
         assert _get_run_umid(conn, "r-u1") is None
 
 
+def test_backfill_matches_across_unbounded_lookback(tmp_path):
+    """The backfill scans the whole table — a USER Message from days before
+    the run still satisfies the match as long as it's the latest qualifying
+    one at-or-before the run's created_at."""
+    url, cfg = _cfg(tmp_path)
+    command.upgrade(cfg, _PRIOR_HEAD)
+    engine = create_engine(url)
+
+    with engine.begin() as conn:
+        _seed_user(conn)
+        _insert_message(
+            conn, mid=500, user_id=1, content="Long-gap question",
+            created_at="2026-06-08 09:00:00",
+        )
+        _insert_run(
+            conn, run_id="r-gap", user_id=1, question="Long-gap question",
+            created_at="2026-06-10 10:00:00",
+        )
+
+    command.upgrade(cfg, "head")
+
+    with engine.connect() as conn:
+        assert _get_run_umid(conn, "r-gap") == 500
+
+
 def test_backfill_ignores_assistant_role_messages(tmp_path):
     """Assistant-role rows with the same content (e.g. echoed in a SQL
     Message's question column) must not satisfy the join — only USER rows."""
