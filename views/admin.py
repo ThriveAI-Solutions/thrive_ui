@@ -40,9 +40,12 @@ with control_cols[0]:
     )
 with control_cols[1]:
     if st.button("Refresh Data", help="Clear cached data and reload metrics"):
-        from views.admin_analytics import _read_metrics
+        from views.admin_analytics import _read_metrics, _read_user_org_question_stats
+
         _read_metrics.clear()
+        _read_user_org_question_stats.clear()
         from views.errors import _load as _errors_load, _load_aggregates as _errors_load_aggregates
+
         _errors_load.clear()
         _errors_load_aggregates.clear()
         st.rerun()
