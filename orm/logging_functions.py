@@ -740,6 +740,14 @@ PER_QUERY_ROW_KEYS: tuple[str, ...] = (
     "success",
     "error",
     "patients_touched",
+    # Surfaced for the "what was the answer" audit columns (Epic #218 follow-up):
+    # ``final_answer_text`` is the question-level natural-language answer
+    # (``AgentRun.final_answer_text`` for agentic, latest assistant SUMMARY
+    # Message for legacy). ``result_text`` is the per-unit tool/SQL result text
+    # (``ToolCall.result_summary`` for agentic; same as final_answer_text for
+    # legacy since legacy has one row per question).
+    "final_answer_text",
+    "result_text",
 )
 
 
@@ -871,6 +879,7 @@ def _per_query_base_subquery(session, filters: dict):
                 literal(None, Integer()).label("elapsed_ms"),
                 literal(None, Boolean()).label("tool_success"),
                 literal(None, String()).label("tool_error"),
+                literal(None, String()).label("final_answer_text"),
             )
             .join(User, User.id == Message.user_id)
             .outerjoin(AgentRun, AgentRun.user_message_id == Message.id)
@@ -907,6 +916,7 @@ def _per_query_base_subquery(session, filters: dict):
                 ToolCall.elapsed_ms.label("elapsed_ms"),
                 ToolCall.success.label("tool_success"),
                 ToolCall.error.label("tool_error"),
+                AgentRun.final_answer_text.label("final_answer_text"),
             )
             .join(User, User.id == Message.user_id)
             .join(AgentRun, AgentRun.user_message_id == Message.id)
@@ -957,6 +967,7 @@ def _per_query_base_subquery(session, filters: dict):
                 literal(None, Integer()).label("elapsed_ms"),
                 literal(None, Boolean()).label("tool_success"),
                 literal(None, String()).label("tool_error"),
+                literal(None, String()).label("final_answer_text"),
             )
             .join(User, User.id == Message.user_id)
             .filter(literal(False))
@@ -979,11 +990,13 @@ def _decorate_per_query_rows(session, rows: list) -> list[dict]:
     if not rows:
         return []
 
-    # ---- Batched legacy enrichment: assistant SQL + assistant ERROR per
-    # (user_id, question) ----
+    # ---- Batched legacy enrichment: assistant SQL + assistant ERROR + assistant
+    # SUMMARY per (user_id, question). SUMMARY powers the "Final Answer" column
+    # for legacy questions (no AgentRun.final_answer_text fallback exists). ----
     legacy_keys: set[tuple[int, str]] = {(r.user_id, r.question) for r in rows if r.pipeline == PIPELINE_LEGACY}
     legacy_sql_by_key: dict[tuple[int, str], dict[str, Any]] = {}
     legacy_err_by_key: dict[tuple[int, str], str] = {}
+    legacy_summary_by_key: dict[tuple[int, str], str] = {}
     if legacy_keys:
         user_ids = {k[0] for k in legacy_keys}
         contents = {k[1] for k in legacy_keys}
@@ -1000,7 +1013,7 @@ def _decorate_per_query_rows(session, rows: list) -> list[dict]:
                 Message.role == RoleType.ASSISTANT.value,
                 Message.user_id.in_(user_ids),
                 Message.question.in_(contents),
-                Message.type.in_({MessageType.SQL.value, MessageType.ERROR.value}),
+                Message.type.in_({MessageType.SQL.value, MessageType.ERROR.value, MessageType.SUMMARY.value}),
             )
             .order_by(Message.created_at.desc())
             .all()
@@ -1014,6 +1027,8 @@ def _decorate_per_query_rows(session, rows: list) -> list[dict]:
                 }
             elif ar.type == MessageType.ERROR.value and key not in legacy_err_by_key:
                 legacy_err_by_key[key] = ar.content
+            elif ar.type == MessageType.SUMMARY.value and key not in legacy_summary_by_key:
+                legacy_summary_by_key[key] = ar.content
 
     # ---- Batched patient access lookup ----
     # AgentPatientAccess.tool_call_id is the *string* tool_call_id (matches
@@ -1073,10 +1088,14 @@ def _decorate_per_query_rows(session, rows: list) -> list[dict]:
         success: bool | None
         error: str | None
 
+        final_answer_text: str | None
+        result_text: str | None
+
         if is_legacy:
             key = (r.user_id, r.question)
             sql_row = legacy_sql_by_key.get(key)
             err_text = legacy_err_by_key.get(key)
+            summary_text = legacy_summary_by_key.get(key)
             sql_statements = [sql_row["content"]] if sql_row and sql_row["content"] else []
             non_sql_summary = None
             # Legacy elapsed_time is seconds (Decimal). Normalise to int ms so
@@ -1090,6 +1109,10 @@ def _decorate_per_query_rows(session, rows: list) -> list[dict]:
                 elapsed_ms = None
             success = (err_text is None) if (sql_row or err_text) else None
             error = err_text
+            # Legacy is one-row-per-question, so the unit result and the final
+            # answer collapse to the same SUMMARY Message content.
+            final_answer_text = summary_text
+            result_text = summary_text
         elif is_disabled:
             # Logging disabled — agentic rows still surface (so admins know
             # something ran) but payload columns are sentinelled, not crashed.
@@ -1098,12 +1121,20 @@ def _decorate_per_query_rows(session, rows: list) -> list[dict]:
             elapsed_ms = r.elapsed_ms
             success = r.tool_success
             error = r.tool_error
+            # AgentRun.final_answer_text may still be present even when tool
+            # logging is disabled (finalize_run writes it independently).
+            final_answer_text = getattr(r, "final_answer_text", None)
+            result_text = None
         else:
             sql_statements = _decode_sql_executed_json(r.sql_executed_json, run_id=r.run_id)
             non_sql_summary = None if sql_statements else r.non_sql_summary
             elapsed_ms = r.elapsed_ms
             success = r.tool_success
             error = r.tool_error
+            final_answer_text = getattr(r, "final_answer_text", None)
+            # Per-tool result_summary regardless of SQL-bearing-ness so SQL
+            # tools also expose their result text in the new "Result" section.
+            result_text = r.non_sql_summary
 
         # Patient touch list — per-tool-call when we have a uid, else run-level.
         if is_legacy:
@@ -1136,6 +1167,8 @@ def _decorate_per_query_rows(session, rows: list) -> list[dict]:
                 "success": success,
                 "error": error,
                 "patients_touched": patients_touched,
+                "final_answer_text": final_answer_text,
+                "result_text": result_text,
             }
         )
     return items

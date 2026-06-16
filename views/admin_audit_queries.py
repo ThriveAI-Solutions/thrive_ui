@@ -44,6 +44,7 @@ from views.admin_analytics import (
     _VIEW_COLUMN_HELP,
     _VIEW_COLUMN_LABEL,
     _cached_audit_filter_options,
+    _truncate,
 )
 
 logger = get_logger(__name__)
@@ -59,6 +60,10 @@ _DISABLED_SQL_SENTINEL = "(logging disabled)"
 _SCRUBBED_SQL_PREFIX = "(scrubbed) "
 _NO_SQL_TOOL_RESULT = "(no SQL — tool result)"
 _LEGACY_TOOL_LABEL = "(legacy SQL)"
+
+# Truncation length for the Flat-mode "Answer" column. The full text is in the
+# dialog and CSV export; the column is for scannability.
+_ANSWER_PREVIEW_CHARS = 120
 
 _SCRUBBED_BANNER = (
     "Scrubbed mode — literals hashed. Verify against a full-fidelity environment before drawing conclusions."
@@ -151,6 +156,7 @@ def _per_query_row_to_table_dict(item: dict) -> dict[str, Any]:
         "SQL": _format_sql_preview(item),
         "Patient(s)": _format_patients_touched(item),
         "Status": _derive_status(item),
+        "Answer": _truncate(item.get("final_answer_text") or "", _ANSWER_PREVIEW_CHARS),
         "Elapsed (ms)": int(item.get("elapsed_ms") or 0),
     }
 
@@ -178,6 +184,10 @@ def _group_items_by_question(items: list[dict]) -> list[tuple[dict, list[dict]]]
                 "total_elapsed_ms": int(it.get("elapsed_ms") or 0),
                 "query_count": 1,
                 "logging_mode": it.get("logging_mode"),
+                # All units in a group share the same question-level final
+                # answer (AgentRun.final_answer_text for agentic, latest
+                # SUMMARY Message for legacy), so the first unit is canonical.
+                "final_answer_text": it.get("final_answer_text"),
             }
             by_msg[mid] = len(groups)
             groups.append((header, [it]))
@@ -249,6 +259,28 @@ def _render_sql_block(item: dict, *, can_see_query_details: bool) -> None:
     st.write("_(no SQL captured)_")
 
 
+def _render_result_block(item: dict) -> None:
+    """Render the per-unit result text section.
+
+    For agentic rows this is ``ToolCall.result_summary`` (regardless of whether
+    the tool ran SQL). For legacy rows the unit and the question collapse to
+    the same SUMMARY message content, so this section duplicates what the
+    per-question dialog shows at the top — that's the right thing for a single
+    Flat-mode row click where the user opened the dialog expecting "what did
+    this query produce."
+    """
+    st.markdown("**Result**")
+    text = item.get("result_text")
+    if text:
+        st.write(text)
+    else:
+        mode = item.get("logging_mode")
+        if mode == "disabled":
+            st.write(f"_{_DISABLED_SQL_SENTINEL}_")
+        else:
+            st.write("_(no result captured)_")
+
+
 def _render_patients_block(item: dict) -> None:
     """Render the patients-touched chips."""
     touched = item.get("patients_touched") or []
@@ -290,6 +322,8 @@ def _render_query_detail_dialog_body(item: dict) -> None:
     st.write(item.get("question") or "_(empty)_")
 
     _render_sql_block(item, can_see_query_details=can_see_query_details)
+
+    _render_result_block(item)
 
     _render_patients_block(item)
 
@@ -362,6 +396,14 @@ def _render_question_detail_dialog_body(group_header: dict, units: list[dict]) -
 
     st.markdown("**Question**")
     st.write(group_header.get("question") or "_(empty)_")
+
+    st.markdown("**Final Answer**")
+    final_answer = group_header.get("final_answer_text")
+    if final_answer:
+        st.write(final_answer)
+    else:
+        st.write("_(no final answer captured)_")
+
     st.divider()
 
     for i, unit in enumerate(units):
@@ -546,6 +588,11 @@ def _render_flat_mode(items: list[dict], *, selection_enabled: bool, key_prefix:
             "SQL": st.column_config.TextColumn("SQL", disabled=True),
             "Patient(s)": st.column_config.TextColumn("Patient(s)", disabled=True),
             "Status": st.column_config.TextColumn("Status", disabled=True),
+            "Answer": st.column_config.TextColumn(
+                "Answer",
+                disabled=True,
+                help="Final natural-language answer (truncated). Full text in the dialog and CSV export.",
+            ),
             "Elapsed (ms)": st.column_config.NumberColumn("Elapsed (ms)", disabled=True),
         },
     )
@@ -671,6 +718,7 @@ def _render_csv_export(filters: dict, key_prefix: str = "queries") -> None:
                 "Patient(s)": _format_patients_touched(r),
                 "Logging mode": r.get("logging_mode") or "",
                 "Status": _derive_status(r),
+                "Final Answer": r.get("final_answer_text") or "",
                 "Elapsed (ms)": int(r.get("elapsed_ms") or 0),
             }
             for r in export_rows
