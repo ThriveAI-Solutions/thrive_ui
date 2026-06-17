@@ -64,6 +64,7 @@ _LEGACY_TOOL_LABEL = "(legacy SQL)"
 # Truncation length for the Flat-mode "Answer" column. The full text is in the
 # dialog and CSV export; the column is for scannability.
 _ANSWER_PREVIEW_CHARS = 120
+_QUESTION_PREVIEW_CHARS = 120
 
 _SCRUBBED_BANNER = (
     "Scrubbed mode — literals hashed. Verify against a full-fidelity environment before drawing conclusions."
@@ -150,6 +151,7 @@ def _per_query_row_to_table_dict(item: dict) -> dict[str, Any]:
         "Asked At": item["asked_at"],
         "User": item["username"],
         "Organization": item.get("organization") or "(no org)",
+        "Question": _truncate(item.get("question") or "", _QUESTION_PREVIEW_CHARS),
         "Pipeline": item.get("pipeline") or "",
         "Scope": item.get("scope") or SCOPE_LEGACY,
         "Tool": item.get("tool_name") or _LEGACY_TOOL_LABEL,
@@ -582,6 +584,11 @@ def _render_flat_mode(items: list[dict], *, selection_enabled: bool, key_prefix:
             "Asked At": st.column_config.DatetimeColumn("Asked At", format="YYYY-MM-DD HH:mm:ss", disabled=True),
             "User": st.column_config.TextColumn("User", disabled=True),
             "Organization": st.column_config.TextColumn("Organization", disabled=True),
+            "Question": st.column_config.TextColumn(
+                "Question",
+                disabled=True,
+                help="User's natural-language question (truncated). Full text in the dialog and CSV export.",
+            ),
             "Pipeline": st.column_config.TextColumn("Pipeline", disabled=True),
             "Scope": st.column_config.TextColumn("Scope", disabled=True),
             "Tool": st.column_config.TextColumn("Tool", disabled=True),

@@ -365,6 +365,24 @@ def test_row_dict_answer_column_empty_when_no_answer():
     assert row["Answer"] == ""
 
 
+def test_row_dict_includes_truncated_question_column():
+    from views.admin_audit_queries import _QUESTION_PREVIEW_CHARS, _per_query_row_to_table_dict
+
+    long_question = "q" * (_QUESTION_PREVIEW_CHARS + 50)
+    row = _per_query_row_to_table_dict(_make_item(question=long_question))
+    assert "Question" in row
+    question = row["Question"]
+    assert question.endswith("…")
+    assert len(question) <= _QUESTION_PREVIEW_CHARS
+
+
+def test_row_dict_question_column_empty_when_no_question():
+    from views.admin_audit_queries import _per_query_row_to_table_dict
+
+    row = _per_query_row_to_table_dict(_make_item(question=None))
+    assert row["Question"] == ""
+
+
 # ---------------------------------------------------------------------------
 # View layer: dialog bodies
 # ---------------------------------------------------------------------------
