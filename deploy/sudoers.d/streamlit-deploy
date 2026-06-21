@@ -1,0 +1,1 @@
+streamlituser ALL=(root) NOPASSWD: /usr/bin/systemctl restart streamlit, /usr/bin/systemctl start streamlit, /usr/bin/systemctl stop streamlit, /usr/bin/systemctl status streamlit, /usr/bin/systemctl is-active streamlit
