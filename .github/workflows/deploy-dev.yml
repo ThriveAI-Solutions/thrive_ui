@@ -1,0 +1,20 @@
+name: Deploy dev
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: [self-hosted, thrive-dev]
+    steps:
+      - name: Update deploy tree
+        run: |
+          cd /home/streamlituser/thrive_ui
+          git fetch origin dev
+          git checkout -B dev origin/dev
+          git reset --hard origin/dev
+      - name: Deploy
+        run: /home/streamlituser/thrive_ui/scripts/deploy/dev_deploy.sh
