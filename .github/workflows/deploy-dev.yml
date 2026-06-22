@@ -14,7 +14,11 @@ jobs:
         run: |
           cd /home/streamlituser/thrive_ui
           git fetch origin dev
-          git checkout -B dev origin/dev
+          # -f: discard tracked drift (e.g. uv.lock rewritten by `uv sync`) so the
+          # deploy never depends on a clean tree. Untracked/gitignored files
+          # (secrets.toml, .venv, chromadb/, *.milvus.db) are NOT touched; `git clean`
+          # is never run.
+          git checkout -f -B dev origin/dev
           git reset --hard origin/dev
       - name: Deploy
         run: /home/streamlituser/thrive_ui/scripts/deploy/dev_deploy.sh
