@@ -1,0 +1,24 @@
+name: Deploy dev
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: [self-hosted, thrive-dev]
+    steps:
+      - name: Update deploy tree
+        run: |
+          cd /home/streamlituser/thrive_ui
+          git fetch origin dev
+          # -f: discard tracked drift (e.g. uv.lock rewritten by `uv sync`) so the
+          # deploy never depends on a clean tree. Untracked/gitignored files
+          # (secrets.toml, .venv, chromadb/, *.milvus.db) are NOT touched; `git clean`
+          # is never run.
+          git checkout -f -B dev origin/dev
+          git reset --hard origin/dev
+      - name: Deploy
+        run: /home/streamlituser/thrive_ui/scripts/deploy/dev_deploy.sh

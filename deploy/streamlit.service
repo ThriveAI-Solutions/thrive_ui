@@ -1,0 +1,18 @@
+[Unit]
+Description=Thrive AI Streamlit (dev)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=streamlituser
+Group=streamlituser
+WorkingDirectory=/home/streamlituser/thrive_ui
+ExecStart=/home/streamlituser/.local/bin/uv run --no-sync streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+Restart=always
+RestartSec=5
+MemoryMax=1400M
+MemorySwapMax=0
+
+[Install]
+WantedBy=multi-user.target
