@@ -224,6 +224,7 @@ def set_user_preferences_in_session_state():
         st.session_state.show_suggested = user.show_suggested
         st.session_state.show_followup = user.show_followup
         st.session_state.show_elapsed_time = user.show_elapsed_time
+        st.session_state.show_thinking_process = bool(getattr(user, "show_thinking_process", False))
         st.session_state.llm_fallback = user.llm_fallback
         st.session_state.confirm_magic_commands = getattr(user, "confirm_magic_commands", True)
         st.session_state.show_community_engagement = bool(getattr(user, "show_community_engagement", False) or False)
@@ -266,6 +267,7 @@ def save_user_settings():
             setattr(user, "show_suggested", st.session_state.show_suggested)
             setattr(user, "show_followup", st.session_state.show_followup)
             setattr(user, "show_elapsed_time", st.session_state.show_elapsed_time)
+            setattr(user, "show_thinking_process", st.session_state.get("show_thinking_process", False))
             setattr(user, "llm_fallback", st.session_state.llm_fallback)
             setattr(user, "confirm_magic_commands", st.session_state.get("confirm_magic_commands", True))
             setattr(user, "show_community_engagement", st.session_state.get("show_community_engagement", False))
