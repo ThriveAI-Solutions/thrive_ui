@@ -199,6 +199,7 @@ class User(Base):
     show_suggested = Column(Boolean, default=False)
     show_followup = Column(Boolean, default=False)
     show_elapsed_time = Column(Boolean, default=True)
+    show_thinking_process = Column(Boolean, default=False)
     llm_fallback = Column(Boolean, default=False)
     confirm_magic_commands = Column(Boolean, default=True)  # True = show popup, False = auto-execute
     show_community_engagement = Column(Boolean, default=False)
@@ -231,6 +232,7 @@ class User(Base):
             "show_suggested": self.show_suggested,
             "show_followup": self.show_followup,
             "show_elapsed_time": self.show_elapsed_time,
+            "show_thinking_process": self.show_thinking_process,
             "llm_fallback": self.llm_fallback,
             "confirm_magic_commands": self.confirm_magic_commands,
             "show_community_engagement": self.show_community_engagement,

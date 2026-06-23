@@ -252,6 +252,20 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
     if isinstance(event, ThinkingDeltaEvent):
         slot = _open_slot(state, "thinking", event.turn_index)
         slot["buf"] += event.delta
+        # Epic #222 / Feature #226: when the user has the toggle off, render
+        # a single static placeholder for the turn instead of the live
+        # chunk-by-chunk stream. The slot is still opened so the matching
+        # ThinkingCompletedEvent can outer.empty() the bubble, and the
+        # buffer still accumulates so any downstream consumer sees parity
+        # with the on-path. ``static_rendered`` makes the off-path
+        # idempotent across repeated deltas in the same turn.
+        if not st.session_state.get("show_thinking_process", False):
+            if not slot.get("static_rendered"):
+                with slot["outer"].container():
+                    with st.chat_message(RoleType.ASSISTANT.value):
+                        st.caption("🤔 Thinking…")
+                slot["static_rendered"] = True
+            return
         _write_slot(slot, header="🤔 **Thinking...**")
         return
 
