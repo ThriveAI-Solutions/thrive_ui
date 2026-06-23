@@ -316,6 +316,11 @@ def _render_display_form():
             value=st.session_state.get("show_elapsed_time", True),
             help="Display how long each query took to execute.",
         )
+        form_show_thinking_process = st.checkbox(
+            "Show AI thinking process",
+            value=st.session_state.get("show_thinking_process", False),
+            help="When enabled, show the model's full thinking process for each query. When disabled, only a 'Thinking…' placeholder is shown while the model is running.",
+        )
         form_show_question_history = st.checkbox(
             "Show Question History",
             value=st.session_state.get("show_question_history", True),
@@ -362,6 +367,7 @@ def _render_display_form():
             st.session_state.show_table = form_show_table
             st.session_state.show_chart = form_show_chart
             st.session_state.show_elapsed_time = form_show_elapsed_time
+            st.session_state.show_thinking_process = form_show_thinking_process
             st.session_state.show_question_history = form_show_question_history
             st.session_state.voice_input = form_voice_input
             st.session_state.speak_summary = form_speak_summary
