@@ -1493,8 +1493,12 @@ def _run_message_flow(my_question: str):
                         # Brief delay for visual continuity (1.5 seconds)
                         time.sleep(1.5)
 
-                    # Clear the placeholder - we'll add the thinking as a proper message
-                    thinking_placeholder.empty()
+                # Clear the placeholder unconditionally - we'll add the thinking
+                # as a proper message below. When show_thinking is off we
+                # populate the placeholder before the stream, so we must clear
+                # it even when streamed_sql was never written to session_state
+                # (e.g. backend errored after the stream loop). Epic #222.
+                thinking_placeholder.empty()
 
             # Phase 2: Persistent display - add thinking to chat history as collapsible expander
             # If we collected thinking text, add it as a proper message
