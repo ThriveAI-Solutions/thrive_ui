@@ -1198,7 +1198,16 @@ def _render_followup(message: Message, index: int):
 
 
 def _render_thinking(message: Message, index: int):
-    """Render thinking messages in an expandable container."""
+    """Render thinking messages.
+
+    Gated by Epic #222 / Feature #225: when ``show_thinking_process`` is
+    off (the default), render a compact placeholder instead of the full
+    expander. THINKING messages are always persisted regardless of the
+    toggle — only the rendering changes.
+    """
+    if not st.session_state.get("show_thinking_process", False):
+        st.caption("🤔 Thinking…")
+        return
     with st.expander("🤔 AI Thinking Process", expanded=False):
         st.markdown(message.content)
         if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
@@ -1447,6 +1456,12 @@ def _run_message_flow(my_question: str):
 
     # If we have a thinking model, display the thinking stream
     thinking_text = ""  # Initialize outside the try block for use later
+    # Epic #222 / Feature #225: respect the per-user toggle. When off, show a
+    # static "Thinking…" placeholder for the duration of the stream instead of
+    # rendering streamed chunks live; skip the 1.5s "Done thinking" pause since
+    # the user can't see the content anyway. The THINKING message is still
+    # persisted below so historical re-renders honor the current toggle state.
+    show_thinking = st.session_state.get("show_thinking_process", False)
     if has_thinking_model and hasattr(vn_instance, "stream_generate_sql"):
         try:
             thinking_chunks = []
@@ -1454,13 +1469,16 @@ def _run_message_flow(my_question: str):
             # Create a placeholder for real-time thinking display
             with st.chat_message(RoleType.ASSISTANT.value):
                 thinking_placeholder = st.empty()
+                if not show_thinking:
+                    thinking_placeholder.markdown("🤔 **Thinking…**")
 
                 # Stream the SQL generation and show thinking in real-time
                 stream_gen = vn_instance.stream_generate_sql(my_question)
                 for chunk in stream_gen:
                     thinking_chunks.append(chunk)
                     # Update the thinking display in real-time
-                    thinking_placeholder.markdown("🤔 **Thinking...**\n\n" + "".join(thinking_chunks))
+                    if show_thinking:
+                        thinking_placeholder.markdown("🤔 **Thinking...**\n\n" + "".join(thinking_chunks))
 
                 # After streaming completes, get the cached result
                 if hasattr(st.session_state, "streamed_sql"):
@@ -1469,7 +1487,7 @@ def _run_message_flow(my_question: str):
                     thinking_text = st.session_state.get("streamed_thinking", "")
 
                     # Phase 1: Graceful transition - show completion indicator
-                    if thinking_text and thinking_text.strip():
+                    if show_thinking and thinking_text and thinking_text.strip():
                         # Show "Done thinking" state for a brief moment
                         thinking_placeholder.markdown("✅ **Done thinking**\n\n" + "".join(thinking_chunks))
                         # Brief delay for visual continuity (1.5 seconds)
