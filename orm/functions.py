@@ -808,6 +808,7 @@ def update_user_preferences(user_id: int, **preferences) -> bool:
                 "show_suggested",
                 "show_followup",
                 "show_elapsed_time",
+                "show_thinking_process",
                 "llm_fallback",
                 "show_community_engagement",
                 "min_message_id",

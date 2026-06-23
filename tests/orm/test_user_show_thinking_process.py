@@ -11,7 +11,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
 
-from orm.functions import create_user
+from orm.functions import create_user, update_user_preferences
 from orm.models import User, UserRole
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -58,6 +58,36 @@ def test_user_to_dict_includes_show_thinking_process(in_memory_orm_session):
         payload = user.to_dict()
         assert "show_thinking_process" in payload
         assert payload["show_thinking_process"] is False
+
+
+def test_update_user_preferences_persists_show_thinking_process(in_memory_orm_session):
+    """The admin-capable ``update_user_preferences`` path must accept
+    ``show_thinking_process`` — exercises the allowlist + round-trip
+    persistence, since the self-service ``save_user_settings`` path is
+    Streamlit-coupled and harder to unit-test directly."""
+    with in_memory_orm_session() as session:
+        role_id = session.query(UserRole).filter(UserRole.role_name == "Doctor").one().id
+
+    create_user(
+        "rtuser",
+        "pw",
+        "Round",
+        "Trip",
+        role_id,
+        email="rtuser@example.com",
+        organization="Acme",
+    )
+
+    with in_memory_orm_session() as session:
+        user = session.query(User).filter(User.username == "rtuser").one()
+        assert user.show_thinking_process is False
+        user_id = user.id
+
+    assert update_user_preferences(user_id, show_thinking_process=True) is True
+
+    with in_memory_orm_session() as session:
+        user = session.query(User).filter(User.id == user_id).one()
+        assert user.show_thinking_process is True
 
 
 def test_migration_backfills_show_thinking_process_to_false(tmp_path):
