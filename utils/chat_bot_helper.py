@@ -1391,6 +1391,24 @@ def _run_message_flow(my_question: str):
         from agent.runtime import run_agentic_message_flow
 
         return run_agentic_message_flow(my_question)
+    return _run_vanna_flow(my_question)
+
+
+def _run_vanna_flow(my_question: str):
+    """Legacy single-shot Vanna SQL pipeline.
+
+    Generates SQL from the question via Vanna+RAG, runs it against
+    [postgres], renders DataFrame / chart / summary, and persists the
+    turn as orm.Message rows.
+
+    THREAD: must run on the Streamlit script thread — touches
+    st.session_state and renders widgets. Do NOT invoke from the
+    agent's asyncio loop thread.
+
+    Per Epic #228, this function will also be invoked as the agent's
+    fallback path when the agent finishes a turn without retrieving
+    data (wired in Feature #231).
+    """
     # ----- existing Vanna flow follows unchanged -----
     # Ethical guardrails temporarily disabled for training/testing
     # guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
