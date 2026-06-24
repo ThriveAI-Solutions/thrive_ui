@@ -16,6 +16,7 @@ import streamlit as st
 from agent.deps_builder import build_agent_deps
 from agent.fallback import should_fallback
 from agent.observability import configure_observability
+from agent.run_logger import mark_run_fallback_invoked
 from agent.runner import AgenticRunner
 from agent.state import (
     AgentResponse,
@@ -67,14 +68,38 @@ def _is_scrubbed_logging() -> bool:
         return False
 
 
+def _mark_fallback_invoked_safely(run_id: str | None, fallback_sql: str | None) -> None:
+    """Open a fresh SQLite session on the script thread and persist the
+    fallback-invoked status + SQL via the run_logger helper. Swallows
+    all exceptions — an audit gap is preferable to losing the user's
+    Vanna answer to a logging failure.
+    """
+    if not run_id:
+        return
+    session = None
+    try:
+        session = SessionLocal()
+        mark_run_fallback_invoked(session, run_id=run_id, fallback_sql=fallback_sql)
+    except Exception:
+        logger.exception("mark_run_fallback_invoked failed for run_id=%s", run_id)
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+
 def _maybe_invoke_vanna_fallback(
     question: str,
     final_text: str,
     tool_events: list[ToolCallStarted | ToolCallCompleted],
+    run_id: str | None = None,
 ) -> None:
     """Post-stream fallback hook. Decides whether the agent's turn should
-    be retried via the legacy Vanna pipeline, and if so renders an
-    append-style banner and invokes _run_vanna_flow.
+    be retried via the legacy Vanna pipeline, and if so marks the agent
+    run as ``fallback_invoked`` (Feature #233), renders an append-style
+    banner, and invokes _run_vanna_flow.
 
     Runs on the Streamlit script thread. The classifier LLM call is
     bridged to the persistent asyncio loop via _run_async; the banner
@@ -107,6 +132,12 @@ def _maybe_invoke_vanna_fallback(
     if not decision.invoke:
         return
 
+    # Mark the agent run as fallback_invoked BEFORE invoking _run_vanna_flow.
+    # We don't have the SQL yet — Vanna writes the breadcrumb session-state
+    # key right before its st.rerun() raises RerunException, so we update
+    # the row a second time inside the RerunException catch below.
+    _mark_fallback_invoked_safely(run_id, fallback_sql=None)
+
     # Lazy import to avoid a circular dependency: utils.chat_bot_helper
     # imports agent.runtime via the dispatcher at module top, so a
     # top-level `from utils.chat_bot_helper import ...` here would
@@ -128,6 +159,14 @@ def _maybe_invoke_vanna_fallback(
         # propagate so the script runner can act on them. Mirrors the
         # safety net in chat_bot_helper.normal_message_flow:1342.
         if type(exc).__name__ in ("RerunException", "StopException"):
+            # Capture the SQL Vanna just persisted via its breadcrumb and
+            # update the run row with it before re-raising.
+            try:
+                fallback_sql = st.session_state.get("_last_vanna_fallback_sql")
+            except Exception:
+                fallback_sql = None
+            if fallback_sql:
+                _mark_fallback_invoked_safely(run_id, fallback_sql=fallback_sql)
             raise
         if not isinstance(exc, Exception):
             raise
@@ -260,6 +299,7 @@ def run_agentic_message_flow(my_question: str) -> None:
         # engine after future.result() so we don't double-render anything.
         tool_events: list[ToolCallStarted | ToolCallCompleted] = []
         final_response_text: str = ""
+        final_run_id: str | None = None
         try:
             while True:
                 try:
@@ -282,6 +322,7 @@ def run_agentic_message_flow(my_question: str) -> None:
                     tool_events.append(event)
                 elif isinstance(event, FinalResponseEvent):
                     final_response_text = event.response.text
+                    final_run_id = event.run_id
             # Surface any exception raised inside produce() (and thus the
             # agent run) to the caller, matching the old _run_async behavior.
             future.result()
@@ -293,8 +334,10 @@ def run_agentic_message_flow(my_question: str) -> None:
             # Post-stream Vanna fallback hook (Epic #228 / #231). No-op
             # unless the per-deploy secrets flag AND the per-user opt-in
             # are both on. Failures are logged and swallowed so the
-            # agent's reply still stands.
-            _maybe_invoke_vanna_fallback(my_question, final_response_text, tool_events)
+            # agent's reply still stands. final_run_id (Feature #233)
+            # lets the fallback path mark the agent run as
+            # `fallback_invoked` for audit.
+            _maybe_invoke_vanna_fallback(my_question, final_response_text, tool_events, run_id=final_run_id)
         finally:
             _drain_placeholders(renderer_state)
     finally:

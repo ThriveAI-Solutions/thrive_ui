@@ -75,6 +75,27 @@ def test_dispatcher_routes_to_agent_when_agentic_mode_on(monkeypatch):
     assert vanna_calls == []
 
 
+def test_run_vanna_flow_writes_breadcrumb_for_audit():
+    """Feature #233 audit breadcrumb: _run_vanna_flow must stash the
+    final SQL into st.session_state['_last_vanna_fallback_sql'] right
+    before each st.rerun() call. The agent runtime reads this key
+    inside its RerunException handler to populate AgentRun.fallback_sql.
+
+    Cheap pin: assert the literal key appears in the function's source
+    so the breadcrumb can't be accidentally removed without breaking
+    this test.
+    """
+    import inspect
+
+    import utils.chat_bot_helper as cbh
+
+    source = inspect.getsource(cbh._run_vanna_flow)
+    assert source.count('"_last_vanna_fallback_sql"') >= 2, (
+        "Vanna flow must write the audit breadcrumb on BOTH rerun paths "
+        "(success and error). See Feature #233 / Epic #228."
+    )
+
+
 def test_dispatcher_routes_to_vanna_when_agentic_mode_off(monkeypatch):
     import utils.chat_bot_helper as cbh
 

@@ -1350,10 +1350,7 @@ def normal_message_flow(my_question: str):
         # gave them no signal to wait. Branch the wording so a known-
         # transient cause reads as "wait, then retry" instead of "broken".
         if looks_like_model_timeout(e):
-            body = (
-                "The AI model is slow or temporarily unreachable. "
-                "Please wait a moment and try again."
-            )
+            body = "The AI model is slow or temporarily unreachable. Please wait a moment and try again."
         else:
             body = f"Something went wrong while processing your question.\n\n{e}"
         try:
@@ -1831,6 +1828,12 @@ def _run_vanna_flow(my_question: str):
         # Clear the question from session state after successful processing
         st.session_state.my_question = None
 
+        # Breadcrumb for the agent's Vanna fallback (Epic #228 / Feature
+        # #233). Lets agent.runtime._maybe_invoke_vanna_fallback capture
+        # the SQL we ran after st.rerun() raises RerunException. No-op
+        # for legacy users (the key is just never read).
+        st.session_state["_last_vanna_fallback_sql"] = final_sql
+
         # Trigger a rerun to properly refresh the UI
         st.rerun()
     elif final_sql:
@@ -1917,6 +1920,11 @@ def _run_vanna_flow(my_question: str):
 
         # Clear the question from session state after error processing
         st.session_state.my_question = None
+
+        # Breadcrumb for the agent's Vanna fallback (Epic #228 / Feature
+        # #233). On the error path, prefer the last SQL we actually
+        # tried so the audit reflects what was attempted.
+        st.session_state["_last_vanna_fallback_sql"] = last_failed_sql or final_sql
 
         # Trigger a rerun to properly refresh the UI
         st.rerun()

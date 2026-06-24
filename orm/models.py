@@ -623,6 +623,7 @@ class AgentRun(Base):
     error_type = Column(String(100), nullable=True)
     error = Column(Text, nullable=True)
     stack_trace = Column(Text, nullable=True)
+    fallback_sql = Column(Text, nullable=True)
 
     review_status = Column(String(20), nullable=False, default="unreviewed")
     reviewed_by = Column(Integer, nullable=True)

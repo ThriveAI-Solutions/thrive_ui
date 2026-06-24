@@ -51,6 +51,10 @@ class FinalResponseEvent(BaseModel):
     # Token usage for this run, from pydantic-ai run.usage(). None when the
     # provider doesn't report usage. Keys: input_tokens, output_tokens, total_tokens.
     usage: Optional[dict] = None
+    # AgentRunLogger.run_id, threaded out so the runtime can mark the run
+    # `fallback_invoked` later (Epic #228 / #233). None when run logging
+    # is disabled.
+    run_id: Optional[str] = None
 
     model_config = {"arbitrary_types_allowed": True}
 

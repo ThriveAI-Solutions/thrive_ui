@@ -62,6 +62,17 @@ from agent.tools.search_patients_by_criteria import search_patients_by_criteria
 
 _DEFAULT_MAX_TOOL_CALLS = 7
 _DEFAULT_MAX_WALL_CLOCK_S = 120.0
+
+
+def _logger_run_id(logger: Any) -> Optional[str]:
+    """Extract ``logger.run_id`` only if it's a real string. Production
+    AgentRunLogger always provides a string; defensive isinstance guard
+    keeps existing tests with MagicMock loggers working (the mocked
+    ``logger.run_id`` is a MagicMock, which pydantic rejects)."""
+    if logger is None:
+        return None
+    rid = getattr(logger, "run_id", None)
+    return rid if isinstance(rid, str) else None
 # pydantic-ai exposes a synthetic 'final_result' tool for output-typed agents;
 # it is not a user-facing tool and should not appear in the audit log or UI.
 _OUTPUT_TOOL_NAMES = {"final_result"}
@@ -563,7 +574,12 @@ class AgenticRunner:
                                     total_elapsed_ms=int((loop.time() - start) * 1000),
                                     cap_reached=None,
                                 )
-                            yield FinalResponseEvent(response=output, all_messages=all_msgs, usage=usage)
+                            yield FinalResponseEvent(
+                                response=output,
+                                all_messages=all_msgs,
+                                usage=usage,
+                                run_id=_logger_run_id(logger),
+                            )
                             return
         except Exception as exc:
             if logger is not None:
@@ -605,4 +621,5 @@ class AgenticRunner:
                     response=output,
                     all_messages=list(run.result.all_messages()),
                     usage=usage,
+                    run_id=logger.run_id if logger is not None else None,
                 )
