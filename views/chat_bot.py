@@ -406,6 +406,38 @@ def _render_agentic_section():
         except Exception:
             pass
 
+    # Vanna-fallback opt-in (Epic #228 / Feature #232). Renders only when
+    # agentic_mode is on — the fallback hook fires from the agentic
+    # runtime, so the toggle is meaningless in legacy mode.
+    if agentic_mode:
+        vanna_fallback_initial = bool(
+            getattr(st.session_state.get("user"), "vanna_fallback_enabled", False)
+            if st.session_state.get("user")
+            else st.session_state.get("vanna_fallback_enabled", False)
+        )
+        vanna_fallback_enabled = st.checkbox(
+            "Auto-fallback to Vanna when agent doesn't query data",
+            value=vanna_fallback_initial,
+            help=(
+                "When the agent finishes a turn without retrieving data and "
+                "a one-shot classifier judges the answer inadequate, retry "
+                "the same question through the legacy Vanna SQL pipeline. "
+                "Requires [agent.fallback].enabled = true in secrets."
+            ),
+            key="vanna_fallback_enabled_dialog_checkbox",
+        )
+        st.session_state.vanna_fallback_enabled = vanna_fallback_enabled
+        if vanna_fallback_enabled != vanna_fallback_initial:
+            try:
+                import json as _json
+
+                _uid_str = st.session_state.cookies.get("user_id")
+                if _uid_str:
+                    _uid = _json.loads(_uid_str)
+                    update_user_preferences(user_id=_uid, vanna_fallback_enabled=vanna_fallback_enabled)
+            except Exception:
+                pass
+
 
 def _settings_dialog_body():
     """Pure body of the Settings dialog. Split from the ``@st.dialog``-

@@ -1350,10 +1350,7 @@ def normal_message_flow(my_question: str):
         # gave them no signal to wait. Branch the wording so a known-
         # transient cause reads as "wait, then retry" instead of "broken".
         if looks_like_model_timeout(e):
-            body = (
-                "The AI model is slow or temporarily unreachable. "
-                "Please wait a moment and try again."
-            )
+            body = "The AI model is slow or temporarily unreachable. Please wait a moment and try again."
         else:
             body = f"Something went wrong while processing your question.\n\n{e}"
         try:
@@ -1391,6 +1388,24 @@ def _run_message_flow(my_question: str):
         from agent.runtime import run_agentic_message_flow
 
         return run_agentic_message_flow(my_question)
+    return _run_vanna_flow(my_question)
+
+
+def _run_vanna_flow(my_question: str):
+    """Legacy single-shot Vanna SQL pipeline.
+
+    Generates SQL from the question via Vanna+RAG, runs it against
+    [postgres], renders DataFrame / chart / summary, and persists the
+    turn as orm.Message rows.
+
+    THREAD: must run on the Streamlit script thread — touches
+    st.session_state and renders widgets. Do NOT invoke from the
+    agent's asyncio loop thread.
+
+    Per Epic #228, this function will also be invoked as the agent's
+    fallback path when the agent finishes a turn without retrieving
+    data (wired in Feature #231).
+    """
     # ----- existing Vanna flow follows unchanged -----
     # Ethical guardrails temporarily disabled for training/testing
     # guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
@@ -1813,6 +1828,12 @@ def _run_message_flow(my_question: str):
         # Clear the question from session state after successful processing
         st.session_state.my_question = None
 
+        # Breadcrumb for the agent's Vanna fallback (Epic #228 / Feature
+        # #233). Lets agent.runtime._maybe_invoke_vanna_fallback capture
+        # the SQL we ran after st.rerun() raises RerunException. No-op
+        # for legacy users (the key is just never read).
+        st.session_state["_last_vanna_fallback_sql"] = final_sql
+
         # Trigger a rerun to properly refresh the UI
         st.rerun()
     elif final_sql:
@@ -1899,6 +1920,11 @@ def _run_message_flow(my_question: str):
 
         # Clear the question from session state after error processing
         st.session_state.my_question = None
+
+        # Breadcrumb for the agent's Vanna fallback (Epic #228 / Feature
+        # #233). On the error path, prefer the last SQL we actually
+        # tried so the audit reflects what was attempted.
+        st.session_state["_last_vanna_fallback_sql"] = last_failed_sql or final_sql
 
         # Trigger a rerun to properly refresh the UI
         st.rerun()

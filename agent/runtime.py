@@ -14,7 +14,9 @@ from typing import Any, Coroutine
 import streamlit as st
 
 from agent.deps_builder import build_agent_deps
+from agent.fallback import should_fallback
 from agent.observability import configure_observability
+from agent.run_logger import mark_run_fallback_invoked
 from agent.runner import AgenticRunner
 from agent.state import (
     AgentResponse,
@@ -31,7 +33,144 @@ from agent.state import (
     ToolCallStarted,
 )
 from utils.enums import MessageType, RoleType
+from utils.quick_logger import get_logger
 from orm.models import Message, SessionLocal
+
+
+logger = get_logger(__name__)
+
+
+_FALLBACK_BANNER_TEXT = "_💡 The agent didn't query data — falling back to direct SQL._"
+
+
+def _is_fallback_feature_enabled() -> bool:
+    """True only when the per-deploy secrets flag AND the per-user opt-in
+    are both on. Either flag missing or off → False. Until Feature #232
+    lands the `vanna_fallback_enabled` session-state key stays unset, so
+    this returns False by default and the fallback path is dormant.
+    """
+    try:
+        secrets_enabled = bool(st.secrets.get("agent", {}).get("fallback", {}).get("enabled", False))
+    except Exception:
+        secrets_enabled = False
+    user_opt_in = bool(st.session_state.get("vanna_fallback_enabled", False))
+    return secrets_enabled and user_opt_in
+
+
+def _is_scrubbed_logging() -> bool:
+    """Read `[agent_logging].mode` from secrets. Returns True only when
+    explicitly set to "scrubbed"; any other value (including missing
+    section) returns False.
+    """
+    try:
+        return st.secrets.get("agent_logging", {}).get("mode") == "scrubbed"
+    except Exception:
+        return False
+
+
+def _mark_fallback_invoked_safely(run_id: str | None, fallback_sql: str | None) -> None:
+    """Open a fresh SQLite session on the script thread and persist the
+    fallback-invoked status + SQL via the run_logger helper. Swallows
+    all exceptions — an audit gap is preferable to losing the user's
+    Vanna answer to a logging failure.
+    """
+    if not run_id:
+        return
+    session = None
+    try:
+        session = SessionLocal()
+        mark_run_fallback_invoked(session, run_id=run_id, fallback_sql=fallback_sql)
+    except Exception:
+        logger.exception("mark_run_fallback_invoked failed for run_id=%s", run_id)
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+
+def _maybe_invoke_vanna_fallback(
+    question: str,
+    final_text: str,
+    tool_events: list[ToolCallStarted | ToolCallCompleted],
+    run_id: str | None = None,
+) -> None:
+    """Post-stream fallback hook. Decides whether the agent's turn should
+    be retried via the legacy Vanna pipeline, and if so marks the agent
+    run as ``fallback_invoked`` (Feature #233), renders an append-style
+    banner, and invokes _run_vanna_flow.
+
+    Runs on the Streamlit script thread. The classifier LLM call is
+    bridged to the persistent asyncio loop via _run_async; the banner
+    persistence and the Vanna invocation both need ScriptRunContext so
+    they stay on this thread.
+
+    Failure-tolerant by design: any exception during the decision or
+    the Vanna invocation is logged and swallowed. The original agent
+    reply remains visible — the Epic's Acceptance Criteria require
+    "classifier failure does not block the user."
+    """
+    if not _is_fallback_feature_enabled():
+        return
+
+    try:
+        with st.spinner("Checking whether to retry with direct SQL..."):
+            decision = _run_async(
+                should_fallback(
+                    question=question,
+                    final_text=final_text,
+                    tool_events=tool_events,
+                    feature_enabled=True,
+                    scrubbed=_is_scrubbed_logging(),
+                )
+            )
+    except Exception:
+        logger.exception("Fallback decision failed; skipping fallback")
+        return
+
+    if not decision.invoke:
+        return
+
+    # Mark the agent run as fallback_invoked BEFORE invoking _run_vanna_flow.
+    # We don't have the SQL yet — Vanna writes the breadcrumb session-state
+    # key right before its st.rerun() raises RerunException, so we update
+    # the row a second time inside the RerunException catch below.
+    _mark_fallback_invoked_safely(run_id, fallback_sql=None)
+
+    # Lazy import to avoid a circular dependency: utils.chat_bot_helper
+    # imports agent.runtime via the dispatcher at module top, so a
+    # top-level `from utils.chat_bot_helper import ...` here would
+    # close the cycle.
+    from utils.chat_bot_helper import _run_vanna_flow, add_message
+
+    try:
+        add_message(
+            Message(
+                RoleType.ASSISTANT,
+                _FALLBACK_BANNER_TEXT,
+                MessageType.TEXT,
+            )
+        )
+        _run_vanna_flow(question)
+    except BaseException as exc:
+        # Streamlit's RerunException / StopException are control-flow
+        # signals raised by _run_vanna_flow's st.rerun() — let them
+        # propagate so the script runner can act on them. Mirrors the
+        # safety net in chat_bot_helper.normal_message_flow:1342.
+        if type(exc).__name__ in ("RerunException", "StopException"):
+            # Capture the SQL Vanna just persisted via its breadcrumb and
+            # update the run row with it before re-raising.
+            try:
+                fallback_sql = st.session_state.get("_last_vanna_fallback_sql")
+            except Exception:
+                fallback_sql = None
+            if fallback_sql:
+                _mark_fallback_invoked_safely(run_id, fallback_sql=fallback_sql)
+            raise
+        if not isinstance(exc, Exception):
+            raise
+        logger.exception("Vanna fallback invocation failed")
 
 
 @st.cache_resource
@@ -154,6 +293,13 @@ def run_agentic_message_flow(my_question: str) -> None:
         # mid-flight — otherwise a partial "🤔 Thinking..." panel would
         # stay frozen on screen.
         renderer_state: dict[str, Any] = {"thinking": {}, "text": {}}
+        # Collected for the post-stream Vanna-fallback decision (Epic #228 / #231).
+        # We accumulate tool-call events and the final assistant text on the
+        # script thread as they're rendered, then hand them to the decision
+        # engine after future.result() so we don't double-render anything.
+        tool_events: list[ToolCallStarted | ToolCallCompleted] = []
+        final_response_text: str = ""
+        final_run_id: str | None = None
         try:
             while True:
                 try:
@@ -172,6 +318,11 @@ def run_agentic_message_flow(my_question: str) -> None:
                 if kind == "done":
                     break
                 _render_event(event, renderer_state)
+                if isinstance(event, (ToolCallStarted, ToolCallCompleted)):
+                    tool_events.append(event)
+                elif isinstance(event, FinalResponseEvent):
+                    final_response_text = event.response.text
+                    final_run_id = event.run_id
             # Surface any exception raised inside produce() (and thus the
             # agent run) to the caller, matching the old _run_async behavior.
             future.result()
@@ -180,6 +331,13 @@ def run_agentic_message_flow(my_question: str) -> None:
             # bare except). Redo it here on the script thread so magic
             # functions and the Vanna flow see the final DataFrame.
             _sync_last_dataframe_to_session_state(deps)
+            # Post-stream Vanna fallback hook (Epic #228 / #231). No-op
+            # unless the per-deploy secrets flag AND the per-user opt-in
+            # are both on. Failures are logged and swallowed so the
+            # agent's reply still stands. final_run_id (Feature #233)
+            # lets the fallback path mark the agent run as
+            # `fallback_invoked` for audit.
+            _maybe_invoke_vanna_fallback(my_question, final_response_text, tool_events, run_id=final_run_id)
         finally:
             _drain_placeholders(renderer_state)
     finally:
