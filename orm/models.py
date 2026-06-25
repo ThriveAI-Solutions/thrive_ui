@@ -199,10 +199,12 @@ class User(Base):
     show_suggested = Column(Boolean, default=False)
     show_followup = Column(Boolean, default=False)
     show_elapsed_time = Column(Boolean, default=True)
+    show_thinking_process = Column(Boolean, default=False)
     llm_fallback = Column(Boolean, default=False)
     confirm_magic_commands = Column(Boolean, default=True)  # True = show popup, False = auto-execute
     show_community_engagement = Column(Boolean, default=False)
     agentic_mode = Column(Boolean, default=True)
+    vanna_fallback_enabled = Column(Boolean, default=False)
     min_message_id = Column(Integer, default=0)
     theme = Column(String(50), default=ThemeType.THRIVEAI.value)
     selected_llm_provider = Column(String(50), default=None)
@@ -231,6 +233,7 @@ class User(Base):
             "show_suggested": self.show_suggested,
             "show_followup": self.show_followup,
             "show_elapsed_time": self.show_elapsed_time,
+            "show_thinking_process": self.show_thinking_process,
             "llm_fallback": self.llm_fallback,
             "confirm_magic_commands": self.confirm_magic_commands,
             "show_community_engagement": self.show_community_engagement,
@@ -239,6 +242,7 @@ class User(Base):
             "selected_llm_provider": self.selected_llm_provider,
             "selected_llm_model": self.selected_llm_model,
             "agentic_mode": self.agentic_mode,
+            "vanna_fallback_enabled": self.vanna_fallback_enabled,
         }
 
 
@@ -619,6 +623,7 @@ class AgentRun(Base):
     error_type = Column(String(100), nullable=True)
     error = Column(Text, nullable=True)
     stack_trace = Column(Text, nullable=True)
+    fallback_sql = Column(Text, nullable=True)
 
     review_status = Column(String(20), nullable=False, default="unreviewed")
     reviewed_by = Column(Integer, nullable=True)

@@ -1198,7 +1198,16 @@ def _render_followup(message: Message, index: int):
 
 
 def _render_thinking(message: Message, index: int):
-    """Render thinking messages in an expandable container."""
+    """Render thinking messages.
+
+    Gated by Epic #222 / Feature #225: when ``show_thinking_process`` is
+    off (the default), render a compact placeholder instead of the full
+    expander. THINKING messages are always persisted regardless of the
+    toggle — only the rendering changes.
+    """
+    if not st.session_state.get("show_thinking_process", False):
+        st.caption("🤔 Thinking…")
+        return
     with st.expander("🤔 AI Thinking Process", expanded=False):
         st.markdown(message.content)
         if st.session_state.get("show_elapsed_time", True) and message.elapsed_time is not None:
@@ -1341,10 +1350,7 @@ def normal_message_flow(my_question: str):
         # gave them no signal to wait. Branch the wording so a known-
         # transient cause reads as "wait, then retry" instead of "broken".
         if looks_like_model_timeout(e):
-            body = (
-                "The AI model is slow or temporarily unreachable. "
-                "Please wait a moment and try again."
-            )
+            body = "The AI model is slow or temporarily unreachable. Please wait a moment and try again."
         else:
             body = f"Something went wrong while processing your question.\n\n{e}"
         try:
@@ -1382,6 +1388,24 @@ def _run_message_flow(my_question: str):
         from agent.runtime import run_agentic_message_flow
 
         return run_agentic_message_flow(my_question)
+    return _run_vanna_flow(my_question)
+
+
+def _run_vanna_flow(my_question: str):
+    """Legacy single-shot Vanna SQL pipeline.
+
+    Generates SQL from the question via Vanna+RAG, runs it against
+    [postgres], renders DataFrame / chart / summary, and persists the
+    turn as orm.Message rows.
+
+    THREAD: must run on the Streamlit script thread — touches
+    st.session_state and renders widgets. Do NOT invoke from the
+    agent's asyncio loop thread.
+
+    Per Epic #228, this function will also be invoked as the agent's
+    fallback path when the agent finishes a turn without retrieving
+    data (wired in Feature #231).
+    """
     # ----- existing Vanna flow follows unchanged -----
     # Ethical guardrails temporarily disabled for training/testing
     # guardrail_sentence, guardrail_score = get_ethical_guideline(my_question)
@@ -1447,6 +1471,12 @@ def _run_message_flow(my_question: str):
 
     # If we have a thinking model, display the thinking stream
     thinking_text = ""  # Initialize outside the try block for use later
+    # Epic #222 / Feature #225: respect the per-user toggle. When off, show a
+    # static "Thinking…" placeholder for the duration of the stream instead of
+    # rendering streamed chunks live; skip the 1.5s "Done thinking" pause since
+    # the user can't see the content anyway. The THINKING message is still
+    # persisted below so historical re-renders honor the current toggle state.
+    show_thinking = st.session_state.get("show_thinking_process", False)
     if has_thinking_model and hasattr(vn_instance, "stream_generate_sql"):
         try:
             thinking_chunks = []
@@ -1454,13 +1484,16 @@ def _run_message_flow(my_question: str):
             # Create a placeholder for real-time thinking display
             with st.chat_message(RoleType.ASSISTANT.value):
                 thinking_placeholder = st.empty()
+                if not show_thinking:
+                    thinking_placeholder.markdown("🤔 **Thinking…**")
 
                 # Stream the SQL generation and show thinking in real-time
                 stream_gen = vn_instance.stream_generate_sql(my_question)
                 for chunk in stream_gen:
                     thinking_chunks.append(chunk)
                     # Update the thinking display in real-time
-                    thinking_placeholder.markdown("🤔 **Thinking...**\n\n" + "".join(thinking_chunks))
+                    if show_thinking:
+                        thinking_placeholder.markdown("🤔 **Thinking...**\n\n" + "".join(thinking_chunks))
 
                 # After streaming completes, get the cached result
                 if hasattr(st.session_state, "streamed_sql"):
@@ -1469,14 +1502,18 @@ def _run_message_flow(my_question: str):
                     thinking_text = st.session_state.get("streamed_thinking", "")
 
                     # Phase 1: Graceful transition - show completion indicator
-                    if thinking_text and thinking_text.strip():
+                    if show_thinking and thinking_text and thinking_text.strip():
                         # Show "Done thinking" state for a brief moment
                         thinking_placeholder.markdown("✅ **Done thinking**\n\n" + "".join(thinking_chunks))
                         # Brief delay for visual continuity (1.5 seconds)
                         time.sleep(1.5)
 
-                    # Clear the placeholder - we'll add the thinking as a proper message
-                    thinking_placeholder.empty()
+                # Clear the placeholder unconditionally - we'll add the thinking
+                # as a proper message below. When show_thinking is off we
+                # populate the placeholder before the stream, so we must clear
+                # it even when streamed_sql was never written to session_state
+                # (e.g. backend errored after the stream loop). Epic #222.
+                thinking_placeholder.empty()
 
             # Phase 2: Persistent display - add thinking to chat history as collapsible expander
             # If we collected thinking text, add it as a proper message
@@ -1791,6 +1828,12 @@ def _run_message_flow(my_question: str):
         # Clear the question from session state after successful processing
         st.session_state.my_question = None
 
+        # Breadcrumb for the agent's Vanna fallback (Epic #228 / Feature
+        # #233). Lets agent.runtime._maybe_invoke_vanna_fallback capture
+        # the SQL we ran after st.rerun() raises RerunException. No-op
+        # for legacy users (the key is just never read).
+        st.session_state["_last_vanna_fallback_sql"] = final_sql
+
         # Trigger a rerun to properly refresh the UI
         st.rerun()
     elif final_sql:
@@ -1877,6 +1920,11 @@ def _run_message_flow(my_question: str):
 
         # Clear the question from session state after error processing
         st.session_state.my_question = None
+
+        # Breadcrumb for the agent's Vanna fallback (Epic #228 / Feature
+        # #233). On the error path, prefer the last SQL we actually
+        # tried so the audit reflects what was attempted.
+        st.session_state["_last_vanna_fallback_sql"] = last_failed_sql or final_sql
 
         # Trigger a rerun to properly refresh the UI
         st.rerun()

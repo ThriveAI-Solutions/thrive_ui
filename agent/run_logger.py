@@ -388,3 +388,52 @@ class AgentRunLogger:
             self._safe_commit()
         except Exception:
             pass
+
+
+def mark_run_fallback_invoked(
+    session: Session,
+    *,
+    run_id: str,
+    fallback_sql: Optional[str],
+) -> None:
+    """Mark an already-finalized agent run as ``fallback_invoked`` and
+    persist the Vanna SQL that fired (Epic #228 / #233).
+
+    Called from ``agent.runtime._maybe_invoke_vanna_fallback`` on the
+    Streamlit script thread, using a fresh ``SessionLocal`` — the
+    original ``AgentRunLogger.session`` is owned by the loop thread and
+    may already be closed.
+
+    Silently no-ops when ``run_id`` does not resolve to a row and on any
+    DB error. An audit gap is preferable to losing the user's Vanna
+    answer to a logging failure.
+    """
+    try:
+        run = session.query(AgentRun).filter_by(run_id=run_id).first()
+        if run is None:
+            return
+        run.status = "fallback_invoked"
+        run.fallback_sql = fallback_sql
+        session.add(run)
+
+        # Append a timeline event so the inspector reflects the transition.
+        # `seq` is MAX(seq)+1 for this run — the run's original logger is
+        # gone, so we recompute from the existing rows.
+        next_seq_row = (
+            session.query(func.max(AgentRunEvent.seq)).filter(AgentRunEvent.run_id == run_id).scalar()
+        )
+        next_seq = (next_seq_row or 0) + 1
+        session.add(
+            AgentRunEvent(
+                run_id=run_id,
+                seq=next_seq,
+                event_type="fallback_invoked",
+                payload_summary=f"fallback_sql_chars={len(fallback_sql or '')}",
+            )
+        )
+        session.commit()
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass

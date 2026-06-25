@@ -316,6 +316,11 @@ def _render_display_form():
             value=st.session_state.get("show_elapsed_time", True),
             help="Display how long each query took to execute.",
         )
+        form_show_thinking_process = st.checkbox(
+            "Show AI thinking process",
+            value=st.session_state.get("show_thinking_process", False),
+            help="When enabled, show the model's full thinking process for each query. When disabled, only a 'Thinking…' placeholder is shown while the model is running.",
+        )
         form_show_question_history = st.checkbox(
             "Show Question History",
             value=st.session_state.get("show_question_history", True),
@@ -362,6 +367,7 @@ def _render_display_form():
             st.session_state.show_table = form_show_table
             st.session_state.show_chart = form_show_chart
             st.session_state.show_elapsed_time = form_show_elapsed_time
+            st.session_state.show_thinking_process = form_show_thinking_process
             st.session_state.show_question_history = form_show_question_history
             st.session_state.voice_input = form_voice_input
             st.session_state.speak_summary = form_speak_summary
@@ -399,6 +405,38 @@ def _render_agentic_section():
                 update_user_preferences(user_id=_uid, agentic_mode=agentic_mode)
         except Exception:
             pass
+
+    # Vanna-fallback opt-in (Epic #228 / Feature #232). Renders only when
+    # agentic_mode is on — the fallback hook fires from the agentic
+    # runtime, so the toggle is meaningless in legacy mode.
+    if agentic_mode:
+        vanna_fallback_initial = bool(
+            getattr(st.session_state.get("user"), "vanna_fallback_enabled", False)
+            if st.session_state.get("user")
+            else st.session_state.get("vanna_fallback_enabled", False)
+        )
+        vanna_fallback_enabled = st.checkbox(
+            "Auto-fallback to Vanna when agent doesn't query data",
+            value=vanna_fallback_initial,
+            help=(
+                "When the agent finishes a turn without retrieving data and "
+                "a one-shot classifier judges the answer inadequate, retry "
+                "the same question through the legacy Vanna SQL pipeline. "
+                "Requires [agent.fallback].enabled = true in secrets."
+            ),
+            key="vanna_fallback_enabled_dialog_checkbox",
+        )
+        st.session_state.vanna_fallback_enabled = vanna_fallback_enabled
+        if vanna_fallback_enabled != vanna_fallback_initial:
+            try:
+                import json as _json
+
+                _uid_str = st.session_state.cookies.get("user_id")
+                if _uid_str:
+                    _uid = _json.loads(_uid_str)
+                    update_user_preferences(user_id=_uid, vanna_fallback_enabled=vanna_fallback_enabled)
+            except Exception:
+                pass
 
 
 def _settings_dialog_body():
