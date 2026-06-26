@@ -45,11 +45,14 @@ def transform_adt(
         out.append(
             {
                 "patient_id": patient_id,
+                "visit_number": f"V{e.get('Id', e.get('ENCOUNTER', patient_id))}",
                 "event_date": start,
                 "event_location": str(e.get("ORGANIZATION", "")) or None,
                 "location_type": location_type,
                 "clean_setting": clean_setting,
                 "status": "Discharged" if stop else "Admitted",
+                "clean_status": "DISCHARGE" if stop else "ADMIT",
+                "cancelled_flag": "N",
                 "admit_from": "Home",
                 "discharge_disposition": "Discharged to home" if stop else None,
                 "discharge_location": "Home" if stop else None,

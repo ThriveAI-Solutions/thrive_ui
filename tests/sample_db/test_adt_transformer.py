@@ -86,6 +86,32 @@ enc-001,2026-06-01T08:00:00Z,,pat-001,Buffalo General,prov-1,payer-1,inpatient,1
     assert rows[0]["discharge_location"] is None
 
 
+def test_adt_transformer_emits_visit_number_status_cancelled(encounters_with_admissions_csv, synthea_to_pid, ctx):
+    transform_adt(encounters_with_admissions_csv, synthea_to_pid, ctx)
+    rows = ctx.output["dw.federated_adt_v"]
+    # visit_number present + non-null on every row, and unique per encounter.
+    visit_numbers = [r["visit_number"] for r in rows]
+    assert all(vn for vn in visit_numbers)
+    assert len(set(visit_numbers)) == len(visit_numbers)
+    # both fixture encounters have a STOP → clean_status DISCHARGE; cancelled_flag 'N'.
+    for r in rows:
+        assert r["clean_status"] == "DISCHARGE"
+        assert r["cancelled_flag"] == "N"
+
+
+def test_adt_transformer_inflight_clean_status_is_admit(synthea_to_pid, ctx):
+    data = """Id,START,STOP,PATIENT,ORGANIZATION,PROVIDER,PAYER,ENCOUNTERCLASS,CODE,DESCRIPTION,BASE_ENCOUNTER_COST,TOTAL_CLAIM_COST,PAYER_COVERAGE,REASONCODE,REASONDESCRIPTION
+enc-001,2026-06-01T08:00:00Z,,pat-001,Buffalo General,prov-1,payer-1,inpatient,183452005,Emergency hospital admission,500.00,2500.00,2000.00,,
+"""
+    encounters = pd.read_csv(StringIO(data))
+    transform_adt(encounters, synthea_to_pid, ctx)
+    rows = ctx.output["dw.federated_adt_v"]
+    assert len(rows) == 1
+    assert rows[0]["clean_status"] == "ADMIT"
+    assert rows[0]["cancelled_flag"] == "N"
+    assert rows[0]["visit_number"]
+
+
 def test_adt_transformer_handles_empty_input(synthea_to_pid, ctx):
     empty = pd.DataFrame(
         columns=[
