@@ -28,11 +28,11 @@ def synthea_to_pid() -> dict[str, int]:
     return {"pat-001": 1, "pat-002": 2}
 
 
-def test_adt_transformer_emits_one_row_per_admission(encounters_with_admissions_csv, synthea_to_pid, ctx):
+def test_adt_transformer_emits_admit_and_discharge_events(encounters_with_admissions_csv, synthea_to_pid, ctx):
     transform_adt(encounters_with_admissions_csv, synthea_to_pid, ctx)
     rows = ctx.output["dw.federated_adt_v"]
-    # Only inpatient + emergency should be emitted; ambulatory is dropped.
-    assert len(rows) == 2
+    # Inpatient + emergency each emit ADMIT and DISCHARGE; ambulatory is dropped.
+    assert len(rows) == 4
 
 
 def test_adt_transformer_skips_non_admission_classes(encounters_with_admissions_csv, synthea_to_pid, ctx):
@@ -46,14 +46,23 @@ def test_adt_transformer_skips_non_admission_classes(encounters_with_admissions_
 def test_adt_transformer_maps_inpatient_setting_and_status(encounters_with_admissions_csv, synthea_to_pid, ctx):
     transform_adt(encounters_with_admissions_csv, synthea_to_pid, ctx)
     rows = ctx.output["dw.federated_adt_v"]
-    inpatient = next(r for r in rows if r["clean_setting"] == "INPATIENT")
+    inpatient = next(r for r in rows if r["clean_setting"] == "INPATIENT" and r["clean_status"] == "ADMIT")
     assert inpatient["patient_id"] == 1
     assert inpatient["event_location"] == "Buffalo General"
     assert inpatient["location_type"] == "Hospital"
-    # STOP is present → discharged with a discharge_disposition / location.
-    assert inpatient["status"] == "Discharged"
-    assert inpatient["discharge_disposition"] is not None
-    assert inpatient["discharge_location"] is not None
+    assert inpatient["status"] == "Admitted"
+    assert inpatient["discharge_disposition"] is None
+    assert inpatient["discharge_location"] is None
+
+
+def test_adt_transformer_maps_discharge_event_to_stop_time(encounters_with_admissions_csv, synthea_to_pid, ctx):
+    transform_adt(encounters_with_admissions_csv, synthea_to_pid, ctx)
+    rows = ctx.output["dw.federated_adt_v"]
+    discharge = next(r for r in rows if r["clean_setting"] == "INPATIENT" and r["clean_status"] == "DISCHARGE")
+    assert discharge["status"] == "Discharged"
+    assert str(discharge["event_date"]) == "2026-03-18 10:00:00"
+    assert discharge["discharge_disposition"] == "Discharged to home"
+    assert discharge["discharge_location"] == "Home"
 
 
 def test_adt_transformer_emergency_uses_emergency_location_type(encounters_with_admissions_csv, synthea_to_pid, ctx):
@@ -73,7 +82,7 @@ def test_adt_transformer_skips_unmapped_patients(encounters_with_admissions_csv,
 
 
 def test_adt_transformer_inflight_admission_has_no_discharge_details(synthea_to_pid, ctx):
-    """An encounter still in-flight (STOP empty) → status='Admitted', no discharge cols."""
+    """An encounter still in-flight (STOP empty) → ADMIT only, no discharge event."""
     data = """Id,START,STOP,PATIENT,ORGANIZATION,PROVIDER,PAYER,ENCOUNTERCLASS,CODE,DESCRIPTION,BASE_ENCOUNTER_COST,TOTAL_CLAIM_COST,PAYER_COVERAGE,REASONCODE,REASONDESCRIPTION
 enc-001,2026-06-01T08:00:00Z,,pat-001,Buffalo General,prov-1,payer-1,inpatient,183452005,Emergency hospital admission,500.00,2500.00,2000.00,,
 """
@@ -82,6 +91,7 @@ enc-001,2026-06-01T08:00:00Z,,pat-001,Buffalo General,prov-1,payer-1,inpatient,1
     rows = ctx.output["dw.federated_adt_v"]
     assert len(rows) == 1
     assert rows[0]["status"] == "Admitted"
+    assert rows[0]["clean_status"] == "ADMIT"
     assert rows[0]["discharge_disposition"] is None
     assert rows[0]["discharge_location"] is None
 
@@ -89,13 +99,13 @@ enc-001,2026-06-01T08:00:00Z,,pat-001,Buffalo General,prov-1,payer-1,inpatient,1
 def test_adt_transformer_emits_visit_number_status_cancelled(encounters_with_admissions_csv, synthea_to_pid, ctx):
     transform_adt(encounters_with_admissions_csv, synthea_to_pid, ctx)
     rows = ctx.output["dw.federated_adt_v"]
-    # visit_number present + non-null on every row, and unique per encounter.
+    # visit_number present + non-null on every row, shared by events in the same encounter.
     visit_numbers = [r["visit_number"] for r in rows]
     assert all(vn for vn in visit_numbers)
-    assert len(set(visit_numbers)) == len(visit_numbers)
-    # both fixture encounters have a STOP → clean_status DISCHARGE; cancelled_flag 'N'.
+    assert sorted(visit_numbers.count(vn) for vn in set(visit_numbers)) == [2, 2]
+    statuses = {r["clean_status"] for r in rows}
+    assert statuses == {"ADMIT", "DISCHARGE"}
     for r in rows:
-        assert r["clean_status"] == "DISCHARGE"
         assert r["cancelled_flag"] == "N"
 
 

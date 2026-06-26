@@ -35,6 +35,39 @@ def _sql_str_list(values: tuple[str, ...]) -> str:
     return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
 
 
+def patient_id_text_sql(alias: str, column: str = "patient_id") -> str:
+    """Return a text expression for patient_id joins against federated_adt_v.
+
+    Production federated_adt_v.patient_id is VARCHAR while identity/profile
+    tables expose integer patient_id. Cast the integer side to text instead
+    of casting ADT to numeric, because a dirty ADT value should not make the
+    whole query fail.
+    """
+    return f"CAST({alias}.{column} AS VARCHAR)"
+
+
+def visit_number_sql(alias: str) -> str:
+    """Normalized ADT visit number, blank strings treated as missing."""
+    return f"NULLIF(TRIM(CAST({alias}.visit_number AS VARCHAR)), '')"
+
+
+def visit_key_sql(alias: str) -> str:
+    """Stable grouping key for ADT visits.
+
+    Most rows have visit_number, but production has millions of ADT events
+    with NULL/blank visit_number. Falling back to a per-event descriptive key
+    avoids collapsing every missing-visit row for a patient into one fake stay.
+    """
+    return (
+        f"COALESCE({visit_number_sql(alias)}, "
+        f"'__missing_visit__:' || COALESCE(CAST({alias}.event_date AS VARCHAR), '') || "
+        f"':' || COALESCE({alias}.clean_status, '') || "
+        f"':' || COALESCE({alias}.event_location, '') || "
+        f"':' || COALESCE({alias}.location_type, '') || "
+        f"':' || COALESCE({alias}.clean_setting, ''))"
+    )
+
+
 def _qualifying_evidence_sql(alias: str = "adt") -> str:
     """Row-level predicate: this row is positive evidence of an inpatient stay.
 
@@ -53,10 +86,10 @@ def _qualifying_evidence_sql(alias: str = "adt") -> str:
 def inpatient_admission_flag_sql(dialect: str, alias: str = "adt") -> str:
     """Visit-level boolean: does this visit_number represent an inpatient admission?
 
-    Use inside a query that GROUPs BY visit_number (SELECT column or HAVING).
+    Use inside a query that GROUPs BY visit_key_sql(alias) (SELECT column or HAVING).
     """
     evidence = _qualifying_evidence_sql(alias)
-    cancel = f"{alias}.clean_status = '{CANCEL_ADMIT_STATUS}'"
+    cancel = f"COALESCE({alias}.clean_status, '') = '{CANCEL_ADMIT_STATUS}'"
     if dialect in ("postgres", "redshift"):
         return f"BOOL_OR({evidence}) AND NOT BOOL_OR({cancel})"
     if dialect == "sqlite":
@@ -87,6 +120,8 @@ def inpatient_cohort_subquery_sql(
     params: dict = {}
     flag = inpatient_admission_flag_sql(dialect, alias="adt")
     qad = qualifying_admit_date_sql(alias="adt")
+    patient_id_expr = patient_id_text_sql("adt")
+    visit_key_expr = visit_key_sql("adt")
     having = [flag]
     if start_date:
         having.append(f"{qad} >= :{param_prefix}_start")
@@ -96,14 +131,14 @@ def inpatient_cohort_subquery_sql(
         params[f"{param_prefix}_end"] = end_date
 
     if project_admit_date:
-        select = f"adt.patient_id, {qad} AS qualifying_admit_date"
+        select = f"{patient_id_expr} AS patient_id, {qad} AS qualifying_admit_date"
     else:
-        select = "DISTINCT patient_id"
+        select = f"DISTINCT {patient_id_expr} AS patient_id"
 
     sql = (
         f"SELECT {select}\n"
         f"        FROM {schema_prefix}federated_adt_v adt\n"
-        f"        GROUP BY adt.patient_id, adt.visit_number\n"
+        f"        GROUP BY {patient_id_expr}, {visit_key_expr}\n"
         f"        HAVING {' AND '.join(having)}"
     )
     return sql, params
@@ -118,19 +153,22 @@ def admissions_sql(
     end_date: Optional[str] = None,
     schema_prefix: str = "",
 ) -> Tuple[str, dict]:
-    """One row per visit_number for a patient, with a computed
-    is_inpatient_admission flag (0/1). See the design doc for the definition.
+    """One row per visit for a patient, with a computed is_inpatient_admission
+    flag (0/1). See the design doc for the definition.
 
     facility_type='inpatient' filters to is_inpatient_admission stays and
     date-filters on the derived qualifying_admit_date; other facility types
     filter to stays containing that clean_setting and date-filter on admit_date;
-    'any'/None returns all stays. The CTE rolls up the WHOLE visit so an
-    out-of-window CANCEL ADMIT can still void it.
+    'any'/None returns all stays. Rows with missing/blank visit_number use a
+    per-event synthetic grouping key so they do not collapse into one fake
+    stay. The CTE rolls up the WHOLE keyed visit so an out-of-window CANCEL
+    ADMIT can still void it when visit_number is present.
     """
     params: dict = {"source_id": source_id}
     flag_expr = inpatient_admission_flag_sql(dialect, alias="adt")
     qad_expr = qualifying_admit_date_sql(alias="adt")
     evidence_expr = _qualifying_evidence_sql(alias="adt")
+    visit_key_expr = visit_key_sql("adt")
 
     facility_has_col = ""
     if facility_type and facility_type not in ("any", "inpatient"):
@@ -165,7 +203,7 @@ def admissions_sql(
     # admitting facility, not an arbitrary MAX across the visit.
     admit_rn_expr = (
         f"ROW_NUMBER() OVER (\n"
-        f"                    PARTITION BY isr.source_id, adt.visit_number\n"
+        f"                    PARTITION BY isr.source_id, {visit_key_expr}\n"
         f"                    ORDER BY CASE WHEN {evidence_expr} THEN 0 ELSE 1 END, adt.event_date\n"
         f"                )"
     )
@@ -174,7 +212,8 @@ def admissions_sql(
         WITH ranked AS (
             SELECT
                 isr.source_id AS source_id,
-                adt.visit_number AS visit_number,
+                {visit_number_sql("adt")} AS visit_number,
+                {visit_key_expr} AS visit_key,
                 adt.event_date AS event_date,
                 adt.clean_status AS clean_status,
                 adt.clean_setting AS clean_setting,
@@ -187,13 +226,13 @@ def admissions_sql(
                 {admit_rn_expr} AS admit_rn
             FROM {schema_prefix}federated_adt_v adt
             JOIN {schema_prefix}internal_source_reference_v isr
-              ON isr.patient_id = adt.patient_id AND isr.empi_rank = 1
+              ON {patient_id_text_sql("isr")} = adt.patient_id AND isr.empi_rank = 1
             WHERE isr.source_id = :source_id
         ),
         visit_rollup AS (
             SELECT
                 source_id AS source_id,
-                adt.visit_number AS visit_number,
+                MAX(adt.visit_number) AS visit_number,
                 MIN(adt.event_date) AS admit_date,
                 {qad_expr} AS qualifying_admit_date,
                 MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.event_date END) AS discharge_date,
@@ -209,10 +248,18 @@ def admissions_sql(
                 MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.discharge_location END) AS discharge_location
                 {facility_has_col}
             FROM ranked adt
-            GROUP BY source_id, adt.visit_number
+            GROUP BY source_id, adt.visit_key
         )
         SELECT
-            source_id, visit_number, admit_date, discharge_date, setting,
+            source_id,
+            visit_number,
+            CASE
+                WHEN is_inpatient_admission = 1 AND qualifying_admit_date IS NOT NULL
+                    THEN qualifying_admit_date
+                ELSE admit_date
+            END AS admit_date,
+            discharge_date,
+            setting,
             is_inpatient_admission, event_location, location_type, admit_from,
             discharge_disposition, discharge_location
         FROM visit_rollup

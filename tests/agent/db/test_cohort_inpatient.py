@@ -42,6 +42,12 @@ def test_inpatient_cohort_count(synthetic_db):
     assert rows[0]._mapping["total_count"] == 3
 
 
+def test_inpatient_cohort_casts_profile_patient_id_for_adt_join():
+    sql, _ = cohort_sql(_make(inpatient_admission=True), schema_prefix="dw.", dialect="redshift")
+    n = " ".join(sql.split())
+    assert "adt_ip.patient_id = CAST(p.patient_id AS VARCHAR)" in n
+
+
 def test_inpatient_cohort_dedups_multiple_stays(synthetic_db):
     # p4 has two qualifying stays but must count once.
     rows = _counts(synthetic_db, _make(inpatient_admission=True, sample_size=20))

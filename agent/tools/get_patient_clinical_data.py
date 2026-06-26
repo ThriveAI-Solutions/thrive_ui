@@ -795,11 +795,13 @@ def _build_admissions_result(
         items=items,
         data_availability="data_present",
         reliability_note=(
-            "Admissions are rolled up to one row per visit (visit_number) from "
-            "federated_adt_v. is_inpatient_admission marks visits with inpatient-class "
-            "evidence (clean_setting INPATIENT or an A06 outpatient->inpatient "
-            "conversion), excluding pre-admit/pending statuses and cancelled admits. "
-            "A bare ADMIT/A01 event is not treated as inpatient on its own."
+            "Admissions are rolled up to one row per visit when visit_number is "
+            "present; rows with missing/blank visit_number are kept separate by "
+            "event so unrelated ADT events do not collapse into one stay. "
+            "is_inpatient_admission marks visits with inpatient-class evidence "
+            "(clean_setting INPATIENT or an A06 outpatient->inpatient conversion), "
+            "excluding pre-admit/pending statuses and cancelled admits. A bare "
+            "ADMIT/A01 event is not treated as inpatient on its own."
         ),
     )
 

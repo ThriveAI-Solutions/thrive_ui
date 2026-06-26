@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from agent.db.queries.adt import inpatient_cohort_subquery_sql
+from agent.db.queries.adt import inpatient_cohort_subquery_sql, patient_id_text_sql
 from agent.db.queries.cohort import (
     _build_non_diagnosis_filters,
     _diagnosis_event_where,
@@ -201,7 +201,7 @@ def cohort_breakdown_sql(
             param_prefix="adt",
         )
         params.update(adt_params)
-        join_clauses.append(f"JOIN ({adt_sub}) adt_ip ON adt_ip.patient_id = p.patient_id")
+        join_clauses.append(f"JOIN ({adt_sub}) adt_ip ON adt_ip.patient_id = {patient_id_text_sql('p')}")
 
     join_block = "\n        ".join(join_clauses)
     where_block = " AND ".join(where_clauses)

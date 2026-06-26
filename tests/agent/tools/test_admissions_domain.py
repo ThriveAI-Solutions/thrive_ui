@@ -31,6 +31,17 @@ def test_admissions_any_includes_non_inpatient_flag_false(synthetic_db):
     assert by_visit["V100"].is_inpatient_admission is True
 
 
+def test_admissions_result_pairs_inpatient_facility_with_inpatient_admit_date(synthetic_db):
+    res = _build_admissions_result(
+        _adapter(synthetic_db), "src-john-1971", "", AdmissionsQuery(facility_type="inpatient")
+    )
+    assert len(res.items) == 1
+    stay = res.items[0]
+    assert stay.event_location == "Kaleida Methodist"
+    assert stay.admit_date == "2026-03-15 18:00"
+    assert stay.discharge_date == "2026-03-20 09:00"
+
+
 def test_admissions_no_records(synthetic_db):
     res = _build_admissions_result(_adapter(synthetic_db), "src-nobody", "", AdmissionsQuery())
     assert res.data_availability == "no_records_found"

@@ -15,7 +15,7 @@ expanding bindparam — see agent/db/queries/labs.py for the same idiom.
 from __future__ import annotations
 from typing import Tuple
 
-from agent.db.queries.adt import inpatient_cohort_subquery_sql
+from agent.db.queries.adt import inpatient_cohort_subquery_sql, patient_id_text_sql
 
 
 # WNY-relevant US state aliases. The warehouse's state column has rows in
@@ -122,7 +122,7 @@ def _build_non_diagnosis_filters(
             param_prefix="adt",
         )
         params.update(adt_params)
-        join_clauses.append(f"JOIN ({adt_sub}) adt_ip ON adt_ip.patient_id = p.patient_id")
+        join_clauses.append(f"JOIN ({adt_sub}) adt_ip ON adt_ip.patient_id = {patient_id_text_sql('p')}")
 
     if getattr(criteria, "zip_code", None):
         where_clauses.append("p.zip_code = :geo_zip")

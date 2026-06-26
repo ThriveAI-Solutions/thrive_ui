@@ -43,7 +43,7 @@ def test_a06_conversion_counts_as_inpatient(synthetic_db):
     assert len(rows) == 1
     assert rows[0]["visit_number"] == "V200"
     # qualifying date anchors on the A06 row (18:00), not the EMERGENCY registration (12:00)
-    assert str(rows[0]["admit_date"]).startswith("2026-03-15")
+    assert str(rows[0]["admit_date"]).startswith("2026-03-15 18:00")
 
 
 def test_cancelled_admit_is_not_inpatient(synthetic_db):
@@ -62,6 +62,15 @@ def test_junk_settings_are_not_inpatient(synthetic_db):
     sql, params = admissions_sql(source_id="src-daniel-1977", dialect="sqlite", facility_type="inpatient")
     rows = _adapter(synthetic_db).fetch_all(sql, params)
     assert rows == []
+
+
+def test_missing_visit_numbers_do_not_collapse_into_one_stay(synthetic_db):
+    sql, params = admissions_sql(source_id="src-anne-1948", dialect="sqlite", facility_type="any")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    assert len(rows) == 2
+    assert {r["visit_number"] for r in rows} == {None}
+    assert {str(r["admit_date"]) for r in rows} == {"2026-01-01 08:00", "2026-01-02 09:00"}
+    assert all(r["is_inpatient_admission"] == 0 for r in rows)
 
 
 def test_two_inpatient_stays_for_one_patient(synthetic_db):
@@ -111,7 +120,7 @@ def test_resolves_source_id_via_isr_join():
     assert "WHERE source_id" not in n
     assert "adt.source_id" not in n
     assert "JOIN dw.internal_source_reference_v isr" in n
-    assert "isr.patient_id = adt.patient_id" in n
+    assert "CAST(isr.patient_id AS VARCHAR) = adt.patient_id" in n
     assert "isr.empi_rank = 1" in n
     assert "isr.source_id = :source_id" in n
     assert "isr.source_id AS source_id" in n
@@ -136,3 +145,4 @@ def test_event_location_is_admitting_facility_on_transfer(synthetic_db):
     assert rows[0]["visit_number"] == "V200"
     assert rows[0]["event_location"] == "Kaleida Methodist"
     assert rows[0]["location_type"] == "Hospital"
+    assert str(rows[0]["admit_date"]).startswith("2026-03-15 18:00")

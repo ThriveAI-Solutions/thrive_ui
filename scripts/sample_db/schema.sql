@@ -633,7 +633,7 @@ CREATE TABLE dw.federated_claims_summary_v (
 -- internal_source_reference_v at empi_rank = 1.
 DROP TABLE IF EXISTS dw.federated_adt_v CASCADE;
 CREATE TABLE dw.federated_adt_v (
-    patient_id INTEGER,
+    patient_id VARCHAR(256),
     source_name VARCHAR(256),
     source_format VARCHAR(256),
     last_modified_datetime TIMESTAMP,
@@ -747,4 +747,3 @@ CREATE TABLE dw.metric_federated_data_v (
     encounter_nbr VARCHAR(256),
     code_type VARCHAR(256)
 );
-

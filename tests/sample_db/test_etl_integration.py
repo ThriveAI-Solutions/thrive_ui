@@ -60,11 +60,13 @@ def test_etl_runs_against_fixtures(
     assert len(out["dw.federated_problems_v"]) >= 3
     assert len(out["dw.federated_allergies_v"]) == 2
     # The conftest encounters fixture has exactly one inpatient encounter
-    # (enc-002, pat-002). Ambulatory rows produce no ADT events.
-    assert len(out["dw.federated_adt_v"]) == 1
+    # (enc-002, pat-002). It emits ADMIT + DISCHARGE; ambulatory rows produce none.
+    assert len(out["dw.federated_adt_v"]) == 2
     adt_row = out["dw.federated_adt_v"][0]
     assert adt_row["clean_setting"] == "INPATIENT"
-    # patient_id is the integer warehouse-internal id, NOT the source_id.
+    assert {r["clean_status"] for r in out["dw.federated_adt_v"]} == {"ADMIT", "DISCHARGE"}
+    # In-memory transformer output still carries the integer internal id; DB load
+    # coerces it into federated_adt_v.patient_id's prod-compatible VARCHAR column.
     assert isinstance(adt_row["patient_id"], int)
 
 

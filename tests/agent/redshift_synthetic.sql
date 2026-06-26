@@ -241,7 +241,7 @@ INSERT INTO federated_vitals_v VALUES
 -- every other federated_*_v view). Identity is resolved by joining
 -- internal_source_reference_v at empi_rank = 1.
 CREATE TABLE federated_adt_v (
-    patient_id INTEGER,
+    patient_id TEXT,
     visit_number TEXT,
     event_date TIMESTAMP,
     event_location TEXT,
@@ -261,6 +261,7 @@ CREATE TABLE federated_adt_v (
 --  p3/V300 cancelled admit (ADMIT + CANCEL ADMIT, same visit)                                      -> NOT IP (visit voided)
 --  p4/V400 inpatient stay 2026-03 and p4/V401 inpatient stay 2024-01                               -> IP x2 (one patient)
 --  p5/V500 pre-admit-only inpatient (A05 w/ INPATIENT setting)                                     -> NOT IP
+--  p6 missing/blank visit_number ED rows                                                           -> separate synthetic fallback groups, NOT collapsed
 --  p7/V700 junk settings only ('P', '')                                                            -> NOT IP
 INSERT INTO federated_adt_v VALUES
     (1, 'V100', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'ADMIT',     NULL, 'Emergency Dept', NULL,                 NULL),
@@ -278,6 +279,8 @@ INSERT INTO federated_adt_v VALUES
     (4, 'V400', '2026-03-08 10:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'DISCHARGE', 'N',  NULL,            'Discharged to home', 'Home'),
     (4, 'V401', '2024-01-10 08:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'ADMIT',     'N',  'Home',          'Discharged to home', 'Home'),
     (5, 'V500', '2026-04-01 08:00', 'Buffalo Medical Group',    'Hospital', 'INPATIENT', 'A05',       'N',  'Home',          NULL,                 NULL),
+    (6, NULL,   '2026-01-01 08:00', 'Kaleida ED',               'Emergency','EMERGENCY', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
+    (6, '',     '2026-01-02 09:00', 'Kaleida ED',               'Emergency','EMERGENCY', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
     (7, 'V700', '2026-04-10 08:00', 'Unknown',                  'Unknown',  'P',         'A08',       'N',  NULL,            NULL,                 NULL),
     (7, 'V700', '2026-04-10 09:00', 'Unknown',                  'Unknown',  '',          'A08',       'N',  NULL,            NULL,                 NULL);
 

@@ -148,6 +148,7 @@ def test_admission_month_breakdown_groups_by_month(synthetic_db):
     # exactly one adt_ip join (the filter-only join must be suppressed when the
     # projected admission-date join is present).
     assert bucket_sql.count(") adt_ip ON") == 1
+    assert "adt_ip.patient_id = CAST(p.patient_id AS VARCHAR)" in bucket_sql
     with synthetic_db.connect() as conn:
         buckets = conn.execute(text(bucket_sql), params).fetchall()
     by_count = {r._mapping["bucket_label"]: r._mapping["patient_count"] for r in buckets}

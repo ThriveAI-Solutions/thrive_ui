@@ -122,7 +122,8 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
     wrist, hand, foot, neck, extremity) — the tool expands these to multiple \
     case-insensitive keyword patterns covering synonyms (e.g., "head" matches brain, cranial, skull).
   - get_patient_clinical_data({{domain:'admissions', facility_type, date_range}}) \
-    — ADT events from federated_adt_v, ROLLED UP to one row per visit (a stay). \
+    — ADT events from federated_adt_v, ROLLED UP to one row per visit when \
+    visit_number is present; missing visit_number rows are kept separate by event. \
     Each stay has is_inpatient_admission (true only when there is inpatient-class \
     evidence: clean_setting INPATIENT or an A06 outpatient->inpatient conversion), \
     plus event_location/location_type (the ADMITTING facility — for an ED->inpatient \
