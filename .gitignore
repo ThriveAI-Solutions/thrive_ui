@@ -231,5 +231,7 @@ scripts/synthea/output/
 # agentic eval harness — real roster source_ids and run results are PHI
 /evals/roster.yaml
 /evals/results/
+# generated local sample warehouse (rebuild from data/sample/thrive_sample.sql.zst)
+/sample_warehouse.db
 mempalace.yaml
 .verify-evidence/

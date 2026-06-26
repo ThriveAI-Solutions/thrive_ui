@@ -1,0 +1,7 @@
+# Focused single-turn smoke for the medications change — no followups, no
+# placeholders. Targets the meds retrieve+filter path directly.
+questions:
+  - id: Q9
+    title: Antibiotics treatment check
+    prompt: "Has this patient ever been treated with antibiotics? If so, list each antibiotic medication and the date it was prescribed."
+    followups: []
