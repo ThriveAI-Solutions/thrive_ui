@@ -72,52 +72,83 @@ def qualifying_admit_date_sql(alias: str = "adt") -> str:
 def admissions_sql(
     *,
     source_id: str,
+    dialect: str,
     facility_type: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    include_discharge_details: bool = True,
     schema_prefix: str = "",
 ) -> Tuple[str, dict]:
-    where: list[str] = ["isr.source_id = :source_id", "isr.empi_rank = 1"]
-    params: dict = {"source_id": source_id}
+    """One row per visit_number for a patient, with a computed
+    is_inpatient_admission flag (0/1). See the design doc for the definition.
 
-    if facility_type and facility_type != "any":
+    facility_type='inpatient' filters to is_inpatient_admission stays and
+    date-filters on the derived qualifying_admit_date; other facility types
+    filter to stays containing that clean_setting and date-filter on admit_date;
+    'any'/None returns all stays. The CTE rolls up the WHOLE visit so an
+    out-of-window CANCEL ADMIT can still void it.
+    """
+    params: dict = {"source_id": source_id}
+    flag_expr = inpatient_admission_flag_sql(dialect, alias="adt")
+    qad_expr = qualifying_admit_date_sql(alias="adt")
+    evidence_expr = _qualifying_evidence_sql(alias="adt")
+
+    facility_has_col = ""
+    if facility_type and facility_type not in ("any", "inpatient"):
         settings = _FACILITY_TYPE_SETTINGS.get(facility_type)
         if settings:
-            placeholders = ", ".join(f":ft_{i}" for i in range(len(settings)))
-            where.append(f"UPPER(adt.clean_setting) IN ({placeholders})")
-            for i, s in enumerate(settings):
-                params[f"ft_{i}"] = s
+            facility_has_col = (
+                f",\n                MAX(CASE WHEN UPPER(adt.clean_setting) IN "
+                f"({_sql_str_list(settings)}) THEN 1 ELSE 0 END) AS has_facility"
+            )
+
+    outer_where: list[str] = ["1=1"]
+    if facility_type == "inpatient":
+        outer_where.append("is_inpatient_admission = 1")
+        date_col = "qualifying_admit_date"
+    elif facility_type and facility_type != "any" and _FACILITY_TYPE_SETTINGS.get(facility_type):
+        outer_where.append("has_facility = 1")
+        date_col = "admit_date"
+    else:
+        date_col = "admit_date"
 
     if start_date:
-        where.append("adt.event_date >= :start_date")
+        outer_where.append(f"{date_col} >= :start_date")
         params["start_date"] = start_date
     if end_date:
-        where.append("adt.event_date <= :end_date")
+        outer_where.append(f"{date_col} <= :end_date")
         params["end_date"] = end_date
 
-    discharge_cols = ""
-    if include_discharge_details:
-        discharge_cols = """,
-            adt.discharge_disposition,
-            adt.discharge_location"""
-
-    # `isr.source_id AS source_id` echoes the input identifier into each row
-    # so _build_admissions_result can populate AdmissionItem.source_id without
-    # special-casing this query.
     sql = f"""
+        WITH visit_rollup AS (
+            SELECT
+                isr.source_id AS source_id,
+                adt.visit_number AS visit_number,
+                MIN(adt.event_date) AS admit_date,
+                {qad_expr} AS qualifying_admit_date,
+                MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.event_date END) AS discharge_date,
+                CASE WHEN ({flag_expr}) THEN 1 ELSE 0 END AS is_inpatient_admission,
+                COALESCE(
+                    MAX(CASE WHEN {evidence_expr} THEN adt.clean_setting END),
+                    MAX(adt.clean_setting)
+                ) AS setting,
+                MAX(adt.event_location) AS event_location,
+                MAX(adt.location_type) AS location_type,
+                MAX(adt.admit_from) AS admit_from,
+                MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.discharge_disposition END) AS discharge_disposition,
+                MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.discharge_location END) AS discharge_location
+                {facility_has_col}
+            FROM {schema_prefix}federated_adt_v adt
+            JOIN {schema_prefix}internal_source_reference_v isr
+              ON isr.patient_id = adt.patient_id AND isr.empi_rank = 1
+            WHERE isr.source_id = :source_id
+            GROUP BY isr.source_id, adt.visit_number
+        )
         SELECT
-            isr.source_id AS source_id,
-            adt.event_date,
-            adt.event_location,
-            adt.location_type,
-            adt.clean_setting AS setting,
-            adt.status,
-            adt.admit_from{discharge_cols}
-        FROM {schema_prefix}federated_adt_v adt
-        JOIN {schema_prefix}internal_source_reference_v isr
-          ON isr.patient_id = adt.patient_id
-        WHERE {" AND ".join(where)}
-        ORDER BY adt.event_date DESC
+            source_id, visit_number, admit_date, discharge_date, setting,
+            is_inpatient_admission, event_location, location_type, admit_from,
+            discharge_disposition, discharge_location
+        FROM visit_rollup
+        WHERE {" AND ".join(outer_where)}
+        ORDER BY admit_date DESC
     """
     return sql, params
