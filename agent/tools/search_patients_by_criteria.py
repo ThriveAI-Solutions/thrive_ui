@@ -229,7 +229,7 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     if criteria.breakdown:
         return _run_breakdown(ctx, criteria, adapter, schema_prefix)
 
-    sql, params = cohort_sql(criteria, schema_prefix=schema_prefix)
+    sql, params = cohort_sql(criteria, schema_prefix=schema_prefix, dialect=adapter.dialect)
     try:
         rows = adapter.fetch_all(sql, params)
     except SQLAlchemyError as exc:
