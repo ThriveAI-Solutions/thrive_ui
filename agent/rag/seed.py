@@ -162,10 +162,11 @@ SCHEMA_DOCS: List[_Doc] = [
         "text": (
             "federated_allergies_v: allergy records. Columns: source_id, code "
             "(SNOMED), code_type, allergy, type (Drug/Food/Adverse Reaction/"
-            "Environmental/Contact), severity, status, onset_date, status_datetime, "
-            "reaction. Use get_patient_clinical_data domain='allergies'; NKA "
-            "surfaces via the result's negative_assertion flag, drug-med conflicts "
-            "via notes_to_agent. Uncoded allergies in notes are NOT captured."
+            "Environmental/Contact), severity, status, date (clinical event date, "
+            "often NULL), created_date, reaction, comments. Use "
+            "get_patient_clinical_data domain='allergies'; NKA surfaces via the "
+            "result's negative_assertion flag, drug-med conflicts via "
+            "notes_to_agent. Uncoded allergies in notes are NOT captured."
         ),
     },
     {

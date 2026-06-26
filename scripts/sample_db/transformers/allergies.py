@@ -66,8 +66,12 @@ def transform_allergies(
                 "type": _CATEGORY_MAP.get(category_raw, "Adverse Reaction"),
                 "severity": _normalize_severity(a.get("SEVERITY1")),
                 "status": "Resolved" if stop else "Active",
-                "onset_date": start,
-                "status_datetime": stop or start,
+                # Prod's clinical `date` is frequently NULL; `created_date` is the
+                # record timestamp the query coalesces onto. Mirror that here:
+                # the allergy onset (START) populates `date`, and stop-or-start
+                # stands in for the ingest/record timestamp.
+                "date": start,
+                "created_date": stop or start,
                 "reaction": a.get("DESCRIPTION1") if isinstance(a.get("DESCRIPTION1"), str) else None,
                 "comments": None,
             }

@@ -649,11 +649,10 @@ CREATE TABLE dw.federated_adt_v (
     source_raw_table VARCHAR(256)
 );
 
--- federated_allergies_v: dedicated allergies view added by epic #201. Schema
--- inferred from the dev-warehouse evaluation set (allergy / type / severity
--- columns confirmed) plus the federated_problems_v shape. The Redshift
--- catalog JSON does not yet document this view; confirm columns and update
--- docs/superpowers/research/2026-05-06-redshift-tables.json before merge.
+-- federated_allergies_v: dedicated allergies view added by epic #201. Columns
+-- confirmed against the production view 2026-06-26: the clinical event date is
+-- `date` (frequently NULL in prod) with `created_date` as the record
+-- timestamp; the legacy onset_date / status_datetime columns no longer exist.
 DROP TABLE IF EXISTS dw.federated_allergies_v CASCADE;
 CREATE TABLE dw.federated_allergies_v (
     patient_id VARCHAR(256),
@@ -661,22 +660,22 @@ CREATE TABLE dw.federated_allergies_v (
     source_format VARCHAR(256),
     last_modified_datetime TIMESTAMP,
     source_id VARCHAR(50),
-    onset_date TIMESTAMP,
-    service_provider_npi VARCHAR(50),
+    date DATE,
+    allergy VARCHAR(256),
+    reaction VARCHAR(256),
+    type VARCHAR(256),
+    severity VARCHAR(4000),
+    status VARCHAR(256),
+    comments VARCHAR(4000),
+    created_date TIMESTAMP,
     code VARCHAR(256),
     code_type VARCHAR(256),
-    allergy VARCHAR(256),
-    type VARCHAR(256),
-    severity VARCHAR(256),
-    status VARCHAR(256),
-    status_datetime TIMESTAMP,
-    reaction VARCHAR(256),
-    comments VARCHAR(4000),
-    entry_code VARCHAR(256),
-    created_date TIMESTAMP,
-    allergy_id VARCHAR(256),
-    id VARCHAR(256),
-    source_raw_table VARCHAR(256)
+    source_raw_table VARCHAR(256),
+    place_of_service VARCHAR(3),
+    location_id VARCHAR(256),
+    location_name VARCHAR(256),
+    encounter_id VARCHAR(256),
+    encounter_nbr VARCHAR(256)
 );
 
 DROP TABLE IF EXISTS dw.metric_federated_data_v CASCADE;
