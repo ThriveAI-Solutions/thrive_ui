@@ -71,7 +71,7 @@ Available domains and their key filters:
       immunizations — cvx_codes, vaccine_text, date_range
       procedures — cpt_codes, procedure_text, date_range
       imaging — modality (xray|ct|mri|us|pet|any), body_region, date_range
-      admissions — facility_type (inpatient|ltc|snf|ed|outpatient|any), date_range, include_discharge_details
+      admissions — facility_type (inpatient|ltc|snf|ed|outpatient|any), date_range; read is_inpatient_admission per stay
     Coverage caveats (surface verbatim when the tool returns reliability_note): \
 LOINC ~50% on labs; ICD-10 ~57% on diagnoses; procedures union includes \
 claims which lag ~30 days.
@@ -121,14 +121,18 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
     regions (head, chest, abdomen, pelvis, spine, shoulder, knee, hip, ankle, \
     wrist, hand, foot, neck, extremity) — the tool expands these to multiple \
     case-insensitive keyword patterns covering synonyms (e.g., "head" matches brain, cranial, skull).
-  - get_patient_clinical_data({{domain:'admissions', facility_type, date_range, \
-    include_discharge_details}}) — ADT (admit/discharge/transfer) events from \
-    federated_adt_v. Returns event_date, event_location, location_type, setting, \
-    status, admit_from, discharge_disposition, discharge_location. Use this \
-    domain when the user asks about hospital admissions, discharges, transfers, \
-    LTC/SNF stays, or facility history. facility_type literal: \
-    inpatient | ltc | snf | ed | outpatient | any. When the user asks \
-    "which facilities?" or "what admission/discharge dates?", use this domain.
+  - get_patient_clinical_data({{domain:'admissions', facility_type, date_range}}) \
+    — ADT events from federated_adt_v, ROLLED UP to one row per visit (a stay). \
+    Each stay has is_inpatient_admission (true only when there is inpatient-class \
+    evidence: clean_setting INPATIENT or an A06 outpatient->inpatient conversion), \
+    plus admit_date, discharge_date, setting, admit_from, discharge_disposition, \
+    discharge_location. To answer "was the patient admitted to an inpatient \
+    facility?", read is_inpatient_admission — do NOT infer admission from raw \
+    status codes, and treat a bare ADMIT/ED visit as NOT inpatient unless it was \
+    converted (A06). facility_type: inpatient | ltc | snf | ed | outpatient | any \
+    (default any returns every stay; inpatient returns only is_inpatient_admission \
+    stays). Use for hospital admissions, discharges, transfers, LTC/SNF stays, or \
+    facility history.
   - list_patient_documents({{document_type, date_range}}) — returns the document \
     INDEX, not bodies. Same caveat: full text lives in HEALTHeLINK / EHR.
 

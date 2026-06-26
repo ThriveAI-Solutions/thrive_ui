@@ -135,14 +135,16 @@ SCHEMA_DOCS: List[_Doc] = [
         "view": "federated_adt_v",
         "kind": "schema",
         "text": (
-            "federated_adt_v: admit/discharge/transfer events. Columns: patient_id "
-            "(no source_id — join internal_source_reference_v at empi_rank=1), "
-            "event_date, event_location, location_type, clean_setting (normalized "
-            "setting: INPATIENT, OUTPATIENT, EMERGENCY, LONG TERM CARE, SNF), "
-            "status, admit_from, discharge_disposition, discharge_location. "
-            "Use get_patient_clinical_data with domain='admissions' to query this "
-            "view. Supports facility_type filtering (inpatient, ltc, snf, ed, "
-            "outpatient, any) and date_range."
+            "federated_adt_v: admit/discharge/transfer events, queried via "
+            "get_patient_clinical_data(domain='admissions') and rolled up to one row "
+            "per visit_number (a stay). patient_id only (no source_id — join "
+            "internal_source_reference_v at empi_rank=1). Each stay carries "
+            "is_inpatient_admission: true iff a non-cancelled row has clean_setting "
+            "INPATIENT or clean_status A06 (outpatient->inpatient), excluding pre-admit/"
+            "pending (A05,A14,A38,A27) and any visit with CANCEL ADMIT. A bare ADMIT/A01 "
+            "(often EMERGENCY-class) is NOT inpatient on its own. Supports facility_type "
+            "(inpatient, ltc, snf, ed, outpatient, any) and date_range; inpatient "
+            "date filters use the qualifying admission date."
         ),
     },
     {
@@ -291,7 +293,7 @@ EXAMPLES_DOCS: List[_Doc] = [
         "text": (
             "Q: 'What was the reason for patient X's most recent admission?'\n"
             "Tool sequence: (1) get_patient_clinical_data({domain:'admissions'}) — "
-            "items are ordered event_date DESC, so items[0] is the most recent; "
+            "stays are ordered admit_date DESC, so items[0] is the most recent; "
             "(2) get_patient_clinical_data({domain:'diagnoses', date_range:{start:"
             "<admission_date - 1 day>, end:<admission_date + 1 day>}}) to surface "
             "diagnoses recorded around the admission. federated_adt_v has no "
@@ -374,9 +376,9 @@ EXAMPLES_DOCS: List[_Doc] = [
             "Q: 'Which facilities was this patient admitted to? What were the "
             "admission and discharge dates?'\n"
             "Tool sequence: get_patient_clinical_data({domain:'admissions', "
-            "facility_type:'any', include_discharge_details:True}). Returns "
-            "event_location, event_date, discharge_disposition, and "
-            "discharge_location for all ADT events."
+            "facility_type:'any'}). Returns one row per visit (a stay) with "
+            "event_location, admit_date, discharge_date, discharge_disposition, and "
+            "discharge_location."
         ),
     },
     {
@@ -405,10 +407,13 @@ EXAMPLES_DOCS: List[_Doc] = [
         "view": "",
         "kind": "examples",
         "text": (
-            "Q: 'Was patient admitted to hospital or inpatient during 2025?'\n"
+            "Q: 'Was this patient admitted to an inpatient facility in 2025?'\n"
             "Tool sequence: get_patient_clinical_data({domain:'admissions', "
-            "facility_type:'inpatient', date_range:{start:'2025-01-01', "
-            "end:'2025-12-31'}})."
+            "facility_type:'inpatient', date_range:{start:'2025-01-01', end:'2025-12-31'}}). "
+            "Returns one row per qualifying inpatient stay; answer yes iff any stay is "
+            "returned (each has is_inpatient_admission=true). For all facility history "
+            "(ED/SNF/outpatient too), omit facility_type and read is_inpatient_admission "
+            "per stay."
         ),
     },
     {
