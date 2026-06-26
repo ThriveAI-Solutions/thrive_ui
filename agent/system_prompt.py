@@ -125,7 +125,9 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
     — ADT events from federated_adt_v, ROLLED UP to one row per visit (a stay). \
     Each stay has is_inpatient_admission (true only when there is inpatient-class \
     evidence: clean_setting INPATIENT or an A06 outpatient->inpatient conversion), \
-    plus admit_date, discharge_date, setting, admit_from, discharge_disposition, \
+    plus event_location/location_type (the ADMITTING facility — for an ED->inpatient \
+    transfer this is where they were admitted, not the ED), admit_date, \
+    discharge_date, setting, admit_from, discharge_disposition, \
     discharge_location. To answer "was the patient admitted to an inpatient \
     facility?", read is_inpatient_admission — do NOT infer admission from raw \
     status codes, and treat a bare ADMIT/ED visit as NOT inpatient unless it was \

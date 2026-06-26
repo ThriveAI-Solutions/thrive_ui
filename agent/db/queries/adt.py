@@ -158,10 +158,41 @@ def admissions_sql(
         outer_where.append(f"{date_col} <= :end_date")
         params["end_date"] = end_date
 
+    # admit_rn=1 marks the admitting event of the visit: the earliest qualifying
+    # (inpatient/A06) row, or — when the visit has no qualifying row — the
+    # earliest event. event_location/location_type are read from that row so a
+    # cross-facility transfer (ED at one site -> inpatient at another) reports the
+    # admitting facility, not an arbitrary MAX across the visit.
+    admit_rn_expr = (
+        f"ROW_NUMBER() OVER (\n"
+        f"                    PARTITION BY isr.source_id, adt.visit_number\n"
+        f"                    ORDER BY CASE WHEN {evidence_expr} THEN 0 ELSE 1 END, adt.event_date\n"
+        f"                )"
+    )
+
     sql = f"""
-        WITH visit_rollup AS (
+        WITH ranked AS (
             SELECT
                 isr.source_id AS source_id,
+                adt.visit_number AS visit_number,
+                adt.event_date AS event_date,
+                adt.clean_status AS clean_status,
+                adt.clean_setting AS clean_setting,
+                adt.cancelled_flag AS cancelled_flag,
+                adt.event_location AS event_location,
+                adt.location_type AS location_type,
+                adt.admit_from AS admit_from,
+                adt.discharge_disposition AS discharge_disposition,
+                adt.discharge_location AS discharge_location,
+                {admit_rn_expr} AS admit_rn
+            FROM {schema_prefix}federated_adt_v adt
+            JOIN {schema_prefix}internal_source_reference_v isr
+              ON isr.patient_id = adt.patient_id AND isr.empi_rank = 1
+            WHERE isr.source_id = :source_id
+        ),
+        visit_rollup AS (
+            SELECT
+                source_id AS source_id,
                 adt.visit_number AS visit_number,
                 MIN(adt.event_date) AS admit_date,
                 {qad_expr} AS qualifying_admit_date,
@@ -171,17 +202,14 @@ def admissions_sql(
                     MAX(CASE WHEN {evidence_expr} THEN adt.clean_setting END),
                     MAX(adt.clean_setting)
                 ) AS setting,
-                MAX(adt.event_location) AS event_location,
-                MAX(adt.location_type) AS location_type,
+                MAX(CASE WHEN adt.admit_rn = 1 THEN adt.event_location END) AS event_location,
+                MAX(CASE WHEN adt.admit_rn = 1 THEN adt.location_type END) AS location_type,
                 MAX(adt.admit_from) AS admit_from,
                 MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.discharge_disposition END) AS discharge_disposition,
                 MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.discharge_location END) AS discharge_location
                 {facility_has_col}
-            FROM {schema_prefix}federated_adt_v adt
-            JOIN {schema_prefix}internal_source_reference_v isr
-              ON isr.patient_id = adt.patient_id AND isr.empi_rank = 1
-            WHERE isr.source_id = :source_id
-            GROUP BY isr.source_id, adt.visit_number
+            FROM ranked adt
+            GROUP BY source_id, adt.visit_number
         )
         SELECT
             source_id, visit_number, admit_date, discharge_date, setting,

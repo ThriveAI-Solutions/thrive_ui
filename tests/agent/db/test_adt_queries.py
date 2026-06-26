@@ -122,3 +122,17 @@ def test_does_not_leak_other_patients(synthetic_db):
     rows = _adapter(synthetic_db).fetch_all(sql, params)
     assert all(r["source_id"] == "src-john-1971" for r in rows)
     assert {r["visit_number"] for r in rows} == {"V200"}
+
+
+def test_event_location_is_admitting_facility_on_transfer(synthetic_db):
+    """V200 is an ED->inpatient cross-facility transfer: ED registration at
+    'Sisters of Charity ED', then admitted INPATIENT (A06) at 'Kaleida
+    Methodist'. event_location must be the ADMITTING (qualifying-event)
+    facility, not a blind MAX across the visit (which would pick the
+    lexicographically-greater 'Sisters of Charity ED')."""
+    sql, params = admissions_sql(source_id="src-john-1971", dialect="sqlite", facility_type="inpatient")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    assert len(rows) == 1
+    assert rows[0]["visit_number"] == "V200"
+    assert rows[0]["event_location"] == "Kaleida Methodist"
+    assert rows[0]["location_type"] == "Hospital"

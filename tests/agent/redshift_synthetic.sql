@@ -257,7 +257,7 @@ CREATE TABLE federated_adt_v (
 --  p1/V100 clean inpatient stay (multi-event, NULL clean_status+cancelled_flag exercises COALESCE) -> IP
 --  p1/V101 ED-only bare ADMIT (EMERGENCY)                                                          -> NOT IP
 --  p1/V102 SNF stay                                                                                -> NOT IP (facility=snf)
---  p2/V200 A06 outpatient->inpatient conversion                                                    -> IP (qualifying date = A06 row)
+--  p2/V200 A06 outpatient->inpatient conversion, ED->inpatient cross-facility transfer            -> IP (admit date+facility = A06 row @ Kaleida, not the ED reg @ Sisters)
 --  p3/V300 cancelled admit (ADMIT + CANCEL ADMIT, same visit)                                      -> NOT IP (visit voided)
 --  p4/V400 inpatient stay 2026-03 and p4/V401 inpatient stay 2024-01                               -> IP x2 (one patient)
 --  p5/V500 pre-admit-only inpatient (A05 w/ INPATIENT setting)                                     -> NOT IP
@@ -269,7 +269,7 @@ INSERT INTO federated_adt_v VALUES
     (1, 'V101', '2024-11-05 14:00', 'ECMC Emergency',           'Emergency','EMERGENCY', 'ADMIT',     'N',  'Self',          'Discharged to home', 'Home'),
     (1, 'V102', '2025-06-20 10:00', 'Sunrise SNF',              'Skilled Nursing','SNF',  'ADMIT',     'N',  'Buffalo General Hospital', NULL,     NULL),
     (1, 'V102', '2025-07-01 10:00', 'Sunrise SNF',              'Skilled Nursing','SNF',  'DISCHARGE', 'N',  NULL,            'Discharged to home', 'Home'),
-    (2, 'V200', '2026-03-15 12:00', 'Kaleida Methodist',        'Emergency','EMERGENCY', 'REGISTRATION','N','Home',          NULL,                 NULL),
+    (2, 'V200', '2026-03-15 12:00', 'Sisters of Charity ED',    'Emergency','EMERGENCY', 'REGISTRATION','N','Home',          NULL,                 NULL),
     (2, 'V200', '2026-03-15 18:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'A06',       'N',  NULL,            NULL,                 NULL),
     (2, 'V200', '2026-03-20 09:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'DISCHARGE', 'N',  NULL,            'Discharged to home', 'Home'),
     (3, 'V300', '2026-02-01 08:00', 'ECMC',                     'Hospital', 'INPATIENT', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
