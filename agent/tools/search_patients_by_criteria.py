@@ -214,9 +214,11 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
       - breakdown: optional list of ONE dimension to group counts by —
         diagnosis_month / diagnosis_quarter / diagnosis_year (require a
         diagnosis anchor: codes or a date range; buckets overlap and don't
-        sum), gender, or age_band. Returns aggregate buckets instead of a
-        patient sample. Pass 2+ dimensions only to escalate: the tool then
-        returns a generated_sql template to extend in run_sql.
+        sum), admission_month / admission_quarter / admission_year (require
+        inpatient_admission=true; buckets overlap and don't sum), gender, or
+        age_band. Returns aggregate buckets instead of a patient sample. Pass
+        2+ dimensions only to escalate: the tool then returns a generated_sql
+        template to extend in run_sql.
 
     Returns CohortResult with total_count + sample. The sample is truncated
     to sample_size; total_count carries the full population. When a code-based
