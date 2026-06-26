@@ -67,7 +67,7 @@ Available domains and their key filters:
       encounters — facility_type (inpatient|outpatient|ed|ltc|any), date_range
       labs — loinc_codes, test_name_text, date_range, result_filter (positive|negative|abnormal|any), most_recent_only
       diagnoses — icd10_codes, condition_text, most_recent_only
-      medications — rxnorm_codes, date_range
+      medications — date_range (returns the full med list; filter by med_name / status yourself)
       immunizations — cvx_codes, vaccine_text, date_range
       procedures — cpt_codes, procedure_text, date_range
       imaging — modality (xray|ct|mri|us|pet|any), body_region, date_range
@@ -78,7 +78,7 @@ claims which lag ~30 days.
 
   - Human-readable term needs codes FIRST → `search_codes(vocabulary, \
 query)` then feed codes into `get_patient_clinical_data`. Vocabularies: \
-icd10, loinc, cvx, rxnorm, cpt. One call per concept is enough (one \
+icd10, loinc, cvx, cpt. One call per concept is enough (one \
 search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
 
   - get_patient_clinical_data({{domain:'demographics'}}) — name, DOB, gender.
@@ -94,10 +94,12 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
   - get_patient_clinical_data({{domain:'diagnoses', icd10_codes, condition_text, \
     most_recent_only}}) — problems list. ICD-10 ~57%; SNOMED/ICD-9 the rest. \
     Surface reliability_note when present.
-  - get_patient_clinical_data({{domain:'medications', rxnorm_codes, date_range}}) \
-    — meds. Both NDC and RxNorm are 100% populated. The drug_class and \
-    linked_diagnosis_codes filters are NOT implemented in v1; resolve drug \
-    classes to rxnorm_codes via search_codes(vocabulary='rxnorm') first.
+  - get_patient_clinical_data({{domain:'medications', date_range}}) \
+    — meds. Returns the patient's FULL medication list; med_name is always \
+    populated. Do NOT use search_codes for medications. Fetch the list \
+    (optionally date_range-bounded) and identify the relevant drugs by \
+    med_name yourself. Each row includes status and date_stopped — use them \
+    to distinguish an active medication from a discontinued/historical one.
   - get_patient_clinical_data({{domain:'immunizations', cvx_codes, vaccine_text, \
     date_range}}) — vaccines. CVX is 100% populated; resolve common names \
     (MMR, Tdap, Hep A) via search_codes(vocabulary='cvx') first.

@@ -316,11 +316,11 @@ EXAMPLES_DOCS: List[_Doc] = [
         "kind": "examples",
         "text": (
             "Q: 'Has patient been treated with antibiotics for Gonorrhea after a date?'\n"
-            "Tool sequence: search_codes(vocabulary='rxnorm', query='azithromycin') and "
-            "search_codes(vocabulary='rxnorm', query='ceftriaxone') → "
-            "get_patient_clinical_data({domain:'medications', rxnorm_codes:[...], "
-            "date_range:{start:...}}). EPT and pregnancy-at-test are not in the warehouse — "
-            "tell the user."
+            "Tool sequence: get_patient_clinical_data({domain:'medications', "
+            "date_range:{start:...}}) → scan the returned med_name values yourself "
+            "for the relevant antibiotics (e.g. azithromycin, ceftriaxone); do not "
+            "look up RxNorm codes for medications. EPT and pregnancy-at-test are not "
+            "in the warehouse — tell the user."
         ),
     },
     {
