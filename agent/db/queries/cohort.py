@@ -164,6 +164,7 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
             getattr(criteria, "zip_code", None),
             getattr(criteria, "city", None),
             getattr(criteria, "state", None),
+            getattr(criteria, "inpatient_admission", None),
         )
     ):
         raise ValueError("cohort_sql requires at least one search criterion; refusing to issue an unfiltered scan.")
