@@ -26,7 +26,7 @@ from agent.db.queries.surgeries import surgeries_sql
 from agent.db.queries.imaging import imaging_sql
 from agent.db.queries.adt import admissions_sql
 from agent.db.queries.allergies import allergies_sql
-from agent.code_normalizer import normalize_token, variants_for
+from agent.code_normalizer import normalize_token
 from agent.codes.allergies import find_drug_allergy_conflicts
 from agent.dataframe_adapters import clinical_result_to_df
 
@@ -125,7 +125,6 @@ class AdmissionsQuery(BaseModel):
     domain: Literal["admissions"] = "admissions"
     date_range: Optional[DateRange] = None
     facility_type: Optional[Literal["inpatient", "ltc", "snf", "ed", "outpatient", "any"]] = "any"
-    include_discharge_details: bool = True
 
 
 class AllergiesQuery(BaseModel):
@@ -290,14 +289,16 @@ class ImagingItem(BaseModel):
     location_name: Optional[str] = None
 
 
-class AdmissionItem(BaseModel):
-    item_type: Literal["admission"] = "admission"
+class AdmissionStay(BaseModel):
+    item_type: Literal["admission_stay"] = "admission_stay"
     source_id: str
-    event_date: Optional[str] = None
+    visit_number: Optional[str] = None
+    admit_date: Optional[str] = None
+    discharge_date: Optional[str] = None
+    setting: Optional[str] = None
+    is_inpatient_admission: bool = False
     event_location: Optional[str] = None
     location_type: Optional[str] = None
-    setting: Optional[str] = None
-    status: Optional[str] = None
     admit_from: Optional[str] = None
     discharge_disposition: Optional[str] = None
     discharge_location: Optional[str] = None
@@ -333,7 +334,7 @@ ClinicalItem = Annotated[
         ProcedureItem,
         SurgeryItem,
         ImagingItem,
-        AdmissionItem,
+        AdmissionStay,
         AllergyItem,
     ],
     Field(discriminator="item_type"),
@@ -760,10 +761,10 @@ def _build_admissions_result(
     dr = query.date_range
     sql, params = admissions_sql(
         source_id=source_id,
+        dialect=adapter.dialect,
         facility_type=query.facility_type,
         start_date=dr.start.isoformat() if dr and dr.start else None,
         end_date=dr.end.isoformat() if dr and dr.end else None,
-        include_discharge_details=query.include_discharge_details,
         schema_prefix=schema_prefix,
     )
     rows = adapter.fetch_all(sql, params)
@@ -773,18 +774,19 @@ def _build_admissions_result(
             items=[],
             data_availability="no_records_found",
         )
-    include_discharge = query.include_discharge_details
     items = [
-        AdmissionItem(
+        AdmissionStay(
             source_id=r["source_id"],
-            event_date=str(r["event_date"]) if r.get("event_date") else None,
+            visit_number=r.get("visit_number"),
+            admit_date=str(r["admit_date"]) if r.get("admit_date") else None,
+            discharge_date=str(r["discharge_date"]) if r.get("discharge_date") else None,
+            setting=r.get("setting"),
+            is_inpatient_admission=bool(r.get("is_inpatient_admission")),
             event_location=r.get("event_location"),
             location_type=r.get("location_type"),
-            setting=r.get("setting"),
-            status=r.get("status"),
             admit_from=r.get("admit_from"),
-            discharge_disposition=r.get("discharge_disposition") if include_discharge else None,
-            discharge_location=r.get("discharge_location") if include_discharge else None,
+            discharge_disposition=r.get("discharge_disposition"),
+            discharge_location=r.get("discharge_location"),
         )
         for r in rows
     ]
@@ -793,9 +795,13 @@ def _build_admissions_result(
         items=items,
         data_availability="data_present",
         reliability_note=(
-            "ADT events are sourced from federated_adt_v. Setting values are "
-            "normalized via clean_setting. Discharge details may be absent for "
-            "events still in progress or from sources that do not report them."
+            "Admissions are rolled up to one row per visit when visit_number is "
+            "present; rows with missing/blank visit_number are kept separate by "
+            "event so unrelated ADT events do not collapse into one stay. "
+            "is_inpatient_admission marks visits with inpatient-class evidence "
+            "(clean_setting INPATIENT or an A06 outpatient->inpatient conversion), "
+            "excluding pre-admit/pending statuses and cancelled admits. A bare "
+            "ADMIT/A01 event is not treated as inpatient on its own."
         ),
     )
 

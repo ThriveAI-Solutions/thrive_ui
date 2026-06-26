@@ -241,24 +241,48 @@ INSERT INTO federated_vitals_v VALUES
 -- every other federated_*_v view). Identity is resolved by joining
 -- internal_source_reference_v at empi_rank = 1.
 CREATE TABLE federated_adt_v (
-    patient_id INTEGER,
+    patient_id TEXT,
+    visit_number TEXT,
     event_date TIMESTAMP,
     event_location TEXT,
     location_type TEXT,
     clean_setting TEXT,
-    status TEXT,
+    clean_status TEXT,
+    cancelled_flag TEXT,
     admit_from TEXT,
     discharge_disposition TEXT,
     discharge_location TEXT
 );
--- patient_id 1 maps to source_id 'src-john-1962' (empi_rank=1) per
--- internal_source_reference_v above. patient_id 2 maps to 'src-john-1971'.
+-- Cases (see design doc Data Findings):
+--  p1/V100 clean inpatient stay (multi-event, NULL clean_status+cancelled_flag exercises COALESCE) -> IP
+--  p1/V101 ED-only bare ADMIT (EMERGENCY)                                                          -> NOT IP
+--  p1/V102 SNF stay                                                                                -> NOT IP (facility=snf)
+--  p2/V200 A06 outpatient->inpatient conversion, ED->inpatient cross-facility transfer            -> IP (admit date+facility = A06 row @ Kaleida, not the ED reg @ Sisters)
+--  p3/V300 cancelled admit (ADMIT + CANCEL ADMIT, same visit)                                      -> NOT IP (visit voided)
+--  p4/V400 inpatient stay 2026-03 and p4/V401 inpatient stay 2024-01                               -> IP x2 (one patient)
+--  p5/V500 pre-admit-only inpatient (A05 w/ INPATIENT setting)                                     -> NOT IP
+--  p6 missing/blank visit_number ED rows                                                           -> separate synthetic fallback groups, NOT collapsed
+--  p7/V700 junk settings only ('P', '')                                                            -> NOT IP
 INSERT INTO federated_adt_v VALUES
-    (1, '2026-01-10 08:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home'),
-    (1, '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'Discharged', 'Emergency Dept', 'Discharged to SNF', 'Sunrise SNF'),
-    (1, '2025-06-20 10:00', 'Sunrise SNF', 'Skilled Nursing', 'SNF', 'Discharged', 'Buffalo General Hospital', 'Discharged to home', 'Home'),
-    (1, '2024-11-05 14:00', 'ECMC Emergency', 'Emergency', 'EMERGENCY', 'Discharged', 'Self', 'Discharged to home', 'Home'),
-    (2, '2026-03-15 14:00', 'Kaleida Methodist', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home');
+    (1, 'V100', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'ADMIT',     NULL, 'Emergency Dept', NULL,                 NULL),
+    (1, 'V100', '2025-06-16 09:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'A02',       NULL, NULL,            NULL,                 NULL),
+    (1, 'V100', '2025-06-18 11:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'DISCHARGE', NULL, NULL,            'Discharged to home', 'Home'),
+    (1, 'V101', '2024-11-05 14:00', 'ECMC Emergency',           'Emergency','EMERGENCY', 'ADMIT',     'N',  'Self',          'Discharged to home', 'Home'),
+    (1, 'V102', '2025-06-20 10:00', 'Sunrise SNF',              'Skilled Nursing','SNF',  'ADMIT',     'N',  'Buffalo General Hospital', NULL,     NULL),
+    (1, 'V102', '2025-07-01 10:00', 'Sunrise SNF',              'Skilled Nursing','SNF',  'DISCHARGE', 'N',  NULL,            'Discharged to home', 'Home'),
+    (2, 'V200', '2026-03-15 12:00', 'Sisters of Charity ED',    'Emergency','EMERGENCY', 'REGISTRATION','N','Home',          NULL,                 NULL),
+    (2, 'V200', '2026-03-15 18:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'A06',       'N',  NULL,            NULL,                 NULL),
+    (2, 'V200', '2026-03-20 09:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'DISCHARGE', 'N',  NULL,            'Discharged to home', 'Home'),
+    (3, 'V300', '2026-02-01 08:00', 'ECMC',                     'Hospital', 'INPATIENT', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
+    (3, 'V300', '2026-02-01 10:00', 'ECMC',                     'Hospital', 'INPATIENT', 'CANCEL ADMIT','Y',NULL,            NULL,                 NULL),
+    (4, 'V400', '2026-03-05 08:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
+    (4, 'V400', '2026-03-08 10:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'DISCHARGE', 'N',  NULL,            'Discharged to home', 'Home'),
+    (4, 'V401', '2024-01-10 08:00', 'Kaleida Methodist',        'Hospital', 'INPATIENT', 'ADMIT',     'N',  'Home',          'Discharged to home', 'Home'),
+    (5, 'V500', '2026-04-01 08:00', 'Buffalo Medical Group',    'Hospital', 'INPATIENT', 'A05',       'N',  'Home',          NULL,                 NULL),
+    (6, NULL,   '2026-01-01 08:00', 'Kaleida ED',               'Emergency','EMERGENCY', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
+    (6, '',     '2026-01-02 09:00', 'Kaleida ED',               'Emergency','EMERGENCY', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
+    (7, 'V700', '2026-04-10 08:00', 'Unknown',                  'Unknown',  'P',         'A08',       'N',  NULL,            NULL,                 NULL),
+    (7, 'V700', '2026-04-10 09:00', 'Unknown',                  'Unknown',  '',          'A08',       'N',  NULL,            NULL,                 NULL);
 
 -- federated_allergies_v: dedicated allergies view per epic #201. Columns
 -- match the production view confirmed 2026-06-26: the clinical event date is

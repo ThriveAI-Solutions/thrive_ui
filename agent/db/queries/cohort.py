@@ -15,6 +15,8 @@ expanding bindparam — see agent/db/queries/labs.py for the same idiom.
 from __future__ import annotations
 from typing import Tuple
 
+from agent.db.queries.adt import inpatient_cohort_subquery_sql, patient_id_text_sql
+
 
 # WNY-relevant US state aliases. The warehouse's state column has rows in
 # both 2-letter ("NY") and full-name ("NEW YORK") forms; matching only one
@@ -83,10 +85,16 @@ def _diagnosis_event_where(criteria) -> tuple[list[str], dict] | None:
     return dx_filter, params
 
 
-def _build_non_diagnosis_filters(criteria, schema_prefix: str) -> tuple[list[str], list[str], dict]:
+def _build_non_diagnosis_filters(
+    criteria, schema_prefix: str, dialect: str = "sqlite", include_inpatient_admission: bool = True
+) -> tuple[list[str], list[str], dict]:
     """Build (join_clauses, where_clauses, params) for everything except
     the diagnosis filter. Shared by cohort_sql and the breakdown builder so
     geo/demographic/medication logic lives in exactly one place.
+
+    include_inpatient_admission=False suppresses the filter-only ADT join so
+    the admission-time breakdown path can add its own projected adt_ip join
+    without producing two adt_ip aliases.
     """
     params: dict = {}
     join_clauses: list[str] = []
@@ -102,6 +110,19 @@ def _build_non_diagnosis_filters(criteria, schema_prefix: str) -> tuple[list[str
             f"WHERE code IN ({placeholders}) "
             f"AND code_type IN ('RxNorm', 'NDC')) med ON med.patient_id = p.patient_id"
         )
+
+    if include_inpatient_admission and getattr(criteria, "inpatient_admission", None):
+        dr = getattr(criteria, "inpatient_admission_date_range", None)
+        adt_sub, adt_params = inpatient_cohort_subquery_sql(
+            dialect,
+            schema_prefix=schema_prefix,
+            start_date=dr.start.isoformat() if dr and getattr(dr, "start", None) else None,
+            end_date=dr.end.isoformat() if dr and getattr(dr, "end", None) else None,
+            project_admit_date=False,
+            param_prefix="adt",
+        )
+        params.update(adt_params)
+        join_clauses.append(f"JOIN ({adt_sub}) adt_ip ON adt_ip.patient_id = {patient_id_text_sql('p')}")
 
     if getattr(criteria, "zip_code", None):
         where_clauses.append("p.zip_code = :geo_zip")
@@ -141,7 +162,7 @@ def _build_non_diagnosis_filters(criteria, schema_prefix: str) -> tuple[list[str
     return join_clauses, where_clauses, params
 
 
-def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
+def cohort_sql(criteria, schema_prefix: str = "", dialect: str = "sqlite") -> Tuple[str, dict]:
     """Build the SELECT for search_patients_by_criteria.
 
     `criteria` is a CohortCriteria (defined in agent/tools/search_patients_by_criteria.py).
@@ -164,6 +185,7 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
             getattr(criteria, "zip_code", None),
             getattr(criteria, "city", None),
             getattr(criteria, "state", None),
+            getattr(criteria, "inpatient_admission", None),
         )
     ):
         raise ValueError("cohort_sql requires at least one search criterion; refusing to issue an unfiltered scan.")
@@ -183,7 +205,7 @@ def cohort_sql(criteria, schema_prefix: str = "") -> Tuple[str, dict]:
             f"WHERE {' AND '.join(dx_filter)}) dx ON dx.patient_id = p.patient_id"
         )
 
-    other_joins, other_where, other_params = _build_non_diagnosis_filters(criteria, schema_prefix)
+    other_joins, other_where, other_params = _build_non_diagnosis_filters(criteria, schema_prefix, dialect=dialect)
     join_clauses.extend(other_joins)
     where_clauses.extend(other_where)
     params.update(other_params)

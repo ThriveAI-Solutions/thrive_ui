@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from agent.db.queries.adt import inpatient_cohort_subquery_sql, patient_id_text_sql
 from agent.db.queries.cohort import (
     _build_non_diagnosis_filters,
     _diagnosis_event_where,
@@ -24,6 +25,9 @@ class BreakdownDimension(str, Enum):
     DIAGNOSIS_MONTH = "diagnosis_month"
     DIAGNOSIS_QUARTER = "diagnosis_quarter"
     DIAGNOSIS_YEAR = "diagnosis_year"
+    ADMISSION_MONTH = "admission_month"
+    ADMISSION_QUARTER = "admission_quarter"
+    ADMISSION_YEAR = "admission_year"
     GENDER = "gender"
     AGE_BAND = "age_band"
 
@@ -33,6 +37,7 @@ class BucketSpec:
     group_expr: str  # SQL expression used in SELECT + GROUP BY, aliased to bucket_label
     non_additive: bool
     requires_diagnosis_anchor: bool
+    requires_inpatient_admission_anchor: bool = False
 
 
 _AGE_BAND_CASE = (
@@ -72,12 +77,46 @@ def _time_expr(unit: str, dialect: str) -> str:
     raise ValueError(f"Unsupported dialect for breakdown: {dialect!r}")
 
 
+def _admission_time_expr(unit: str, dialect: str) -> str:
+    """Stable string label for an inpatient-admission-date bucket, per dialect.
+
+    Mirrors _time_expr but operates on adt_ip.qualifying_admit_date (the
+    projected ADT subquery alias).
+    """
+    col = "adt_ip.qualifying_admit_date"
+    if dialect == "sqlite":
+        if unit == "month":
+            return f"strftime('%Y-%m', {col})"
+        if unit == "year":
+            return f"strftime('%Y', {col})"
+        return f"strftime('%Y', {col}) || '-Q' || ((CAST(strftime('%m', {col}) AS INTEGER) + 2) / 3)"
+    if dialect in ("postgres", "redshift"):
+        if unit == "month":
+            return f"TO_CHAR(DATE_TRUNC('month', {col}), 'YYYY-MM')"
+        if unit == "year":
+            return f"TO_CHAR({col}, 'YYYY')"
+        return f"TO_CHAR(DATE_TRUNC('quarter', {col}), 'YYYY-\"Q\"Q')"
+    raise ValueError(f"Unsupported dialect for breakdown: {dialect!r}")
+
+
 def breakdown_bucket(dimension: BreakdownDimension, dialect: str) -> BucketSpec:
     """Resolve a dimension to its SQL bucket expression for the given dialect."""
     if dimension == BreakdownDimension.GENDER:
         return BucketSpec(_GENDER_CASE, non_additive=False, requires_diagnosis_anchor=False)
     if dimension == BreakdownDimension.AGE_BAND:
         return BucketSpec(_AGE_BAND_CASE, non_additive=False, requires_diagnosis_anchor=False)
+    admission_units = {
+        BreakdownDimension.ADMISSION_MONTH: "month",
+        BreakdownDimension.ADMISSION_QUARTER: "quarter",
+        BreakdownDimension.ADMISSION_YEAR: "year",
+    }
+    if dimension in admission_units:
+        return BucketSpec(
+            _admission_time_expr(admission_units[dimension], dialect),
+            non_additive=True,
+            requires_diagnosis_anchor=False,
+            requires_inpatient_admission_anchor=True,
+        )
     unit = {
         BreakdownDimension.DIAGNOSIS_MONTH: "month",
         BreakdownDimension.DIAGNOSIS_QUARTER: "quarter",
@@ -108,6 +147,9 @@ def cohort_breakdown_sql(
     """
     spec = breakdown_bucket(dimension, dialect)
 
+    if spec.requires_inpatient_admission_anchor and not getattr(criteria, "inpatient_admission", None):
+        raise ValueError("An admission-time breakdown needs inpatient_admission=True.")
+
     dx = _diagnosis_event_where(criteria)
     if spec.requires_diagnosis_anchor and dx is None:
         raise MissingDiagnosisAnchorError(
@@ -134,10 +176,32 @@ def cohort_breakdown_sql(
                 f"WHERE {' AND '.join(dx_filter)}) dx ON dx.patient_id = p.patient_id"
             )
 
-    other_joins, other_where, other_params = _build_non_diagnosis_filters(criteria, schema_prefix)
+    # When an admission-time dimension is active, suppress the filter-only ADT
+    # join from _build_non_diagnosis_filters and add a single projected join
+    # below so adt_ip.qualifying_admit_date is in scope (and there is exactly
+    # one adt_ip alias).
+    other_joins, other_where, other_params = _build_non_diagnosis_filters(
+        criteria,
+        schema_prefix,
+        dialect=dialect,
+        include_inpatient_admission=not spec.requires_inpatient_admission_anchor,
+    )
     join_clauses.extend(other_joins)
     where_clauses.extend(other_where)
     params.update(other_params)
+
+    if spec.requires_inpatient_admission_anchor:
+        dr = getattr(criteria, "inpatient_admission_date_range", None)
+        adt_sub, adt_params = inpatient_cohort_subquery_sql(
+            dialect,
+            schema_prefix=schema_prefix,
+            start_date=dr.start.isoformat() if dr and getattr(dr, "start", None) else None,
+            end_date=dr.end.isoformat() if dr and getattr(dr, "end", None) else None,
+            project_admit_date=True,
+            param_prefix="adt",
+        )
+        params.update(adt_params)
+        join_clauses.append(f"JOIN ({adt_sub}) adt_ip ON adt_ip.patient_id = {patient_id_text_sql('p')}")
 
     join_block = "\n        ".join(join_clauses)
     where_block = " AND ".join(where_clauses)

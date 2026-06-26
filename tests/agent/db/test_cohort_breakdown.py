@@ -65,6 +65,8 @@ def _crit(**kw):
         zip_code=None,
         city=None,
         state=None,
+        inpatient_admission=None,
+        inpatient_admission_date_range=None,
     )
     base.update(kw)
     return SimpleNamespace(**base)
@@ -128,3 +130,36 @@ def test_time_breakdown_without_anchor_raises():
     crit = _crit(gender="F")  # demographic only, no diagnosis anchor
     with pytest.raises(ValueError, match="diagnosis"):
         cohort_breakdown_sql(crit, BreakdownDimension.DIAGNOSIS_MONTH, schema_prefix="", dialect="sqlite")
+
+
+def test_admission_month_bucket_needs_admission_anchor():
+    spec = breakdown_bucket(BreakdownDimension.ADMISSION_MONTH, dialect="sqlite")
+    assert spec.non_additive is True
+    assert spec.requires_inpatient_admission_anchor is True
+    assert "qualifying_admit_date" in spec.group_expr
+    assert "strftime" in spec.group_expr
+
+
+def test_admission_month_breakdown_groups_by_month(synthetic_db):
+    crit = _crit(inpatient_admission=True)
+    bucket_sql, total_sql, params = cohort_breakdown_sql(
+        crit, BreakdownDimension.ADMISSION_MONTH, schema_prefix="", dialect="sqlite"
+    )
+    # exactly one adt_ip join (the filter-only join must be suppressed when the
+    # projected admission-date join is present).
+    assert bucket_sql.count(") adt_ip ON") == 1
+    assert "adt_ip.patient_id = CAST(p.patient_id AS VARCHAR)" in bucket_sql
+    with synthetic_db.connect() as conn:
+        buckets = conn.execute(text(bucket_sql), params).fetchall()
+    by_count = {r._mapping["bucket_label"]: r._mapping["patient_count"] for r in buckets}
+    # qualifying inpatient admit dates: p4/V401 2024-01, p1/V100 2025-06,
+    # p2/V200 + p4/V400 both 2026-03.
+    assert by_count.get("2024-01") == 1
+    assert by_count.get("2025-06") == 1
+    assert by_count.get("2026-03") == 2
+
+
+def test_admission_breakdown_without_anchor_raises():
+    crit = _crit(gender="F")  # no inpatient_admission anchor
+    with pytest.raises(ValueError, match="inpatient_admission"):
+        cohort_breakdown_sql(crit, BreakdownDimension.ADMISSION_MONTH, schema_prefix="", dialect="sqlite")

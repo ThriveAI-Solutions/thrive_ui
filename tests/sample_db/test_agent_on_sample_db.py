@@ -132,7 +132,7 @@ def test_admissions_tool_returns_data_for_admitted_patient():
                 SELECT isr.source_id
                 FROM dw.federated_adt_v adt
                 JOIN dw.internal_source_reference_v isr
-                  ON isr.patient_id = adt.patient_id
+                  ON CAST(isr.patient_id AS VARCHAR) = adt.patient_id
                 WHERE adt.clean_setting = 'INPATIENT' AND isr.empi_rank = 1
                 LIMIT 1
                 """
@@ -142,7 +142,7 @@ def test_admissions_tool_returns_data_for_admitted_patient():
             pytest.skip("No admitted patient available in loaded sample DB")
         admitted_source_id = row[0]
 
-    adapter = AnalyticsDbAdapter(engine=eng, dialect="postgresql", schema_prefix="dw.")
+    adapter = AnalyticsDbAdapter(engine=eng, dialect="postgres", schema="dw")
     deps = AgentDeps(
         user_id=1,
         user_role=MagicMock(value=1),
@@ -170,7 +170,9 @@ def test_admissions_tool_returns_data_for_admitted_patient():
     assert result.data_availability == "data_present"
     assert len(result.items) >= 1
     item = result.items[0]
-    assert item.event_date is not None
+    assert item.admit_date is not None
+    assert item.discharge_date is not None
+    assert item.event_location is not None
     assert (item.setting or "").upper() == "INPATIENT"
 
 
@@ -199,7 +201,7 @@ def test_admissions_tool_distinguishes_no_records_from_no_admissions():
                 WHERE isr.empi_rank = 1
                   AND NOT EXISTS (
                       SELECT 1 FROM dw.federated_adt_v adt
-                      WHERE adt.patient_id = isr.patient_id
+                      WHERE adt.patient_id = CAST(isr.patient_id AS VARCHAR)
                   )
                 LIMIT 1
                 """
@@ -209,7 +211,7 @@ def test_admissions_tool_distinguishes_no_records_from_no_admissions():
             pytest.skip("Every patient in sample has admissions — cannot test the no-records branch")
         non_admitted_source_id = row[0]
 
-    adapter = AnalyticsDbAdapter(engine=eng, dialect="postgresql", schema_prefix="dw.")
+    adapter = AnalyticsDbAdapter(engine=eng, dialect="postgres", schema="dw")
     deps = AgentDeps(
         user_id=1,
         user_role=MagicMock(value=1),

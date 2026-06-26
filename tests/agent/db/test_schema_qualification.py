@@ -87,7 +87,7 @@ _CASES = [
     ),
     (
         "admissions",
-        lambda **kw: admissions_sql(source_id="x", **kw),
+        lambda **kw: admissions_sql(source_id="x", dialect="sqlite", **kw),
         {"federated_adt_v", "internal_source_reference_v"},
     ),
     (

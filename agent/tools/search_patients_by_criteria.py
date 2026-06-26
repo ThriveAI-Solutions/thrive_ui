@@ -44,6 +44,8 @@ class CohortCriteria(BaseModel):
     zip_code: Optional[str] = None  # 5-digit ZIP, exact match on p.zip_code
     city: Optional[str] = None  # case-insensitive substring on p.city
     state: Optional[str] = None  # 2-letter USPS code, exact match on uppercased p.state
+    inpatient_admission: Optional[bool] = None  # True = patient had ≥1 inpatient admission (federated_adt_v)
+    inpatient_admission_date_range: Optional[DateRange] = None  # bounds the qualifying admission date
     sample_size: int = Field(default=20, ge=0, le=100)
     breakdown: List[BreakdownDimension] = Field(default_factory=list)
 
@@ -70,13 +72,14 @@ class CohortCriteria(BaseModel):
                 self.zip_code,
                 self.city,
                 self.state,
+                self.inpatient_admission,
             )
         ):
             raise ValueError(
                 "search_patients_by_criteria requires at least one criterion "
                 "(diagnosis_codes, medication_rxnorm_codes, condition_text, "
                 "age_min/age_max, gender, facility, last_visit_after, "
-                "last_visit_before, zip_code, city, or state). "
+                "last_visit_before, zip_code, city, state, or inpatient_admission). "
                 "Do not call without a filter."
             )
         return self
@@ -202,13 +205,20 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
       - zip_code: 5-digit ZIP code, exact match against internal_patient_profile_v.zip_code (~100% coverage).
       - city: city name, case-insensitive substring match (city strings vary by source).
       - state: 2-letter USPS code, exact match on uppercased input. May miss long-form 'NEW YORK'.
+      - inpatient_admission: True to require the patient had at least one INPATIENT
+        admission (federated_adt_v; clean_setting INPATIENT or an A06 conversion,
+        excluding pre-admit/pending and cancelled admits). Use for "how many patients
+        were admitted to inpatient". A bare ED visit does NOT qualify.
+      - inpatient_admission_date_range: DateRange bounding the qualifying admission date.
       - sample_size: 0-100; default 20. Set to 0 for count-only.
       - breakdown: optional list of ONE dimension to group counts by —
         diagnosis_month / diagnosis_quarter / diagnosis_year (require a
         diagnosis anchor: codes or a date range; buckets overlap and don't
-        sum), gender, or age_band. Returns aggregate buckets instead of a
-        patient sample. Pass 2+ dimensions only to escalate: the tool then
-        returns a generated_sql template to extend in run_sql.
+        sum), admission_month / admission_quarter / admission_year (require
+        inpatient_admission=true; buckets overlap and don't sum), gender, or
+        age_band. Returns aggregate buckets instead of a patient sample. Pass
+        2+ dimensions only to escalate: the tool then returns a generated_sql
+        template to extend in run_sql.
 
     Returns CohortResult with total_count + sample. The sample is truncated
     to sample_size; total_count carries the full population. When a code-based
@@ -221,7 +231,7 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     if criteria.breakdown:
         return _run_breakdown(ctx, criteria, adapter, schema_prefix)
 
-    sql, params = cohort_sql(criteria, schema_prefix=schema_prefix)
+    sql, params = cohort_sql(criteria, schema_prefix=schema_prefix, dialect=adapter.dialect)
     try:
         rows = adapter.fetch_all(sql, params)
     except SQLAlchemyError as exc:
