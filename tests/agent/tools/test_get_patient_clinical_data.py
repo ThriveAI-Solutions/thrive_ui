@@ -158,13 +158,15 @@ def test_medications_returns_two(synthetic_db):
     assert all(isinstance(i, MedicationItem) for i in result.items)
 
 
-def test_medications_filtered_by_rxnorm(synthetic_db):
+def test_medications_surface_status(synthetic_db):
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
-    q = MedicationsQuery(rxnorm_codes=["18631"])
-    result = get_patient_clinical_data(ctx, q)
-    assert len(result.items) == 1
-    assert result.items[0].med_name == "Azithromycin"
+    result = get_patient_clinical_data(ctx, MedicationsQuery())
+    assert len(result.items) == 2
+    by_name = {i.med_name: i for i in result.items}
+    assert by_name["Metformin"].status == "active"
+    assert by_name["Metformin"].date_stopped is None
+    assert by_name["Azithromycin"].status == "completed"
 
 
 from agent.tools.get_patient_clinical_data import ImmunizationsQuery, ImmunizationItem

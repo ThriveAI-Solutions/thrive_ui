@@ -83,9 +83,6 @@ class MedicationsQuery(BaseModel):
 
     domain: Literal["medications"] = "medications"
     date_range: Optional[DateRange] = None
-    rxnorm_codes: Optional[List[str]] = None
-    drug_class: Optional[str] = None
-    linked_diagnosis_codes: Optional[List[str]] = None
 
 
 class ImmunizationsQuery(BaseModel):
@@ -233,6 +230,8 @@ class MedicationItem(BaseModel):
     med_sig: Optional[str] = None
     drug_supply_days: Optional[int] = None
     number_of_refills: Optional[int] = None
+    status: Optional[str] = None
+    date_stopped: Optional[str] = None
 
 
 class ImmunizationItem(BaseModel):
@@ -519,20 +518,9 @@ def _build_diagnoses_result(adapter: Any, source_id: str, schema_prefix: str, qu
 def _build_medications_result(
     adapter: Any, source_id: str, schema_prefix: str, query: MedicationsQuery
 ) -> ClinicalResult:
-    if query.drug_class is not None or query.linked_diagnosis_codes is not None:
-        return ClinicalResult(
-            domain="medications",
-            items=[],
-            data_availability="domain_not_available",
-            notes_to_agent=(
-                "drug_class / linked_diagnosis_codes filters are not implemented in v1. "
-                "Resolve to rxnorm_codes via search_codes(vocabulary='rxnorm') and retry."
-            ),
-        )
     dr = query.date_range
     sql, params = medications_sql(
         source_id=source_id,
-        rxnorm_codes=query.rxnorm_codes,
         start_date=dr.start.isoformat() if dr and dr.start else None,
         end_date=dr.end.isoformat() if dr and dr.end else None,
         schema_prefix=schema_prefix,
@@ -558,6 +546,8 @@ def _build_medications_result(
             med_sig=r.get("med_sig"),
             drug_supply_days=r.get("drug_supply_days"),
             number_of_refills=r.get("number_of_refills"),
+            status=r.get("status"),
+            date_stopped=str(r["date_stopped"]) if r.get("date_stopped") else None,
         )
         for r in rows
     ]
