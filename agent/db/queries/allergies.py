@@ -2,9 +2,13 @@
 
 Per epic #201: the dedicated allergies view exposes structured allergen,
 category (`type`), and severity columns plus a 'NO KNOWN ALLERGIES'
-negative-assertion row. Schema is inferred from the dev-warehouse
-evaluation set + the federated_problems_v shape — verify columns against
-production before merge.
+negative-assertion row.
+
+Columns confirmed against the production view 2026-06-26. The clinical event
+date is `date` (frequently NULL in prod — ~79% of rows), so the event
+timestamp coalesces onto `created_date` for ordering and date filtering. The
+legacy onset_date / status_datetime columns were removed from the view; do not
+reintroduce references to them (the rename mirrors the medications fix).
 """
 
 from __future__ import annotations
@@ -60,7 +64,10 @@ def allergies_sql(
         # status='Active' by convention so it is preserved by this filter.
         where.append("(status IS NULL OR LOWER(status) IN ('active', 'unresolved'))")
 
-    date_col = "COALESCE(status_datetime, onset_date)"
+    # `date` is the clinical event date but is often NULL in prod, so coalesce
+    # onto created_date for a robust sortable/filterable timestamp. `date` is a
+    # reserved-ish identifier — quote it for Postgres/Redshift/SQLite parity.
+    date_col = 'COALESCE("date", created_date)'
     if start_date:
         where.append(f"{date_col} >= :start_date")
         params["start_date"] = start_date
@@ -77,7 +84,7 @@ def allergies_sql(
             type,
             severity,
             status,
-            onset_date,
+            "date" AS onset_date,
             {date_col} AS event_datetime,
             reaction,
             comments

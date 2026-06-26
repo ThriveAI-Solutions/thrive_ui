@@ -64,8 +64,9 @@ def test_allergies_nka_row_is_returned_verbatim(synthetic_db):
 
 
 def test_allergies_filtered_by_date_range(synthetic_db):
-    """date_range filters by COALESCE(status_datetime, onset_date) so resolved
-    allergies (where status_datetime is the resolution date) sort correctly."""
+    """date_range filters by COALESCE(date, created_date). The clinical `date`
+    is frequently NULL in production, so rows fall back to created_date rather
+    than being silently dropped by the filter."""
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = allergies_sql(
         source_id="src-john-1962",
@@ -73,8 +74,20 @@ def test_allergies_filtered_by_date_range(synthetic_db):
         start_date="2018-01-01",
     )
     rows = adapter.fetch_all(sql, params)
-    # Peanuts (2018-03-01) + Latex (status_datetime 2020-06-01) — Penicillin (2010) is filtered out.
+    # Peanuts (date 2018-03-01) kept; Latex (date NULL → created_date 2020-06-01)
+    # kept via the COALESCE fallback; Penicillin (date 2010-05-01) filtered out.
     assert {r["allergy"] for r in rows} == {"Peanuts", "Latex"}
+
+
+def test_allergies_event_datetime_falls_back_to_created_date(synthetic_db):
+    """When the clinical `date` is NULL, event_datetime must surface
+    created_date rather than NULL so the row still sorts and date-filters."""
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = allergies_sql(source_id="src-john-1962", include_inactive=True)
+    rows = adapter.fetch_all(sql, params)
+    latex = next(r for r in rows if r["allergy"] == "Latex")
+    assert latex["onset_date"] is None  # clinical date genuinely unknown
+    assert str(latex["event_datetime"]).startswith("2020-06-01")
 
 
 def test_allergies_schema_prefix_applied(synthetic_db):

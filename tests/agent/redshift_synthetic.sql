@@ -260,10 +260,10 @@ INSERT INTO federated_adt_v VALUES
     (1, '2024-11-05 14:00', 'ECMC Emergency', 'Emergency', 'EMERGENCY', 'Discharged', 'Self', 'Discharged to home', 'Home'),
     (2, '2026-03-15 14:00', 'Kaleida Methodist', 'Hospital', 'INPATIENT', 'Discharged', 'Home', 'Discharged to home', 'Home');
 
--- federated_allergies_v: dedicated allergies view per epic #201. Schema
--- inferred from the dev-warehouse evaluation set (allergy / type / severity
--- columns confirmed) plus the federated_problems_v shape. Verify columns
--- against production before shipping.
+-- federated_allergies_v: dedicated allergies view per epic #201. Columns
+-- match the production view confirmed 2026-06-26: the clinical event date is
+-- `date` (frequently NULL in prod), with `created_date` as the record
+-- timestamp. The legacy onset_date/status_datetime columns no longer exist.
 CREATE TABLE federated_allergies_v (
     source_id TEXT,
     code TEXT,
@@ -272,22 +272,23 @@ CREATE TABLE federated_allergies_v (
     type TEXT,
     severity TEXT,
     status TEXT,
-    onset_date DATE,
-    status_datetime TIMESTAMP,
+    date DATE,
+    created_date TIMESTAMP,
     reaction TEXT,
     comments TEXT
 );
 -- src-john-1962: Penicillin (Drug, Severe, Active) + Peanuts (Food, Mild, Active)
 -- + Latex (Adverse Reaction, Moderate, Resolved). Tests default-active filter,
 -- include_inactive, category filter, text filter, snomed code filter, and
--- drug-allergy conflict signal (paired with amoxicillin med below).
+-- drug-allergy conflict signal (paired with amoxicillin med below). Latex has a
+-- NULL `date` so it exercises the COALESCE(date, created_date) event-date fallback.
 -- src-john-1971: 'NO KNOWN ALLERGIES' negative assertion.
 -- src-mary-1956: Sulfa drugs (Drug, Moderate, Active).
 -- src-jane-1985: no rows → data_availability=no_records_found.
 INSERT INTO federated_allergies_v VALUES
-    ('src-john-1962', '91936005', 'SNOMED', 'Penicillin', 'Drug allergy', 'Severe', 'Active', '2010-05-01', '2010-05-01', 'Hives', NULL),
-    ('src-john-1962', '91934008', 'SNOMED', 'Peanuts', 'Food allergy', 'Mild', 'Active', '2018-03-01', '2018-03-01', 'Rash', NULL),
-    ('src-john-1962', '300916003', 'SNOMED', 'Latex', 'Adverse Reaction', 'Moderate', 'Resolved', '2015-01-01', '2020-06-01', 'Contact dermatitis', NULL),
+    ('src-john-1962', '91936005', 'SNOMED', 'Penicillin', 'Drug allergy', 'Severe', 'Active', '2010-05-01', '2010-05-02', 'Hives', NULL),
+    ('src-john-1962', '91934008', 'SNOMED', 'Peanuts', 'Food allergy', 'Mild', 'Active', '2018-03-01', '2018-03-02', 'Rash', NULL),
+    ('src-john-1962', '300916003', 'SNOMED', 'Latex', 'Adverse Reaction', 'Moderate', 'Resolved', NULL, '2020-06-01', 'Contact dermatitis', NULL),
     ('src-john-1971', NULL, NULL, 'NO KNOWN ALLERGIES', NULL, NULL, 'Active', NULL, '2024-01-15', NULL, NULL),
     ('src-mary-1956', '91937001', 'SNOMED', 'Sulfa drugs', 'Drug allergy', 'Moderate', 'Active', '2015-09-10', '2015-09-10', 'Rash', NULL);
 
