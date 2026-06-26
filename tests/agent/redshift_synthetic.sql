@@ -263,6 +263,11 @@ CREATE TABLE federated_adt_v (
 --  p5/V500 pre-admit-only inpatient (A05 w/ INPATIENT setting)                                     -> NOT IP
 --  p6 missing/blank visit_number ED rows                                                           -> separate synthetic fallback groups, NOT collapsed
 --  p7/V700 junk settings only ('P', '')                                                            -> NOT IP
+--  p8 outpatient-only patient mirroring real HEALTHeLINK federated ADT churn:
+--  p8/V800 radiology that emits ONLY A08 with OUTPATIENT setting (Windsong)                         -> outpatient visit (no lifecycle event exists in the feed)
+--  p8/V801 ambulatory registration+discharge preceded by an admin A08 update                        -> outpatient visit, anchored on the registration
+--  p8/V802 practice that emits ONLY A31 with Unknown ('U') setting (Buffalo Medical Group)          -> real contact: surfaces under 'any', NOT under 'outpatient'
+--  p8/V803 pre-admit only (A08 with 'P' preadmit class + A05)                                        -> NOT a visit
 INSERT INTO federated_adt_v VALUES
     (1, 'V100', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'ADMIT',     NULL, 'Emergency Dept', NULL,                 NULL),
     (1, 'V100', '2025-06-16 09:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'A02',       NULL, NULL,            NULL,                 NULL),
@@ -282,7 +287,14 @@ INSERT INTO federated_adt_v VALUES
     (6, NULL,   '2026-01-01 08:00', 'Kaleida ED',               'Emergency','EMERGENCY', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
     (6, '',     '2026-01-02 09:00', 'Kaleida ED',               'Emergency','EMERGENCY', 'ADMIT',     'N',  'Home',          NULL,                 NULL),
     (7, 'V700', '2026-04-10 08:00', 'Unknown',                  'Unknown',  'P',         'A08',       'N',  NULL,            NULL,                 NULL),
-    (7, 'V700', '2026-04-10 09:00', 'Unknown',                  'Unknown',  '',          'A08',       'N',  NULL,            NULL,                 NULL);
+    (7, 'V700', '2026-04-10 09:00', 'Unknown',                  'Unknown',  '',          'A08',       'N',  NULL,            NULL,                 NULL),
+    (8, 'V800', '2026-05-01 08:00', 'Windsong Radiology',       'Radiology','OUTPATIENT','A08',       'N',  NULL,            NULL,                 NULL),
+    (8, 'V801', '2026-05-02 08:00', 'Patient Admin',            'Admin',    'OUTPATIENT','A08',       'N',  NULL,            NULL,                 NULL),
+    (8, 'V801', '2026-05-02 09:00', 'Kaleida Ambulatory',       'Clinic',   'OUTPATIENT','REGISTRATION','N','1',             NULL,                 NULL),
+    (8, 'V801', '2026-05-02 10:00', 'Kaleida Ambulatory',       'Clinic',   'OUTPATIENT','DISCHARGE', 'N',  NULL,            'Discharged to home', 'Home'),
+    (8, 'V802', '2026-05-03 08:00', 'Buffalo Medical Group',    'Practice', 'U',         'A31',       'N',  NULL,            NULL,                 NULL),
+    (8, 'V803', '2026-05-04 08:00', 'Kaleida Methodist',        'Hospital', 'P',         'A08',       'N',  NULL,            NULL,                 NULL),
+    (8, 'V803', '2026-05-04 09:00', 'Kaleida Methodist',        'Hospital', 'P',         'A05',       'N',  NULL,            NULL,                 NULL);
 
 -- federated_allergies_v: dedicated allergies view per epic #201. Columns
 -- match the production view confirmed 2026-06-26: the clinical event date is

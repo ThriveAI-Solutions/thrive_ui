@@ -107,6 +107,70 @@ def test_facility_type_ed(synthetic_db):
     assert rows[0]["visit_number"] == "V101"
 
 
+# --- Real-life federated ADT exposure (patient 8 / src-susan-1955) ---
+# Some HEALTHeLINK source systems emit ONLY A08/A31 messages, which still
+# represent genuine encounters. A visit is exposed when it has any real
+# patient-facility contact (any care setting or lifecycle event); only
+# pre-admit/pending placeholders and cancelled admits are suppressed.
+
+
+def test_outpatient_filter_includes_a08_only_radiology_visit(synthetic_db):
+    """Windsong-style radiology emits only A08 with an OUTPATIENT setting (V800);
+    that IS an outpatient encounter and must surface alongside the
+    registration/discharge ambulatory visit (V801)."""
+    sql, params = admissions_sql(source_id="src-susan-1955", dialect="sqlite", facility_type="outpatient")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    assert {r["visit_number"] for r in rows} == {"V800", "V801"}
+
+
+def test_a08_only_radiology_visit_anchors_on_its_own_event(synthetic_db):
+    sql, params = admissions_sql(source_id="src-susan-1955", dialect="sqlite", facility_type="outpatient")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    v800 = next(r for r in rows if r["visit_number"] == "V800")
+    assert v800["event_location"] == "Windsong Radiology"
+    assert v800["setting"] == "OUTPATIENT"
+    assert str(v800["admit_date"]).startswith("2026-05-01 08:00")
+
+
+def test_outpatient_visit_anchors_on_registration_not_admin_update(synthetic_db):
+    """V801 has an earlier admin A08 (08:00) and a REGISTRATION (09:00); the
+    visit start and admitting location come from the lifecycle event, not the
+    admin update."""
+    sql, params = admissions_sql(source_id="src-susan-1955", dialect="sqlite", facility_type="outpatient")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    v801 = next(r for r in rows if r["visit_number"] == "V801")
+    assert v801["event_location"] == "Kaleida Ambulatory"
+    assert v801["location_type"] == "Clinic"
+    assert str(v801["admit_date"]).startswith("2026-05-02 09:00")
+    assert str(v801["discharge_date"]).startswith("2026-05-02 10:00")
+
+
+def test_any_surfaces_unknown_setting_contact_and_excludes_preadmit(synthetic_db):
+    """'any' shows every real patient-facility contact, including the
+    unknown-setting A31 practice (V802), but never a pre-admit-only placeholder
+    (V803). None of patient 8's contacts are inpatient."""
+    sql, params = admissions_sql(source_id="src-susan-1955", dialect="sqlite", facility_type="any")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    assert {r["visit_number"] for r in rows} == {"V800", "V801", "V802"}
+    assert all(r["is_inpatient_admission"] == 0 for r in rows)
+
+
+def test_unknown_setting_contact_excluded_from_outpatient_filter(synthetic_db):
+    """V802 (Unknown setting) is a real contact but is not classified OUTPATIENT,
+    so facility_type='outpatient' must not return it."""
+    sql, params = admissions_sql(source_id="src-susan-1955", dialect="sqlite", facility_type="outpatient")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    assert "V802" not in {r["visit_number"] for r in rows}
+
+
+def test_preadmit_only_outpatient_is_not_a_visit(synthetic_db):
+    """V803 is only a 'P' preadmit-class A08 plus an A05 pending admit — not a
+    completed encounter, so it never surfaces."""
+    sql, params = admissions_sql(source_id="src-susan-1955", dialect="sqlite", facility_type="any")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    assert "V803" not in {r["visit_number"] for r in rows}
+
+
 def test_no_records_for_unknown_source(synthetic_db):
     sql, params = admissions_sql(source_id="src-nonexistent", dialect="sqlite")
     rows = _adapter(synthetic_db).fetch_all(sql, params)

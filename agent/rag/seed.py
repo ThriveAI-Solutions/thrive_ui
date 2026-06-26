@@ -135,15 +135,16 @@ SCHEMA_DOCS: List[_Doc] = [
         "view": "federated_adt_v",
         "kind": "schema",
         "text": (
-            "federated_adt_v: admit/discharge/transfer events via "
-            "get_patient_clinical_data(domain='admissions'), rolled up to one row per "
-            "visit_number when present; missing visit_number rows are kept separate "
-            "by event. patient_id only (no source_id — join "
-            "internal_source_reference_v at empi_rank=1). Each stay has "
-            "is_inpatient_admission: true iff a non-cancelled row has clean_setting "
-            "INPATIENT or clean_status A06, excluding pre-admit/pending (A05,A14,A38,A27) "
-            "and any CANCEL ADMIT visit. A bare ADMIT/A01 is NOT inpatient alone. Supports "
-            "facility_type (inpatient, ltc, snf, ed, outpatient, any) and date_range."
+            "federated_adt_v: ADT events. Prefer "
+            "get_patient_clinical_data(domain='admissions'), which rolls up one row "
+            "per visit_number; missing visit_number rows stay separate. patient_id "
+            "only (no source_id — join internal_source_reference_v at empi_rank=1). "
+            "A08/A31-only encounters ARE visits; only pre-admit (incl. 'P' setting) "
+            "and cancelled admits drop. "
+            "is_inpatient_admission=true iff a non-cancelled row has clean_setting "
+            "INPATIENT or clean_status A06, excluding pre-admit and any "
+            "CANCEL ADMIT visit. A01 alone is not inpatient. Supports "
+            "facility_type/dates."
         ),
     },
     {

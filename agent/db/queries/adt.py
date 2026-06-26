@@ -28,7 +28,24 @@ _FACILITY_TYPE_SETTINGS = {
 INPATIENT_SETTINGS = ("INPATIENT",)
 OP_TO_IP_STATUS = "A06"  # outpatient -> inpatient conversion (clean inpatient signal)
 PREADMIT_PENDING_STATUSES = ("A05", "A14", "A38", "A27")  # not an admission even w/ IP setting
+PREADMIT_SETTINGS = ("P",)  # HL7 PV1-2 patient class P = preadmit; not a completed encounter
 CANCEL_ADMIT_STATUS = "CANCEL ADMIT"  # voids the whole visit
+# Lifecycle statuses are PREFERRED for anchoring a visit's start date / admitting
+# facility. They are NOT required for a visit to exist: some federated source
+# systems (e.g. radiology groups) report a real encounter with only A08/A31.
+VISIT_LIFECYCLE_STATUSES = (
+    "ADMIT",
+    "REGISTRATION",
+    "TRANSFER",
+    "DISCHARGE",
+    "A01",
+    "A02",
+    "A03",
+    "A04",
+    "A06",
+    "A07",
+)
+DISCHARGE_STATUSES = ("DISCHARGE", "A03")
 
 
 def _sql_str_list(values: tuple[str, ...]) -> str:
@@ -81,6 +98,48 @@ def _qualifying_evidence_sql(alias: str = "adt") -> str:
         f"AND COALESCE({alias}.clean_status, '') NOT IN ({_sql_str_list(PREADMIT_PENDING_STATUSES)}) "
         f"AND COALESCE({alias}.cancelled_flag, 'N') <> 'Y'"
     )
+
+
+def _clean_status_in_sql(alias: str, values: tuple[str, ...]) -> str:
+    return f"UPPER(COALESCE({alias}.clean_status, '')) IN ({_sql_str_list(values)})"
+
+
+def _not_preadmit_sql(alias: str = "adt") -> str:
+    """Row is not a pre-admit/pending placeholder.
+
+    Excludes both the pre-admit/pending *statuses* (A05/A14/A38/A27) and the
+    HL7 PV1-2 pre-admit patient-class *setting* ('P'). A pre-admit is a
+    scheduled-but-not-yet-occurred encounter, never a completed visit.
+    """
+    return (
+        f"UPPER(COALESCE({alias}.clean_status, '')) NOT IN ({_sql_str_list(PREADMIT_PENDING_STATUSES)}) "
+        f"AND UPPER(COALESCE({alias}.clean_setting, '')) NOT IN ({_sql_str_list(PREADMIT_SETTINGS)})"
+    )
+
+
+def _visit_event_sql(alias: str = "adt") -> str:
+    """Row-level predicate: this row reflects a real patient-facility contact.
+
+    In this federated feed some source systems (notably radiology groups and
+    some practices) report a genuine encounter using ONLY administrative HL7
+    messages (A08 update / A31 update-person), so a lifecycle status is NOT
+    required. Any row that is not a pre-admit/pending placeholder counts as a
+    real contact. Cancellation is handled at the visit level (a CANCEL ADMIT
+    voids the whole visit), not here, because it is visit-scoped: the cancel
+    message nullifies a different (admit) row that is itself never flagged.
+    """
+    return _not_preadmit_sql(alias)
+
+
+def _lifecycle_event_sql(alias: str = "adt") -> str:
+    """Row-level predicate: this row is a visit *lifecycle* event
+    (registration / admit / transfer / discharge).
+
+    Used only to PREFER a real lifecycle event over an administrative update
+    when anchoring a visit's start date and admitting facility; not used to
+    decide whether the visit exists (see :func:`_visit_event_sql`).
+    """
+    return f"{_clean_status_in_sql(alias, VISIT_LIFECYCLE_STATUSES)} AND {_not_preadmit_sql(alias)}"
 
 
 def inpatient_admission_flag_sql(dialect: str, alias: str = "adt") -> str:
@@ -168,6 +227,10 @@ def admissions_sql(
     flag_expr = inpatient_admission_flag_sql(dialect, alias="adt")
     qad_expr = qualifying_admit_date_sql(alias="adt")
     evidence_expr = _qualifying_evidence_sql(alias="adt")
+    visit_event_expr = _visit_event_sql(alias="adt")
+    lifecycle_expr = _lifecycle_event_sql(alias="adt")
+    cancel_expr = f"COALESCE(adt.clean_status, '') = '{CANCEL_ADMIT_STATUS}'"
+    discharge_expr = _clean_status_in_sql("adt", DISCHARGE_STATUSES)
     visit_key_expr = visit_key_sql("adt")
 
     facility_has_col = ""
@@ -176,7 +239,8 @@ def admissions_sql(
         if settings:
             facility_has_col = (
                 f",\n                MAX(CASE WHEN UPPER(adt.clean_setting) IN "
-                f"({_sql_str_list(settings)}) THEN 1 ELSE 0 END) AS has_facility"
+                f"({_sql_str_list(settings)}) AND adt.is_visit_event = 1 "
+                f"THEN 1 ELSE 0 END) AS has_facility"
             )
 
     outer_where: list[str] = ["1=1"]
@@ -185,9 +249,13 @@ def admissions_sql(
         date_col = "qualifying_admit_date"
     elif facility_type and facility_type != "any" and _FACILITY_TYPE_SETTINGS.get(facility_type):
         outer_where.append("has_facility = 1")
-        date_col = "admit_date"
+        date_col = "COALESCE(visit_start_date, admit_date)"
     else:
-        date_col = "admit_date"
+        outer_where.append("(has_visit_event = 1 OR is_inpatient_admission = 1)")
+        date_col = (
+            "CASE WHEN is_inpatient_admission = 1 AND qualifying_admit_date IS NOT NULL "
+            "THEN qualifying_admit_date ELSE COALESCE(visit_start_date, admit_date) END"
+        )
 
     if start_date:
         outer_where.append(f"{date_col} >= :start_date")
@@ -204,8 +272,16 @@ def admissions_sql(
     admit_rn_expr = (
         f"ROW_NUMBER() OVER (\n"
         f"                    PARTITION BY isr.source_id, {visit_key_expr}\n"
-        f"                    ORDER BY CASE WHEN {evidence_expr} THEN 0 ELSE 1 END, adt.event_date\n"
+        f"                    ORDER BY CASE WHEN {evidence_expr} THEN 0 WHEN {lifecycle_expr} THEN 1 "
+        f"WHEN {visit_event_expr} THEN 2 ELSE 3 END, adt.event_date\n"
         f"                )"
+    )
+    display_admit_date_expr = (
+        "CASE\n"
+        "                WHEN is_inpatient_admission = 1 AND qualifying_admit_date IS NOT NULL\n"
+        "                    THEN qualifying_admit_date\n"
+        "                ELSE COALESCE(visit_start_date, admit_date)\n"
+        "            END"
     )
 
     sql = f"""
@@ -223,6 +299,9 @@ def admissions_sql(
                 adt.admit_from AS admit_from,
                 adt.discharge_disposition AS discharge_disposition,
                 adt.discharge_location AS discharge_location,
+                CASE WHEN {visit_event_expr} THEN 1 ELSE 0 END AS is_visit_event,
+                CASE WHEN {lifecycle_expr} THEN 1 ELSE 0 END AS is_lifecycle_event,
+                CASE WHEN {cancel_expr} THEN 1 ELSE 0 END AS is_cancel_admit,
                 {admit_rn_expr} AS admit_rn
             FROM {schema_prefix}federated_adt_v adt
             JOIN {schema_prefix}internal_source_reference_v isr
@@ -234,18 +313,25 @@ def admissions_sql(
                 source_id AS source_id,
                 MAX(adt.visit_number) AS visit_number,
                 MIN(adt.event_date) AS admit_date,
-                {qad_expr} AS qualifying_admit_date,
-                MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.event_date END) AS discharge_date,
-                CASE WHEN ({flag_expr}) THEN 1 ELSE 0 END AS is_inpatient_admission,
                 COALESCE(
-                    MAX(CASE WHEN {evidence_expr} THEN adt.clean_setting END),
-                    MAX(adt.clean_setting)
+                    MIN(CASE WHEN adt.is_lifecycle_event = 1 THEN adt.event_date END),
+                    MIN(CASE WHEN adt.is_visit_event = 1 THEN adt.event_date END)
+                ) AS visit_start_date,
+                {qad_expr} AS qualifying_admit_date,
+                MAX(CASE WHEN {discharge_expr} THEN adt.event_date END) AS discharge_date,
+                CASE WHEN ({flag_expr}) THEN 1 ELSE 0 END AS is_inpatient_admission,
+                CASE WHEN MAX(adt.is_visit_event) = 1 AND MAX(adt.is_cancel_admit) = 0
+                     THEN 1 ELSE 0 END AS has_visit_event,
+                COALESCE(
+                    MAX(CASE WHEN {evidence_expr} THEN NULLIF(adt.clean_setting, '') END),
+                    MAX(CASE WHEN adt.is_visit_event = 1 THEN NULLIF(adt.clean_setting, '') END),
+                    MAX(NULLIF(adt.clean_setting, ''))
                 ) AS setting,
                 MAX(CASE WHEN adt.admit_rn = 1 THEN adt.event_location END) AS event_location,
                 MAX(CASE WHEN adt.admit_rn = 1 THEN adt.location_type END) AS location_type,
                 MAX(adt.admit_from) AS admit_from,
-                MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.discharge_disposition END) AS discharge_disposition,
-                MAX(CASE WHEN adt.clean_status = 'DISCHARGE' THEN adt.discharge_location END) AS discharge_location
+                MAX(CASE WHEN {discharge_expr} THEN adt.discharge_disposition END) AS discharge_disposition,
+                MAX(CASE WHEN {discharge_expr} THEN adt.discharge_location END) AS discharge_location
                 {facility_has_col}
             FROM ranked adt
             GROUP BY source_id, adt.visit_key
@@ -253,11 +339,7 @@ def admissions_sql(
         SELECT
             source_id,
             visit_number,
-            CASE
-                WHEN is_inpatient_admission = 1 AND qualifying_admit_date IS NOT NULL
-                    THEN qualifying_admit_date
-                ELSE admit_date
-            END AS admit_date,
+            {display_admit_date_expr} AS admit_date,
             discharge_date,
             setting,
             is_inpatient_admission, event_location, location_type, admit_from,
