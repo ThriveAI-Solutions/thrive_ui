@@ -69,6 +69,46 @@ def qualifying_admit_date_sql(alias: str = "adt") -> str:
     return f"MIN(CASE WHEN {_qualifying_evidence_sql(alias)} THEN {alias}.event_date END)"
 
 
+def inpatient_cohort_subquery_sql(
+    dialect: str,
+    schema_prefix: str = "",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    project_admit_date: bool = False,
+    param_prefix: str = "adt",
+) -> Tuple[str, dict]:
+    """Visit-grouped ADT subquery for cohort use.
+
+    project_admit_date=False → SELECT DISTINCT patient_id (filter; dedup so the
+    cohort COUNT(*) OVER () is not inflated by multiple stays per patient).
+    project_admit_date=True → one row per qualifying visit with qualifying_admit_date
+    (breakdown bucketing).
+    """
+    params: dict = {}
+    flag = inpatient_admission_flag_sql(dialect, alias="adt")
+    qad = qualifying_admit_date_sql(alias="adt")
+    having = [flag]
+    if start_date:
+        having.append(f"{qad} >= :{param_prefix}_start")
+        params[f"{param_prefix}_start"] = start_date
+    if end_date:
+        having.append(f"{qad} <= :{param_prefix}_end")
+        params[f"{param_prefix}_end"] = end_date
+
+    if project_admit_date:
+        select = f"adt.patient_id, {qad} AS qualifying_admit_date"
+    else:
+        select = "DISTINCT patient_id"
+
+    sql = (
+        f"SELECT {select}\n"
+        f"        FROM {schema_prefix}federated_adt_v adt\n"
+        f"        GROUP BY adt.patient_id, adt.visit_number\n"
+        f"        HAVING {' AND '.join(having)}"
+    )
+    return sql, params
+
+
 def admissions_sql(
     *,
     source_id: str,

@@ -2,6 +2,7 @@ import pytest
 
 from agent.db.queries.adt import (
     inpatient_admission_flag_sql,
+    inpatient_cohort_subquery_sql,
     qualifying_admit_date_sql,
     PREADMIT_PENDING_STATUSES,
 )
@@ -39,3 +40,29 @@ def test_qualifying_admit_date_sql_is_conditional_min():
 
 def test_preadmit_pending_constant_values():
     assert PREADMIT_PENDING_STATUSES == ("A05", "A14", "A38", "A27")
+
+
+def test_cohort_subquery_distinct_for_filter():
+    sql, params = inpatient_cohort_subquery_sql("redshift", schema_prefix="dw.")
+    n = " ".join(sql.split())
+    assert "SELECT DISTINCT patient_id" in n
+    assert "FROM dw.federated_adt_v adt" in n
+    assert "GROUP BY adt.patient_id, adt.visit_number" in n
+    assert "HAVING BOOL_OR(" in n
+    assert "qualifying_admit_date" not in n
+    assert params == {}
+
+
+def test_cohort_subquery_projects_admit_date_for_breakdown():
+    sql, params = inpatient_cohort_subquery_sql("sqlite", project_admit_date=True)
+    n = " ".join(sql.split())
+    assert "SELECT adt.patient_id" in n and "DISTINCT" not in n
+    assert "AS qualifying_admit_date" in n
+
+
+def test_cohort_subquery_date_params():
+    sql, params = inpatient_cohort_subquery_sql(
+        "redshift", start_date="2026-01-01", end_date="2026-12-31", param_prefix="adt"
+    )
+    assert params == {"adt_start": "2026-01-01", "adt_end": "2026-12-31"}
+    assert ":adt_start" in sql and ":adt_end" in sql
