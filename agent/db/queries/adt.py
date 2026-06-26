@@ -23,6 +23,52 @@ _FACILITY_TYPE_SETTINGS = {
 }
 
 
+# --- Inpatient-admission predicate (single source of truth) ---
+# See docs/superpowers/specs/2026-06-26-adt-inpatient-admission-design.md.
+INPATIENT_SETTINGS = ("INPATIENT",)
+OP_TO_IP_STATUS = "A06"  # outpatient -> inpatient conversion (clean inpatient signal)
+PREADMIT_PENDING_STATUSES = ("A05", "A14", "A38", "A27")  # not an admission even w/ IP setting
+CANCEL_ADMIT_STATUS = "CANCEL ADMIT"  # voids the whole visit
+
+
+def _sql_str_list(values: tuple[str, ...]) -> str:
+    return ", ".join("'" + v.replace("'", "''") + "'" for v in values)
+
+
+def _qualifying_evidence_sql(alias: str = "adt") -> str:
+    """Row-level predicate: this row is positive evidence of an inpatient stay.
+
+    Inpatient setting OR an A06 conversion; not a pre-admit/pending status;
+    not a cancelled row. COALESCE guards NULLs so valid rows don't drop out
+    via SQL three-valued logic.
+    """
+    return (
+        f"(UPPER({alias}.clean_setting) IN ({_sql_str_list(INPATIENT_SETTINGS)}) "
+        f"OR {alias}.clean_status = '{OP_TO_IP_STATUS}') "
+        f"AND COALESCE({alias}.clean_status, '') NOT IN ({_sql_str_list(PREADMIT_PENDING_STATUSES)}) "
+        f"AND COALESCE({alias}.cancelled_flag, 'N') <> 'Y'"
+    )
+
+
+def inpatient_admission_flag_sql(dialect: str, alias: str = "adt") -> str:
+    """Visit-level boolean: does this visit_number represent an inpatient admission?
+
+    Use inside a query that GROUPs BY visit_number (SELECT column or HAVING).
+    """
+    evidence = _qualifying_evidence_sql(alias)
+    cancel = f"{alias}.clean_status = '{CANCEL_ADMIT_STATUS}'"
+    if dialect in ("postgres", "redshift"):
+        return f"BOOL_OR({evidence}) AND NOT BOOL_OR({cancel})"
+    if dialect == "sqlite":
+        return f"MAX(CASE WHEN {evidence} THEN 1 ELSE 0 END) = 1 AND MAX(CASE WHEN {cancel} THEN 1 ELSE 0 END) = 0"
+    raise ValueError(f"Unsupported dialect for ADT predicate: {dialect!r}")
+
+
+def qualifying_admit_date_sql(alias: str = "adt") -> str:
+    """Visit-level admission date = earliest event_date among qualifying rows."""
+    return f"MIN(CASE WHEN {_qualifying_evidence_sql(alias)} THEN {alias}.event_date END)"
+
+
 def admissions_sql(
     *,
     source_id: str,
