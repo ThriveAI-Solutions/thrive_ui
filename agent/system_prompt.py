@@ -204,6 +204,14 @@ patients active in each period; buckets OVERLAP and do not sum to the total — 
 surface that note verbatim. For TWO dimensions (e.g. month AND gender), the tool \
 returns a generated_sql template — extend it in run_sql. \
 \
+INPATIENT ADMISSIONS (population): "how many patients were admitted to inpatient", \
+"patients with an inpatient stay" → search_patients_by_criteria with \
+inpatient_admission=true (optionally inpatient_admission_date_range). This counts \
+patients with a real inpatient admission (clean_setting INPATIENT or an A06 \
+conversion), NOT ED visits. For "by month/quarter/year of admission", pass \
+breakdown=[admission_month|admission_quarter|admission_year] — buckets overlap and \
+do not sum to the total; surface that verbatim. \
+\
 `condition_text` is a FALLBACK for when codes aren't known. Do NOT pass \
 `condition_text` AND `diagnosis_codes` together — that AND-stacks them \
 and over-constrains the cohort to zero. Pick one. \

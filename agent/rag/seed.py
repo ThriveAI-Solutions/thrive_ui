@@ -430,6 +430,18 @@ EXAMPLES_DOCS: List[_Doc] = [
         "view": "internal_patient_profile_v",
         "kind": "examples",
         "text": (
+            "Q: 'How many patients were admitted to an inpatient facility in 2025?' "
+            "A: Call search_patients_by_criteria with inpatient_admission=true, "
+            "inpatient_admission_date_range={start:'2025-01-01', end:'2025-12-31'}, "
+            "sample_size=0; read total_count. This uses the inpatient-admission "
+            "definition (clean_setting INPATIENT or A06 conversion, excluding "
+            "pre-admit/pending and cancelled), not raw ADMIT events."
+        ),
+    },
+    {
+        "view": "internal_patient_profile_v",
+        "kind": "examples",
+        "text": (
             "Q: 'Find me 10 patients on metformin.' "
             "A: Call search_patients_by_criteria with medication_rxnorm_codes=['6809'], "
             "sample_size=10. Do NOT call find_patient first."
