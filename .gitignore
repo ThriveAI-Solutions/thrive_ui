@@ -214,7 +214,8 @@ documentation/
 scratchpads/
 
 # superpowers
-/docs/superpowers/
+# docs/ is local-only working area (specs, guides) — may carry client schema metadata
+/docs/
 
 # Playwright MCP tooling
 .playwright-mcp/
