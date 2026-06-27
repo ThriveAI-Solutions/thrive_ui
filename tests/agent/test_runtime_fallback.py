@@ -244,11 +244,13 @@ def test_maybe_invoke_vanna_fallback_passes_scrubbed_flag(monkeypatch):
     monkeypatch.setattr(runtime, "should_fallback", _spy_should_fallback)
 
     def _mock_run_async(coro):
-        # Drive the spy coroutine to completion in the test loop so we
-        # capture its kwargs, then return what the spy yielded.
+        # Drive the spy coroutine to completion so we capture its kwargs.
+        # asyncio.run() spins a fresh loop rather than relying on an ambient
+        # current loop in the main thread — newer pytest-asyncio (1.4+) no
+        # longer leaves one set for sync tests, so get_event_loop() raises.
         import asyncio
 
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     monkeypatch.setattr(runtime, "_run_async", _mock_run_async)
     _patch_chat_bot_helper(monkeypatch)
@@ -284,7 +286,11 @@ def test_maybe_invoke_vanna_fallback_passes_tool_events(monkeypatch):
     def _mock_run_async(coro):
         import asyncio
 
-        return asyncio.get_event_loop().run_until_complete(coro)
+        # asyncio.run() spins a fresh loop rather than relying on an ambient
+        # current loop in the main thread. Newer pytest-asyncio (1.4+) no
+        # longer leaves one set for sync tests, so get_event_loop() raises
+        # "no current event loop in thread 'MainThread'".
+        return asyncio.run(coro)
 
     monkeypatch.setattr(runtime, "_run_async", _mock_run_async)
     _patch_chat_bot_helper(monkeypatch)

@@ -73,6 +73,8 @@ def _logger_run_id(logger: Any) -> Optional[str]:
         return None
     rid = getattr(logger, "run_id", None)
     return rid if isinstance(rid, str) else None
+
+
 # pydantic-ai exposes a synthetic 'final_result' tool for output-typed agents;
 # it is not a user-facing tool and should not appear in the audit log or UI.
 _OUTPUT_TOOL_NAMES = {"final_result"}
@@ -445,11 +447,15 @@ class AgenticRunner:
                                         arguments=args,
                                     )
                                 elif isinstance(event, FunctionToolResultEvent):
-                                    info = pending.pop(event.tool_call_id, None)
+                                    info = pending.pop(event.part.tool_call_id, None)
                                     if info is None:
                                         continue
                                     elapsed_ms = max(0, int((loop.time() - info["started_perf"]) * 1000))
-                                    result_content = getattr(event.result, "content", None)
+                                    # pydantic-ai 2.0: FunctionToolResultEvent.result was renamed to
+                                    # .part (the ToolReturnPart|RetryPromptPart). .part.content holds
+                                    # the tool's return object — keep using the part (not the event's
+                                    # normalized .content) so model_dump()/reliability_note still work.
+                                    result_content = getattr(event.part, "content", None)
                                     # summarize_result wants a dict. Pydantic results
                                     # (ClinicalResult, DocumentIndexResult, …) need to
                                     # be dumped first, otherwise the summarizer falls
@@ -502,7 +508,7 @@ class AgenticRunner:
                                         )
                                         logger.log_tool_completed(
                                             tool_name=info["tool_name"],
-                                            tool_call_id=event.tool_call_id,
+                                            tool_call_id=event.part.tool_call_id,
                                             turn_index=info.get("turn_index"),
                                             arguments=info["args"],
                                             result_obj=result_for_log,

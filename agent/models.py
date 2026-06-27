@@ -24,9 +24,11 @@ from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.providers.anthropic import AnthropicProvider
-from pydantic_ai.models.bedrock import BedrockConverseModel
-from pydantic_ai.providers.bedrock import BedrockProvider
 
+# NB: Bedrock (pydantic_ai.models.bedrock) is imported lazily inside build_model's
+# bedrock branch — it hard-requires botocore/boto3, which are an optional extra
+# (pydantic-ai-slim[bedrock]) and not installed by default. Keeping the import
+# lazy lets ollama/anthropic deployments run without the AWS SDK.
 
 ModelProvider = Literal["ollama", "anthropic", "bedrock"]
 
@@ -192,6 +194,11 @@ def build_model() -> Any:
         )
 
     if provider == "bedrock":
+        # Lazy import: pulls in botocore/boto3 (optional `pydantic-ai-slim[bedrock]`
+        # extra). Only deployments that actually select bedrock need the AWS SDK.
+        from pydantic_ai.models.bedrock import BedrockConverseModel
+        from pydantic_ai.providers.bedrock import BedrockProvider
+
         model_id = ai_keys.get("bedrock_model_id", "anthropic.claude-sonnet-4-6-v1:0")
         region = ai_keys.get("aws_region", "us-east-1")
         return BedrockConverseModel(

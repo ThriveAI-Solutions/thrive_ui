@@ -9,7 +9,8 @@ from io import StringIO
 
 import pandas as pd
 import streamlit as st
-from ethical_guardrails_lib import get_ethical_guideline
+
+# from ethical_guardrails_lib import get_ethical_guideline  # disabled: guardrails call below is commented out
 
 from orm.functions import save_user_settings, set_user_preferences_in_session_state
 from orm.models import Message

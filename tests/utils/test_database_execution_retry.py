@@ -164,7 +164,6 @@ class TestDatabaseExecutionRetry:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         # Create mock that fails twice then succeeds on third attempt
@@ -195,7 +194,6 @@ class TestDatabaseExecutionRetry:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         # Use a recoverable error (division by zero is not in NON_RECOVERABLE_ERROR_PATTERNS)
@@ -216,7 +214,6 @@ class TestDatabaseExecutionRetry:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         vn = _MockVNWithDatabaseError(
@@ -240,7 +237,6 @@ class TestDatabaseExecutionRetry:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         # Always fail - never succeed
@@ -268,7 +264,6 @@ class TestDatabaseExecutionRetry:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         vn = _MockVNWithDatabaseError(
@@ -311,7 +306,6 @@ class TestNonRecoverableErrors:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         vn = _MockVNWithDatabaseError(
@@ -349,7 +343,6 @@ class TestNonRecoverableErrors:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         vn = _MockVNWithDatabaseError(
@@ -389,7 +382,6 @@ class TestRetryUIFeedback:
 
         fake_st.info = capture_info
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         vn = _MockVNWithDatabaseError(
@@ -417,7 +409,6 @@ class TestErrorDetailsInExpandable:
 
         fake_st = _fake_st()
         monkeypatch.setattr(cbh, "st", fake_st)
-        monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
         monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
         error_msg = "type mismatch: cannot compare text with integer"

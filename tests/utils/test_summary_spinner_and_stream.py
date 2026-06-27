@@ -72,7 +72,6 @@ def test_summary_uses_status_and_write_stream(monkeypatch):
 
     # Avoid guardrails short-circuiting the flow
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     # Avoid rendering side-effects in add_message
     monkeypatch.setattr(cbh, "add_message", lambda *a, **k: None)
     monkeypatch.setattr(cbh, "get_vn", lambda: _VN())

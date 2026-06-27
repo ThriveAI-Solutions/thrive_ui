@@ -28,6 +28,11 @@ def test_build_model_anthropic(monkeypatch):
 
 
 def test_build_model_bedrock(monkeypatch):
+    # Bedrock is a dormant provider: the AWS SDK (botocore/boto3) is an
+    # optional extra (pydantic-ai-slim[bedrock]) that we don't install by
+    # default. Skip rather than fail when it's absent; the import is lazy
+    # in build_model so ollama/anthropic deployments don't need it.
+    pytest.importorskip("botocore")
     monkeypatch.setattr(
         "agent.models._read_secrets",
         lambda: {

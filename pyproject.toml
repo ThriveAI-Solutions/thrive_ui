@@ -7,8 +7,8 @@ requires-python = "==3.13.*"
 dependencies = [
     "anthropic>=0.49.0",
     "chromadb>=1.1.0",
-    "ethical-guardrails-lib",
-    "kaleido==0.2.1",
+    # "ethical-guardrails-lib",  # disabled: not used (guardrails call is commented out in chat_bot_helper)
+    "kaleido>=0.2.1",
     "ollama>=0.4.7",
     "psycopg2-binary>=2.9.10",
     # "pyaudio>=0.2.14",
@@ -20,7 +20,7 @@ dependencies = [
     "speechrecognition>=3.14.1",
     "streamlit>=1.43.2",
     "streamlit-cookies-manager-ext>=0.1.0",
-    "vanna[anthropic,chromadb,gemini,ollama,postgres]==2.0.2",
+    "vanna[anthropic,chromadb,gemini,ollama,postgres]>=2.0.2",
     "google-generativeai>=0.8.0",                                              # vanna 2.0.2 [gemini] extra switched to google-genai (new SDK); legacy GoogleGeminiChat still needs this (old SDK)
     "wordcloud>=1.9.4",
     "vertexai>=1.71.1",                                                        # required transitively by `vanna.legacy.google` __init__ -> BigQuery_VectorStore
@@ -55,4 +55,4 @@ extend-exclude = ["alembic/versions"]
 line-ending = "lf"
 
 [tool.uv.sources]
-ethical-guardrails-lib = { git = "https://github.com/ThriveAI-Solutions/ethical_guardrails_lib.git" }
+# ethical-guardrails-lib = { git = "https://github.com/ThriveAI-Solutions/ethical_guardrails_lib.git" }  # disabled

@@ -218,7 +218,6 @@ def test_sql_failure_no_longer_calls_st_stop(monkeypatch):
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
     monkeypatch.setattr(cbh, "get_vn", lambda: _SqlFailsForever())
 
@@ -249,7 +248,6 @@ def test_top_level_safety_net_catches_unexpected_exception(monkeypatch):
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
     monkeypatch.setattr(cbh, "get_vn", lambda: _RaisesRuntimeError())
 
@@ -269,7 +267,6 @@ def test_top_level_safety_net_reraises_streamlit_control_exceptions(monkeypatch)
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
     class StopException(Exception):
@@ -530,7 +527,6 @@ def test_new_question_after_error_clears_pending_state(monkeypatch):
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
     class _FailThenSucceed:
@@ -574,7 +570,6 @@ def test_new_question_after_error_clears_pending_state(monkeypatch):
     assert fake_st.session_state.get("pending_sql_error") is False
     assert fake_st.session_state.get("last_failed_sql") in (None, "")
     assert fake_st.session_state.get("last_run_sql_error") in (None, "")
-
 
 
 # --- Issue #198: model-timeout error UX --------------------------------------
@@ -658,7 +653,6 @@ def test_safety_net_renders_model_slow_message_for_timeout(monkeypatch):
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
     monkeypatch.setattr(cbh, "get_vn", lambda: _RaisesModelAPIError())
 

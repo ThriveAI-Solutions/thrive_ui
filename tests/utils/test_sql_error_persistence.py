@@ -124,7 +124,6 @@ def test_clears_pending_sql_error_after_success(monkeypatch):
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
     vn = _DummyVNServiceFailThenSuccess()
@@ -163,7 +162,6 @@ def test_invalid_sql_does_not_call_llm(monkeypatch):
 
     called_llm = {"called": False}
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))  # Allow question through
     monkeypatch.setattr(cbh, "call_llm", lambda *_a, **_k: called_llm.__setitem__("called", True))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
@@ -208,7 +206,6 @@ def test_no_summary_added_when_sql_error(monkeypatch):
     )
 
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
     class _FailExecSvc:

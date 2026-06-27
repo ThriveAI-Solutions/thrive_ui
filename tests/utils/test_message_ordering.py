@@ -141,7 +141,6 @@ def test_message_ordering_thinking_and_summary(monkeypatch, has_thinking):
     monkeypatch.setattr(cbh, "st", fake_st)
 
     # Ensure guardrails do not block
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
 
     # Patch Message.save to bypass DB
     monkeypatch.setattr(cbh.Message, "save", _fake_save, raising=True)
@@ -191,7 +190,6 @@ def test_two_questions_ordering(monkeypatch, first_thinking, second_thinking):
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", _fake_save, raising=True)
 
     # First question (pass fake_st for thinking model support)

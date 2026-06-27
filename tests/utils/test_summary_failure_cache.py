@@ -94,7 +94,6 @@ def test_failed_summary_does_not_cache(monkeypatch):
 
     fake_st = _fake_st()
     monkeypatch.setattr(cbh, "st", fake_st)
-    monkeypatch.setattr(cbh, "get_ethical_guideline", lambda q: ("", 1))
     monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
 
     vn = _VNServiceSummarySometimesEmpty(empty_first=True)
