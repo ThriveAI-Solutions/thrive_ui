@@ -142,8 +142,7 @@ def test_slash_command_still_works_when_previous_df_set(monkeypatch):
 
     assert handled is True
     assert calls == [("help", "/help", None)], (
-        "Slash command must route to MAGIC_RENDERERS with previous_df=None even when "
-        "a previous dataframe is supplied"
+        "Slash command must route to MAGIC_RENDERERS with previous_df=None even when a previous dataframe is supplied"
     )
 
 

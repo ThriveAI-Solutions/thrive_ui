@@ -20,11 +20,7 @@ def _iter_sql_source_files() -> list[Path]:
     are skipped so the test focuses on the template surface area.
     """
     skip = {"__init__.py", "analytics_adapter.py"}
-    return sorted(
-        p
-        for p in _QUERIES_DIR.rglob("*.py")
-        if p.name not in skip and "__pycache__" not in p.parts
-    )
+    return sorted(p for p in _QUERIES_DIR.rglob("*.py") if p.name not in skip and "__pycache__" not in p.parts)
 
 
 def test_no_substr_function_call_in_agent_db_sql_templates():
@@ -81,6 +77,4 @@ def test_substr_guard_actually_catches_the_bad_pattern():
         "SELECT SUBSTRX_NOT_A_THING(...)",  # word boundary check
     ]
     for sample in safe_samples:
-        assert not pattern.search(sample), (
-            f"guard false-positive on benign sample: {sample!r}"
-        )
+        assert not pattern.search(sample), f"guard false-positive on benign sample: {sample!r}"

@@ -57,10 +57,7 @@ def test_all_allergy_codes_have_no_cross_category_duplicates():
     """If a code lands in two categories that's a curation mistake — pick
     the primary category. Reviewers will rely on this invariant."""
     flat = all_allergy_codes()
-    assert len(flat) == len(set(flat)), (
-        f"duplicate codes across categories: "
-        f"{[c for c in flat if flat.count(c) > 1]}"
-    )
+    assert len(flat) == len(set(flat)), f"duplicate codes across categories: {[c for c in flat if flat.count(c) > 1]}"
 
 
 def test_drift_guard_every_curated_code_exists_in_snomed_data():

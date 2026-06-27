@@ -49,7 +49,7 @@ def _make_st_stub(form_submitted: bool = True, inputs: dict | None = None):
     # decorated function directly. The dialog is applied as
     # @st.dialog("Create User") so .dialog must be callable, return a
     # decorator that returns the function unchanged.
-    stub.dialog = lambda *_a, **_kw: (lambda f: f)
+    stub.dialog = lambda *_a, **_kw: lambda f: f
 
     # Form / dialog context managers.
     form_cm = MagicMock()

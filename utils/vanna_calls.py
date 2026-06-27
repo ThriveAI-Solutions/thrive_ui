@@ -3792,9 +3792,7 @@ def _parse_markdown_table(text: str) -> str | None:
 
     def _is_separator(line: str) -> bool:
         return "|" in line and all(
-            part.strip().replace("-", "").replace(":", "") == ""
-            for part in line.split("|")
-            if part.strip()
+            part.strip().replace("-", "").replace(":", "") == "" for part in line.split("|") if part.strip()
         )
 
     # Slide through lines looking for: pipe-line, separator, pipe-line (header + sep + data)

@@ -240,8 +240,7 @@ def render(days_int: int | None = None) -> None:
     if st.button("Delete My Chat History", key="danger_delete_chat_btn"):
         confirm_destructive(
             body_md=(
-                "Permanently removes **your** chat history from this account. "
-                "Other users' messages are not affected."
+                "Permanently removes **your** chat history from this account. Other users' messages are not affected."
             ),
             token="DELETE",
             on_confirm=delete_all_messages,

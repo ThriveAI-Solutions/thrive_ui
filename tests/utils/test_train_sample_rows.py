@@ -76,10 +76,7 @@ class TestParseMarkdownTable:
     def test_pipe_in_prose_before_table_still_parses(self):
         from utils.vanna_calls import _parse_markdown_table
 
-        text = (
-            "The format is col1 | col2 for reference.\n\n"
-            + SAMPLE_LLM_MARKDOWN
-        )
+        text = "The format is col1 | col2 for reference.\n\n" + SAMPLE_LLM_MARKDOWN
         result = _parse_markdown_table(text)
         assert result is not None
         assert "Jane" in result
@@ -314,9 +311,7 @@ class TestTrainSampleRows:
         """Verify that the original raw data values do not appear in train() calls."""
         from utils.vanna_calls import train_sample_rows
 
-        raw_df = pd.DataFrame(
-            {"id": [999], "patient_name": ["REAL_SECRET_NAME"], "ssn": ["123-45-6789"]}
-        )
+        raw_df = pd.DataFrame({"id": [999], "patient_name": ["REAL_SECRET_NAME"], "ssn": ["123-45-6789"]})
         mocks = self._setup_mocks(tables=[("patients",)], sample_df=raw_df)
 
         with (

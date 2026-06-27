@@ -97,11 +97,17 @@ def test_backfill_populates_user_message_id_for_matching_run(tmp_path):
     with engine.begin() as conn:
         _seed_user(conn)
         _insert_message(
-            conn, mid=100, user_id=1, content="How many patients?",
+            conn,
+            mid=100,
+            user_id=1,
+            content="How many patients?",
             created_at="2026-06-10 10:00:00",
         )
         _insert_run(
-            conn, run_id="r-A", user_id=1, question="How many patients?",
+            conn,
+            run_id="r-A",
+            user_id=1,
+            question="How many patients?",
             created_at="2026-06-10 10:00:02",
         )
 
@@ -120,11 +126,17 @@ def test_backfill_leaves_unrelated_runs_alone(tmp_path):
     with engine.begin() as conn:
         _seed_user(conn)
         _insert_message(
-            conn, mid=100, user_id=1, content="Different question",
+            conn,
+            mid=100,
+            user_id=1,
+            content="Different question",
             created_at="2026-06-10 10:00:00",
         )
         _insert_run(
-            conn, run_id="r-orphan", user_id=1, question="Original question",
+            conn,
+            run_id="r-orphan",
+            user_id=1,
+            question="Original question",
             created_at="2026-06-10 10:00:02",
         )
 
@@ -143,18 +155,28 @@ def test_backfill_preserves_already_populated_user_message_id(tmp_path):
     with engine.begin() as conn:
         _seed_user(conn)
         _insert_message(
-            conn, mid=100, user_id=1, content="Already linked",
+            conn,
+            mid=100,
+            user_id=1,
+            content="Already linked",
             created_at="2026-06-10 10:00:00",
         )
         _insert_message(
-            conn, mid=101, user_id=1, content="Already linked",
+            conn,
+            mid=101,
+            user_id=1,
+            content="Already linked",
             created_at="2026-06-10 10:00:01",
         )
         # Run already correctly points at the older Message 100; the newer
         # 101 would win on backfill if we didn't gate on NULL.
         _insert_run(
-            conn, run_id="r-prelinked", user_id=1, question="Already linked",
-            created_at="2026-06-10 10:00:02", user_message_id=100,
+            conn,
+            run_id="r-prelinked",
+            user_id=1,
+            question="Already linked",
+            created_at="2026-06-10 10:00:02",
+            user_message_id=100,
         )
 
     command.upgrade(cfg, "head")
@@ -173,19 +195,31 @@ def test_backfill_picks_message_per_run_when_question_repeated(tmp_path):
     with engine.begin() as conn:
         _seed_user(conn)
         _insert_message(
-            conn, mid=200, user_id=1, content="Repeated question",
+            conn,
+            mid=200,
+            user_id=1,
+            content="Repeated question",
             created_at="2026-06-10 10:00:00",
         )
         _insert_run(
-            conn, run_id="r-first", user_id=1, question="Repeated question",
+            conn,
+            run_id="r-first",
+            user_id=1,
+            question="Repeated question",
             created_at="2026-06-10 10:00:01",
         )
         _insert_message(
-            conn, mid=201, user_id=1, content="Repeated question",
+            conn,
+            mid=201,
+            user_id=1,
+            content="Repeated question",
             created_at="2026-06-10 10:00:05",
         )
         _insert_run(
-            conn, run_id="r-second", user_id=1, question="Repeated question",
+            conn,
+            run_id="r-second",
+            user_id=1,
+            question="Repeated question",
             created_at="2026-06-10 10:00:06",
         )
 
@@ -213,11 +247,17 @@ def test_backfill_ignores_messages_from_other_users(tmp_path):
             )
         )
         _insert_message(
-            conn, mid=300, user_id=2, content="Cross-user question",
+            conn,
+            mid=300,
+            user_id=2,
+            content="Cross-user question",
             created_at="2026-06-10 10:00:00",
         )
         _insert_run(
-            conn, run_id="r-u1", user_id=1, question="Cross-user question",
+            conn,
+            run_id="r-u1",
+            user_id=1,
+            question="Cross-user question",
             created_at="2026-06-10 10:00:02",
         )
 
@@ -238,11 +278,17 @@ def test_backfill_matches_across_unbounded_lookback(tmp_path):
     with engine.begin() as conn:
         _seed_user(conn)
         _insert_message(
-            conn, mid=500, user_id=1, content="Long-gap question",
+            conn,
+            mid=500,
+            user_id=1,
+            content="Long-gap question",
             created_at="2026-06-08 09:00:00",
         )
         _insert_run(
-            conn, run_id="r-gap", user_id=1, question="Long-gap question",
+            conn,
+            run_id="r-gap",
+            user_id=1,
+            question="Long-gap question",
             created_at="2026-06-10 10:00:00",
         )
 
@@ -262,11 +308,18 @@ def test_backfill_ignores_assistant_role_messages(tmp_path):
     with engine.begin() as conn:
         _seed_user(conn)
         _insert_message(
-            conn, mid=400, user_id=1, content="Role-filtered question",
-            created_at="2026-06-10 10:00:00", role="assistant",
+            conn,
+            mid=400,
+            user_id=1,
+            content="Role-filtered question",
+            created_at="2026-06-10 10:00:00",
+            role="assistant",
         )
         _insert_run(
-            conn, run_id="r-asst", user_id=1, question="Role-filtered question",
+            conn,
+            run_id="r-asst",
+            user_id=1,
+            question="Role-filtered question",
             created_at="2026-06-10 10:00:02",
         )
 

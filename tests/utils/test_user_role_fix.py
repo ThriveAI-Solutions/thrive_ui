@@ -21,14 +21,14 @@ def mock_streamlit_session_admin():
     with patch("streamlit.session_state", new_callable=MagicMock) as mock_session:
         # Mock cookies with admin user
         mock_cookies = MagicMock()
-        mock_cookies.get.side_effect = (
-            lambda key: '"5"' if key == "user_id" else "Admin" if key == "role_name" else None
+        mock_cookies.get.side_effect = lambda key: (
+            '"5"' if key == "user_id" else "Admin" if key == "role_name" else None
         )
         mock_session.cookies = mock_cookies
 
         # Mock session state with admin role
-        mock_session.get.side_effect = (
-            lambda key, default=None: RoleTypeEnum.ADMIN.value if key == "user_role" else default
+        mock_session.get.side_effect = lambda key, default=None: (
+            RoleTypeEnum.ADMIN.value if key == "user_role" else default
         )
         mock_session.user_role = RoleTypeEnum.ADMIN.value
 

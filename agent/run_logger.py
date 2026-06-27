@@ -419,9 +419,7 @@ def mark_run_fallback_invoked(
         # Append a timeline event so the inspector reflects the transition.
         # `seq` is MAX(seq)+1 for this run — the run's original logger is
         # gone, so we recompute from the existing rows.
-        next_seq_row = (
-            session.query(func.max(AgentRunEvent.seq)).filter(AgentRunEvent.run_id == run_id).scalar()
-        )
+        next_seq_row = session.query(func.max(AgentRunEvent.seq)).filter(AgentRunEvent.run_id == run_id).scalar()
         next_seq = (next_seq_row or 0) + 1
         session.add(
             AgentRunEvent(

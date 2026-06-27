@@ -46,9 +46,7 @@ def _rag():
     from chromadb.config import Settings
 
     chroma_path = st.secrets.get("rag_model", {}).get("chroma_path", "./chromadb")
-    return ChromaRagAdapter(
-        chromadb.PersistentClient(path=chroma_path, settings=Settings(anonymized_telemetry=False))
-    )
+    return ChromaRagAdapter(chromadb.PersistentClient(path=chroma_path, settings=Settings(anonymized_telemetry=False)))
 
 
 def _selected_patient_from_session() -> Optional[SelectedPatient]:

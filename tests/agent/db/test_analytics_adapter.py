@@ -103,17 +103,13 @@ def test_from_streamlit_secrets_enables_pool_pre_ping_for_redshift(monkeypatch):
     """Regression: Redshift idle-killed sockets must be detected before use,
     or the first SET statement_timeout after pool checkout dies with
     'SSL connection has been closed unexpectedly'."""
-    captured = _capture_engine_kwargs(
-        "redshift", "redshift+psycopg2://u:p@h:5439/db", monkeypatch
-    )
+    captured = _capture_engine_kwargs("redshift", "redshift+psycopg2://u:p@h:5439/db", monkeypatch)
     assert captured["kwargs"].get("pool_pre_ping") is True
     assert captured["kwargs"].get("pool_recycle") == 1800
 
 
 def test_from_streamlit_secrets_enables_pool_pre_ping_for_postgres(monkeypatch):
-    captured = _capture_engine_kwargs(
-        "postgres", "postgresql+psycopg2://u:p@h:5432/db", monkeypatch
-    )
+    captured = _capture_engine_kwargs("postgres", "postgresql+psycopg2://u:p@h:5432/db", monkeypatch)
     assert captured["kwargs"].get("pool_pre_ping") is True
     assert captured["kwargs"].get("pool_recycle") == 1800
 

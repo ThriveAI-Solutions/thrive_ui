@@ -206,8 +206,6 @@ def _render_patient_access_tab(days: int) -> None:
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
-
-
 def render(days_int: int | None = None) -> None:
     """Admin → Analytics → Agentic inner view (Epic #144 / #147).
 

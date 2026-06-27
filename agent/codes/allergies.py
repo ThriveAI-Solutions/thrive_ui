@@ -36,19 +36,19 @@ from typing import Final, List
 
 ALLERGY_SNOMED_BY_CATEGORY: Final[dict[str, list[str]]] = {
     "drug": [
-        "91936005",   # Allergy to penicillin
+        "91936005",  # Allergy to penicillin
         "294505008",  # Allergy to amoxicillin
-        "91937001",   # Allergy to sulfonamide
+        "91937001",  # Allergy to sulfonamide
         "293584003",  # Allergy to aspirin
         "293586001",  # Allergy to NSAID
     ],
     "food": [
-        "91934008",   # Allergy to peanut
-        "91935009",   # Allergy to nut
+        "91934008",  # Allergy to peanut
+        "91935009",  # Allergy to nut
         "300913006",  # Allergy to seafood
         "417532002",  # Allergy to fish
-        "91938006",   # Allergy to dairy
-        "91930004",   # Allergy to eggs
+        "91938006",  # Allergy to dairy
+        "91930004",  # Allergy to eggs
         "300915002",  # Allergy to wheat
     ],
     "environmental": [
@@ -62,7 +62,7 @@ ALLERGY_SNOMED_BY_CATEGORY: Final[dict[str, list[str]]] = {
         "300916003",  # Allergy to latex
     ],
     "anaphylaxis": [
-        "39579001",   # Anaphylaxis
+        "39579001",  # Anaphylaxis
         "241929008",  # Acute allergic reaction
     ],
 }
@@ -78,9 +78,7 @@ def codes_for_category(category: str) -> list[str]:
     drop a typo into a successful empty lookup.
     """
     if category not in ALLERGY_SNOMED_BY_CATEGORY:
-        raise ValueError(
-            f"unknown allergy category {category!r}; expected one of {ALLERGY_CATEGORIES}"
-        )
+        raise ValueError(f"unknown allergy category {category!r}; expected one of {ALLERGY_CATEGORIES}")
     return list(ALLERGY_SNOMED_BY_CATEGORY[category])
 
 

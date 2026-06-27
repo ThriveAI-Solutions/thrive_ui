@@ -21,14 +21,14 @@ def mock_streamlit_environment():
     with patch("streamlit.session_state", new_callable=MagicMock) as mock_session:
         # Mock cookies with admin user
         mock_cookies = MagicMock()
-        mock_cookies.get.side_effect = (
-            lambda key: '"5"' if key == "user_id" else "Admin" if key == "role_name" else None
+        mock_cookies.get.side_effect = lambda key: (
+            '"5"' if key == "user_id" else "Admin" if key == "role_name" else None
         )
         mock_session.cookies = mock_cookies
 
         # Mock session state with admin role
-        mock_session.get.side_effect = (
-            lambda key, default=None: RoleTypeEnum.ADMIN.value if key == "user_role" else default
+        mock_session.get.side_effect = lambda key, default=None: (
+            RoleTypeEnum.ADMIN.value if key == "user_role" else default
         )
         mock_session.user_role = RoleTypeEnum.ADMIN.value
 
@@ -217,12 +217,12 @@ class TestUserRoleIntegration:
         # Test admin user
         with patch("streamlit.session_state", new_callable=MagicMock) as mock_session_admin:
             mock_cookies_admin = MagicMock()
-            mock_cookies_admin.get.side_effect = (
-                lambda key: '"5"' if key == "user_id" else "Admin" if key == "role_name" else None
+            mock_cookies_admin.get.side_effect = lambda key: (
+                '"5"' if key == "user_id" else "Admin" if key == "role_name" else None
             )
             mock_session_admin.cookies = mock_cookies_admin
-            mock_session_admin.get.side_effect = (
-                lambda key, default=None: RoleTypeEnum.ADMIN.value if key == "user_role" else default
+            mock_session_admin.get.side_effect = lambda key, default=None: (
+                RoleTypeEnum.ADMIN.value if key == "user_role" else default
             )
             mock_session_admin.user_role = RoleTypeEnum.ADMIN.value
             mock_session_admin._vn_instance = None
@@ -251,12 +251,12 @@ class TestUserRoleIntegration:
         # Test patient user
         with patch("streamlit.session_state", new_callable=MagicMock) as mock_session_patient:
             mock_cookies_patient = MagicMock()
-            mock_cookies_patient.get.side_effect = (
-                lambda key: '"10"' if key == "user_id" else "Patient" if key == "role_name" else None
+            mock_cookies_patient.get.side_effect = lambda key: (
+                '"10"' if key == "user_id" else "Patient" if key == "role_name" else None
             )
             mock_session_patient.cookies = mock_cookies_patient
-            mock_session_patient.get.side_effect = (
-                lambda key, default=None: RoleTypeEnum.PATIENT.value if key == "user_role" else default
+            mock_session_patient.get.side_effect = lambda key, default=None: (
+                RoleTypeEnum.PATIENT.value if key == "user_role" else default
             )
             mock_session_patient.user_role = RoleTypeEnum.PATIENT.value
             mock_session_patient._vn_instance = None

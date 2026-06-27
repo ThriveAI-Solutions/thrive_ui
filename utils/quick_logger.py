@@ -54,6 +54,7 @@ def get_speaking_steps() -> bool:
 
 # ── Logger factory ──────────────────────────────────────────────────────
 
+
 def get_logger(name: str) -> logging.Logger:
     """Return a stdlib ``Logger`` for *name*.
 
@@ -112,6 +113,7 @@ def pvlog(
 
 
 # ── Performance tracking ───────────────────────────────────────────────
+
 
 def set_start_time() -> float:
     """Capture and return the current wall-clock time."""
