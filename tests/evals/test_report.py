@@ -52,8 +52,13 @@ def _fixture_results():
 def test_html_is_standalone():
     html = generate_html(_fixture_results())
     assert html.lstrip().lower().startswith("<!doctype html>")
-    assert "http://" not in html
-    assert "https://" not in html
+    # "Standalone" means the page loads NO external resources — not that the
+    # string "http://" never appears. The vendored echarts.min.js legitimately
+    # contains W3C XML-namespace URIs (http://www.w3.org/2000/svg, xlink, …)
+    # and Apache/MIT license URLs in comments; those are inert identifiers, not
+    # fetches. Assert on the actual external-load vectors instead.
+    for vector in ('src="http', "src='http", 'href="http', "href='http", "url(http", 'src="//', 'href="//'):
+        assert vector not in html, f"report loads an external resource via {vector!r}"
 
 
 def test_html_embeds_data_and_marking_machinery():

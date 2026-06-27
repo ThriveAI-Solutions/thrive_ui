@@ -1,14 +1,16 @@
 import importlib
 
 
-def test_module_imports_and_exposes_main():
-    mod = importlib.import_module("views.agent_analytics")
-    assert hasattr(mod, "main")
+def test_module_imports_and_exposes_entrypoint():
+    # The agent-analytics view was consolidated into views.admin_agentic by the
+    # 3-route IA refactor (commit 15e5c14); its entry point is render(), not main().
+    mod = importlib.import_module("views.admin_agentic")
+    assert hasattr(mod, "render")
     assert hasattr(mod, "_guard_admin")
 
 
 def test_render_run_timeline_orders_events():
-    from views.agent_analytics import _timeline_rows
+    from views.admin_agentic import _timeline_rows
 
     detail = {
         "events": [

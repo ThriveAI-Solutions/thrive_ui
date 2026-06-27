@@ -9,6 +9,7 @@ inherently non-hermetic, so it skips cleanly when that DB or user isn't present
 from pathlib import Path
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from orm.functions import get_user_questions_page, get_user_recent_questions
 from orm.models import SessionLocal, User
@@ -21,11 +22,17 @@ def test_recent_questions_for_known_user_kr():
 
     # orm.models.SessionLocal is already bound to the configured DB at import,
     # so no secrets mutation is needed (and st.secrets is read-only anyway).
-    with SessionLocal() as session:
-        user = session.query(User).filter(User.username == "thriveai-kr").first()
-        if user is None:
-            pytest.skip("User 'thriveai-kr' not present in local DB; developer-only smoke test")
-        user_id = user.id
+    try:
+        with SessionLocal() as session:
+            user = session.query(User).filter(User.username == "thriveai-kr").first()
+            if user is None:
+                pytest.skip("User 'thriveai-kr' not present in local DB; developer-only smoke test")
+            user_id = user.id
+    except OperationalError as exc:
+        # A stale local DB (e.g. predating a column migration like `organization`)
+        # is the same class of "dev env not set up" as a missing DB — skip rather
+        # than fail. Run `uv run alembic upgrade head` to exercise this test.
+        pytest.skip(f"Local SQLite DB schema is stale ({exc.orig}); run alembic upgrade head")
 
     # Recent questions (deduped)
     recent = get_user_recent_questions(user_id, limit=200)

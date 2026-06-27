@@ -1,4 +1,4 @@
-"""End-to-end smoke test for views.user.import_users().
+"""End-to-end smoke test for views._admin_helpers.import_users().
 
 Drives the importer against an in-memory SQLite using a constructed pandas
 DataFrame (no file I/O) and asserts the full mixed-row behavior: valid rows
@@ -96,21 +96,21 @@ def test_import_users_handles_mixed_rows(in_memory_orm_session, monkeypatch):
     """7-row import: 2 valid + 5 failures (missing email, missing org, bad
     format, dup username, dup email). Asserts the persisted state and the
     Streamlit error/success surface."""
-    # views/user.py:24 does `from orm.models import SessionLocal, ...` which
-    # re-binds the symbol into views.user's namespace. The conftest fixture
+    # views/_admin_helpers.py does `from orm.models import SessionLocal, ...` which
+    # re-binds the symbol into views._admin_helpers's namespace. The conftest fixture
     # only patches orm.models.SessionLocal and orm.functions.SessionLocal —
-    # we need to additionally patch views.user.SessionLocal so the importer's
+    # we need to additionally patch views._admin_helpers.SessionLocal so the importer's
     # role-lookup block uses the in-memory engine.
     import orm.models  # noqa: F401 — ensure module is loaded so we can introspect SessionLocal
-    import views.user
+    import views._admin_helpers
 
-    monkeypatch.setattr(views.user, "SessionLocal", views.user.SessionLocal)
+    monkeypatch.setattr(views._admin_helpers, "SessionLocal", views._admin_helpers.SessionLocal)
     # The fixture has already replaced orm.models.SessionLocal with the
-    # in-memory sessionmaker, but views.user's local binding pre-dates that
+    # in-memory sessionmaker, but views._admin_helpers's local binding pre-dates that
     # patch — re-import it now.
     from orm.models import SessionLocal as _new_session_local
 
-    monkeypatch.setattr(views.user, "SessionLocal", _new_session_local)
+    monkeypatch.setattr(views._admin_helpers, "SessionLocal", _new_session_local)
 
     role_id = _doctor_role_id(in_memory_orm_session)
 
@@ -148,11 +148,11 @@ def test_import_users_handles_mixed_rows(in_memory_orm_session, monkeypatch):
     mock_st.expander.return_value.__exit__ = lambda self_, *args: False
 
     with (
-        patch.object(views.user, "get_user_list_excel", return_value=df),
-        patch.object(views.user, "st", mock_st),
+        patch.object(views._admin_helpers, "get_user_list_excel", return_value=df),
+        patch.object(views._admin_helpers, "st", mock_st),
         patch("os.path.exists", return_value=True),
     ):
-        result = views.user.import_users()
+        result = views._admin_helpers.import_users()
 
     # import_users returns True when any user was successfully imported.
     assert result is True
