@@ -12,6 +12,11 @@ from pydantic import BaseModel, ConfigDict
 from pydantic_ai import ModelRetry, RunContext
 
 from agent.deps import AgentDeps
+from agent.db.federation import (
+    federated_source_ids,
+    fetch_rows_across_source_ids,
+    sort_rows_date_desc,
+)
 from agent.db.queries.documents import documents_sql
 from agent.dataframe_adapters import document_index_result_to_df
 from agent.result_compaction import CompactingListResult
@@ -60,15 +65,23 @@ def list_patient_documents(
         )
     source_id = ctx.deps.selected_patient.source_id
     adapter = ctx.deps.analytics_db
+    schema_prefix = getattr(adapter, "schema_prefix", "")
     dr = query.date_range
-    sql, params = documents_sql(
-        source_id=source_id,
-        document_type=query.document_type,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        schema_prefix=getattr(adapter, "schema_prefix", ""),
+    # Documents are split across the patient's sibling source_ids (one per
+    # contributing source system) — query the full federation set.
+    source_ids = federated_source_ids(adapter, source_id, schema_prefix)
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: documents_sql(
+            source_id=sid,
+            document_type=query.document_type,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_datetime")
     if not rows:
         result = DocumentIndexResult(documents=[], data_availability="no_records_found")
     else:

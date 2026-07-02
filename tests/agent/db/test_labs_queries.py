@@ -103,3 +103,11 @@ def test_labs_most_recent_only(synthetic_db):
     assert len(rows) == 1
     # Most recent row is the one with latest datetime
     assert rows[0]["name"] == "Hemoglobin A1c"
+
+
+def test_labs_order_by_puts_nulls_last():
+    """Postgres/Redshift default NULLS FIRST on DESC, so without an explicit
+    NULLS LAST a NULL-dated row wins most_recent_only's LIMIT 1 and shadows
+    the real newest result (163 NULL-dated rows in the prod-shaped warehouse)."""
+    sql, _ = labs_sql(source_id="s", most_recent_only=True)
+    assert "NULLS LAST" in sql

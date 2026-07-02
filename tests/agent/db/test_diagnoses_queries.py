@@ -39,3 +39,11 @@ def test_diagnoses_most_recent_only(synthetic_db):
     rows = adapter.fetch_all(sql, params)
     assert len(rows) == 1
     assert rows[0]["code"] == "B16.9"
+
+
+def test_diagnoses_order_by_puts_nulls_last():
+    """Postgres/Redshift default NULLS FIRST on DESC, so without an explicit
+    NULLS LAST a NULL-dated row wins most_recent_only's LIMIT 1 and shadows
+    the real newest diagnosis."""
+    sql, _ = diagnoses_sql(source_id="s", most_recent_only=True)
+    assert "NULLS LAST" in sql

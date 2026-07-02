@@ -51,7 +51,7 @@ def diagnoses_sql(
             service_provider_npi
         FROM {schema_prefix}federated_problems_v
         WHERE {where_sql}
-        ORDER BY diagnosis_datetime DESC
+        ORDER BY diagnosis_datetime DESC NULLS LAST
     """
 
     if most_recent_only:

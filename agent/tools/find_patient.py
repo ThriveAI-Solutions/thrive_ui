@@ -82,11 +82,15 @@ def find_patient(
     matches: List[PatientMatch] = []
     for r in rows:
         related = adapter.fetch_all(related_sql, {"internal_patient_id": r["internal_patient_id"]})
+        # internal_source_reference_v holds one row per (source_id,
+        # source_name), so the same source_id recurs — dedupe, keeping
+        # empi_rank order, and drop the canonical id if it reappears.
+        related_ids = [s for s in dict.fromkeys(x["source_id"] for x in related) if s != r["source_id"]]
         matches.append(
             PatientMatch(
                 source_id=r["source_id"],
                 internal_patient_id=r["internal_patient_id"],
-                related_source_ids=[x["source_id"] for x in related],
+                related_source_ids=related_ids,
                 display_name=r["display_name"] or f"{r['first_name']} {r['last_name']}",
                 dob=r["dob"] if isinstance(r["dob"], date) else (date.fromisoformat(r["dob"]) if r["dob"] else None),
                 age=r["age"],

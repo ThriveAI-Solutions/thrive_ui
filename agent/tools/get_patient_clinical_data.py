@@ -29,6 +29,11 @@ from agent.db.queries.allergies import allergies_sql
 from agent.code_normalizer import normalize_token
 from agent.codes.allergies import find_drug_allergy_conflicts
 from agent.dataframe_adapters import clinical_result_to_df
+from agent.db.federation import (
+    federated_source_ids,
+    fetch_rows_across_source_ids,
+    sort_rows_date_desc,
+)
 
 
 # --- Query shapes (Phase 1 subset) ----------------------------------
@@ -357,9 +362,12 @@ class ClinicalResult(CompactingListResult):
 # --- Per-domain helpers ---------------------------------------------
 
 
-def _build_demographics_result(adapter: Any, source_id: str, schema_prefix: str) -> ClinicalResult:
-    sql, params = demographics_sql(source_id=source_id, schema_prefix=schema_prefix)
-    rows = adapter.fetch_all(sql, params)
+def _build_demographics_result(adapter: Any, source_ids: list[str], schema_prefix: str) -> ClinicalResult:
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: demographics_sql(source_id=sid, schema_prefix=schema_prefix),
+    )
     if not rows:
         return ClinicalResult(
             domain="demographics",
@@ -388,17 +396,21 @@ def _build_demographics_result(adapter: Any, source_id: str, schema_prefix: str)
 
 
 def _build_encounters_result(
-    adapter: Any, source_id: str, schema_prefix: str, query: EncountersQuery
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: EncountersQuery
 ) -> ClinicalResult:
     dr = query.date_range
-    sql, params = encounters_sql(
-        source_id=source_id,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        facility_type=query.facility_type,
-        schema_prefix=schema_prefix,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: encounters_sql(
+            source_id=sid,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            facility_type=query.facility_type,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_datetime")
     if not rows:
         return ClinicalResult(
             domain="encounters",
@@ -426,19 +438,26 @@ def _build_encounters_result(
     )
 
 
-def _build_labs_result(adapter: Any, source_id: str, schema_prefix: str, query: LabsQuery) -> ClinicalResult:
+def _build_labs_result(adapter: Any, source_ids: list[str], schema_prefix: str, query: LabsQuery) -> ClinicalResult:
     dr = query.date_range
-    sql, params = labs_sql(
-        source_id=source_id,
-        loinc_codes=query.loinc_codes,
-        test_name_text=query.test_name_text,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        result_filter=query.result_filter,
-        most_recent_only=query.most_recent_only,
-        schema_prefix=schema_prefix,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: labs_sql(
+            source_id=sid,
+            loinc_codes=query.loinc_codes,
+            test_name_text=query.test_name_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            result_filter=query.result_filter,
+            most_recent_only=query.most_recent_only,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_datetime")
+    if query.most_recent_only:
+        # Per-sid LIMIT 1 yields one candidate per sibling; keep the global newest.
+        rows = rows[:1]
     if not rows:
         return ClinicalResult(
             domain="labs",
@@ -474,15 +493,24 @@ def _build_labs_result(adapter: Any, source_id: str, schema_prefix: str, query: 
     )
 
 
-def _build_diagnoses_result(adapter: Any, source_id: str, schema_prefix: str, query: DiagnosesQuery) -> ClinicalResult:
-    sql, params = diagnoses_sql(
-        source_id=source_id,
-        icd10_codes=query.icd10_codes,
-        condition_text=query.condition_text,
-        most_recent_only=query.most_recent_only,
-        schema_prefix=schema_prefix,
+def _build_diagnoses_result(
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: DiagnosesQuery
+) -> ClinicalResult:
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: diagnoses_sql(
+            source_id=sid,
+            icd10_codes=query.icd10_codes,
+            condition_text=query.condition_text,
+            most_recent_only=query.most_recent_only,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "diagnosis_datetime")
+    if query.most_recent_only:
+        # Per-sid LIMIT 1 yields one candidate per sibling; keep the global newest.
+        rows = rows[:1]
     if not rows:
         return ClinicalResult(
             domain="diagnoses",
@@ -517,16 +545,20 @@ def _build_diagnoses_result(adapter: Any, source_id: str, schema_prefix: str, qu
 
 
 def _build_medications_result(
-    adapter: Any, source_id: str, schema_prefix: str, query: MedicationsQuery
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: MedicationsQuery
 ) -> ClinicalResult:
     dr = query.date_range
-    sql, params = medications_sql(
-        source_id=source_id,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        schema_prefix=schema_prefix,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: medications_sql(
+            source_id=sid,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "date_prescribed")
     if not rows:
         return ClinicalResult(
             domain="medications",
@@ -560,18 +592,22 @@ def _build_medications_result(
 
 
 def _build_immunizations_result(
-    adapter: Any, source_id: str, schema_prefix: str, query: ImmunizationsQuery
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: ImmunizationsQuery
 ) -> ClinicalResult:
     dr = query.date_range
-    sql, params = immunizations_sql(
-        source_id=source_id,
-        cvx_codes=query.cvx_codes,
-        vaccine_text=query.vaccine_text,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        schema_prefix=schema_prefix,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: immunizations_sql(
+            source_id=sid,
+            cvx_codes=query.cvx_codes,
+            vaccine_text=query.vaccine_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_datetime")
     if not rows:
         return ClinicalResult(
             domain="immunizations",
@@ -600,18 +636,22 @@ def _build_immunizations_result(
 
 
 def _build_procedures_result(
-    adapter: Any, source_id: str, schema_prefix: str, query: ProceduresQuery
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: ProceduresQuery
 ) -> ClinicalResult:
     dr = query.date_range
-    sql, params = procedures_sql(
-        source_id=source_id,
-        cpt_codes=query.cpt_codes,
-        procedure_text=query.procedure_text,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        schema_prefix=schema_prefix,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: procedures_sql(
+            source_id=sid,
+            cpt_codes=query.cpt_codes,
+            procedure_text=query.procedure_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_date")
     if not rows:
         return ClinicalResult(
             domain="procedures",
@@ -651,19 +691,25 @@ def _build_procedures_result(
     )
 
 
-def _build_surgeries_result(adapter: Any, source_id: str, schema_prefix: str, query: SurgeriesQuery) -> ClinicalResult:
+def _build_surgeries_result(
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: SurgeriesQuery
+) -> ClinicalResult:
     dr = query.date_range
     db_dialect = getattr(adapter, "dialect", "sqlite")
-    sql, params = surgeries_sql(
-        source_id=source_id,
-        cpt_codes=query.cpt_codes,
-        procedure_text=query.procedure_text,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        schema_prefix=schema_prefix,
-        dialect=db_dialect,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: surgeries_sql(
+            source_id=sid,
+            cpt_codes=query.cpt_codes,
+            procedure_text=query.procedure_text,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+            dialect=db_dialect,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_date")
     reliability = (
         "Surgery identification uses CPT surgery range (10004-69990) for orders "
         "and invasive ICD-10-PCS root operations for problems. Claims procedures "
@@ -706,17 +752,23 @@ def _build_surgeries_result(adapter: Any, source_id: str, schema_prefix: str, qu
     )
 
 
-def _build_imaging_result(adapter: Any, source_id: str, schema_prefix: str, query: ImagingQuery) -> ClinicalResult:
+def _build_imaging_result(
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: ImagingQuery
+) -> ClinicalResult:
     dr = query.date_range
-    sql, params = imaging_sql(
-        source_id=source_id,
-        modality=query.modality,
-        body_region=query.body_region,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        schema_prefix=schema_prefix,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: imaging_sql(
+            source_id=sid,
+            modality=query.modality,
+            body_region=query.body_region,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_date")
     impression_note = (
         "Imaging report impressions are NOT stored in this warehouse — only "
         "order/document metadata. Tell the user to retrieve the full report "
@@ -833,19 +885,25 @@ def _normalize_category(type_raw: Optional[str]) -> Optional[str]:
     return _TYPE_TO_CATEGORY.get(type_raw.strip().lower(), "other")
 
 
-def _build_allergies_result(adapter: Any, source_id: str, schema_prefix: str, query: AllergiesQuery) -> ClinicalResult:
+def _build_allergies_result(
+    adapter: Any, source_ids: list[str], schema_prefix: str, query: AllergiesQuery
+) -> ClinicalResult:
     dr = query.date_range
-    sql, params = allergies_sql(
-        source_id=source_id,
-        snomed_codes=query.snomed_codes,
-        allergen_text=query.allergen_text,
-        category=query.category,
-        include_inactive=query.include_inactive,
-        start_date=dr.start.isoformat() if dr and dr.start else None,
-        end_date=dr.end.isoformat() if dr and dr.end else None,
-        schema_prefix=schema_prefix,
+    rows = fetch_rows_across_source_ids(
+        adapter,
+        source_ids,
+        lambda sid: allergies_sql(
+            source_id=sid,
+            snomed_codes=query.snomed_codes,
+            allergen_text=query.allergen_text,
+            category=query.category,
+            include_inactive=query.include_inactive,
+            start_date=dr.start.isoformat() if dr and dr.start else None,
+            end_date=dr.end.isoformat() if dr and dr.end else None,
+            schema_prefix=schema_prefix,
+        ),
     )
-    rows = adapter.fetch_all(sql, params)
+    rows = sort_rows_date_desc(rows, "event_datetime")
 
     # No rows at all = no allergy assertion of any kind for this patient.
     if not rows:
@@ -892,7 +950,7 @@ def _build_allergies_result(adapter: Any, source_id: str, schema_prefix: str, qu
     # Drug-allergy soft conflict signal. Only meaningful when there's at
     # least one drug allergy AND an active medication list. The check is a
     # second SQL fetch — adds <1 round-trip; well under tool-call budget.
-    notes_to_agent = _maybe_drug_allergy_signal(adapter, source_id, schema_prefix, real_rows)
+    notes_to_agent = _maybe_drug_allergy_signal(adapter, source_ids, schema_prefix, real_rows)
 
     return ClinicalResult(
         domain="allergies",
@@ -904,7 +962,7 @@ def _build_allergies_result(adapter: Any, source_id: str, schema_prefix: str, qu
 
 
 def _maybe_drug_allergy_signal(
-    adapter: Any, source_id: str, schema_prefix: str, allergy_rows: list[dict]
+    adapter: Any, source_ids: list[str], schema_prefix: str, allergy_rows: list[dict]
 ) -> Optional[str]:
     """Returns an advisory string when a recorded allergen overlaps an active
     med. Returns None when there's no overlap (or the meds fetch fails)."""
@@ -917,8 +975,13 @@ def _maybe_drug_allergy_signal(
     if not has_drug_concern:
         return None
     try:
-        med_sql, med_params = medications_sql(source_id=source_id, schema_prefix=schema_prefix)
-        meds = adapter.fetch_all(med_sql, med_params)
+        # Meds fan out over the federation set too: the allergy may be
+        # recorded under one sibling and the conflicting med under another.
+        meds = fetch_rows_across_source_ids(
+            adapter,
+            source_ids,
+            lambda sid: medications_sql(source_id=sid, schema_prefix=schema_prefix),
+        )
     except Exception:
         return None
     conflicts = find_drug_allergy_conflicts(allergies=allergy_rows, medications=meds)
@@ -949,28 +1012,38 @@ def get_patient_clinical_data(
     adapter = ctx.deps.analytics_db
     schema_prefix = getattr(adapter, "schema_prefix", "")
 
-    if isinstance(query, DemographicsQuery):
-        result = _build_demographics_result(adapter, source_id, schema_prefix)
-    elif isinstance(query, EncountersQuery):
-        result = _build_encounters_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, LabsQuery):
-        result = _build_labs_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, DiagnosesQuery):
-        result = _build_diagnoses_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, MedicationsQuery):
-        result = _build_medications_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, ImmunizationsQuery):
-        result = _build_immunizations_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, ProceduresQuery):
-        result = _build_procedures_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, SurgeriesQuery):
-        result = _build_surgeries_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, ImagingQuery):
-        result = _build_imaging_result(adapter, source_id, schema_prefix, query)
-    elif isinstance(query, AdmissionsQuery):
+    if isinstance(query, AdmissionsQuery):
+        # adt.py resolves identity through the EMPI join itself; fanning it
+        # out over the federation set would double-apply identity resolution.
         result = _build_admissions_result(adapter, source_id, schema_prefix, query)
+        ctx.deps.last_dataframe = clinical_result_to_df(result)
+        return result
+
+    # A patient's chart is split across sibling source_ids (one per
+    # contributing source system); query every sibling, not just the
+    # canonical id, or domains loaded under a sibling come back empty.
+    source_ids = federated_source_ids(adapter, source_id, schema_prefix)
+
+    if isinstance(query, DemographicsQuery):
+        result = _build_demographics_result(adapter, source_ids, schema_prefix)
+    elif isinstance(query, EncountersQuery):
+        result = _build_encounters_result(adapter, source_ids, schema_prefix, query)
+    elif isinstance(query, LabsQuery):
+        result = _build_labs_result(adapter, source_ids, schema_prefix, query)
+    elif isinstance(query, DiagnosesQuery):
+        result = _build_diagnoses_result(adapter, source_ids, schema_prefix, query)
+    elif isinstance(query, MedicationsQuery):
+        result = _build_medications_result(adapter, source_ids, schema_prefix, query)
+    elif isinstance(query, ImmunizationsQuery):
+        result = _build_immunizations_result(adapter, source_ids, schema_prefix, query)
+    elif isinstance(query, ProceduresQuery):
+        result = _build_procedures_result(adapter, source_ids, schema_prefix, query)
+    elif isinstance(query, SurgeriesQuery):
+        result = _build_surgeries_result(adapter, source_ids, schema_prefix, query)
+    elif isinstance(query, ImagingQuery):
+        result = _build_imaging_result(adapter, source_ids, schema_prefix, query)
     elif isinstance(query, AllergiesQuery):
-        result = _build_allergies_result(adapter, source_id, schema_prefix, query)
+        result = _build_allergies_result(adapter, source_ids, schema_prefix, query)
     else:
         raise ModelRetry(f"Unknown clinical query variant: {type(query).__name__}")
 

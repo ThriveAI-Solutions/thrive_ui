@@ -76,7 +76,9 @@ def test_list_patient_documents_forwards_schema_prefix():
     ctx = _ctx(adapter, with_selection=True)
     list_patient_documents(ctx, DocumentIndexQuery())
     assert adapter.captured_sqls
-    assert "dw.federated_documents_v" in adapter.captured_sqls[0]
+    # First call is EMPI identity resolution; the domain query follows.
+    assert any("dw.internal_source_reference_v" in s for s in adapter.captured_sqls)
+    assert any("dw.federated_documents_v" in s for s in adapter.captured_sqls)
 
 
 @pytest.mark.parametrize(
@@ -107,6 +109,6 @@ def test_default_empty_schema_does_not_break_anything():
     adapter = _CapturingAdapter(schema="")
     ctx = _ctx(adapter, with_selection=True)
     get_patient_clinical_data(ctx, DemographicsQuery())
-    sql = adapter.captured_sqls[0]
-    assert "FROM federated_demographic_v" in sql
-    assert "FROM .federated_demographic_v" not in sql
+    combined = "\n".join(adapter.captured_sqls)
+    assert "FROM federated_demographic_v" in combined
+    assert "FROM ." not in combined

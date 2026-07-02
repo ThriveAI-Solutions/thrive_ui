@@ -71,6 +71,36 @@ def find_patient_sql(
     return sql, params
 
 
+def resolve_source_patient_sql(*, schema_prefix: str = "") -> Tuple[str, dict]:
+    """Resolve an entered source_id (any empi_rank) to its internal patient_id.
+    Caller binds :source_id."""
+    return (
+        f"""
+        SELECT patient_id AS internal_patient_id
+        FROM {schema_prefix}internal_source_reference_v
+        WHERE source_id = :source_id
+        LIMIT 1
+        """,
+        {},
+    )
+
+
+def all_source_ids_sql(*, schema_prefix: str = "") -> Tuple[str, dict]:
+    """All non-stale source_ids for an internal patient — INCLUDING the
+    canonical (empi_rank = 1) row, so the full federation set is returned.
+    Caller binds :internal_patient_id."""
+    return (
+        f"""
+        SELECT source_id, empi_rank, source_name
+        FROM {schema_prefix}internal_source_reference_v
+        WHERE patient_id = :internal_patient_id
+          AND empi_rank != 99
+        ORDER BY empi_rank
+        """,
+        {},
+    )
+
+
 def related_source_ids_sql(*, schema_prefix: str = "") -> Tuple[str, dict]:
     return (
         f"""

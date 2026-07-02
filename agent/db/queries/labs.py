@@ -78,6 +78,6 @@ def labs_sql(
             service_provider
         FROM {schema_prefix}federated_results_v
         WHERE {" AND ".join(where)}
-        ORDER BY datetime DESC{limit_clause}
+        ORDER BY datetime DESC NULLS LAST{limit_clause}
     """
     return sql, params
