@@ -45,6 +45,28 @@ def _state_aliases(state_input: str) -> tuple[str, ...]:
     return _STATE_ALIAS_MAP.get(key, (key,))
 
 
+def best_rank_isr_join_sql(schema_prefix: str) -> str:
+    """One xref row per patient: lowest empi_rank wins, source_id breaks ties.
+
+    COALESCE pins NULL ranks last on every dialect (sqlite sorts NULLs first,
+    postgres/redshift last). Replaces the old hard `empi_rank = 1` join, which
+    silently dropped profiled patients with no rank-1 row (1,462 in prod,
+    2026-07-04 audit).
+    """
+    return (
+        f"JOIN (\n"
+        f"              SELECT patient_id, source_id FROM (\n"
+        f"                SELECT patient_id, source_id,\n"
+        f"                       ROW_NUMBER() OVER (\n"
+        f"                         PARTITION BY patient_id\n"
+        f"                         ORDER BY COALESCE(empi_rank, 2147483647) ASC, source_id ASC\n"
+        f"                       ) AS rn\n"
+        f"                FROM {schema_prefix}internal_source_reference_v\n"
+        f"              ) ranked_isr WHERE rn = 1\n"
+        f"            ) isr ON isr.patient_id = p.patient_id"
+    )
+
+
 def _has_diagnosis_criterion(criteria) -> bool:
     """True when a diagnosis filter is active: codes and/or an active date window.
     An all-None diagnosis_date_range carries no filter and does not count.
@@ -223,19 +245,17 @@ def cohort_sql(criteria, schema_prefix: str = "", dialect: str = "sqlite") -> Tu
         # population size.
         #
         # Count distinct source_id (the EMPI-resolved canonical person
-        # identifier). isr.empi_rank = 1 selects each person's current
-        # primary CID (one per person); counting source_id at rank 1 =
-        # distinct people. empi_rank != 99 would include legacy merged CIDs
-        # and over-count ~2x. Using patient_id here would over-count people
+        # identifier). The best-rank join selects each person's best-ranked
+        # xref row (one per person); counting its source_id = distinct
+        # people. empi_rank != 99 would include legacy merged CIDs and
+        # over-count ~2x. Using patient_id here would over-count people
         # who have multiple internal patient_ids. This matches the sample
         # path's COUNT(*) OVER () grain and the breakdown path's
         # COUNT(DISTINCT source_id).
         sql = f"""
             SELECT COUNT(DISTINCT isr.source_id) AS total_count
             FROM {schema_prefix}internal_patient_profile_v p
-            JOIN {schema_prefix}internal_source_reference_v isr
-              ON isr.patient_id = p.patient_id
-              AND isr.empi_rank = 1
+            {best_rank_isr_join_sql(schema_prefix)}
             {join_block}
             WHERE {where_block}
         """
@@ -252,9 +272,7 @@ def cohort_sql(criteria, schema_prefix: str = "", dialect: str = "sqlite") -> Tu
             p.practice_name,
             COUNT(*) OVER () AS total_count
         FROM {schema_prefix}internal_patient_profile_v p
-        JOIN {schema_prefix}internal_source_reference_v isr
-          ON isr.patient_id = p.patient_id
-          AND isr.empi_rank = 1
+        {best_rank_isr_join_sql(schema_prefix)}
         {join_block}
         WHERE {where_block}
         LIMIT :sample_size_plus_one

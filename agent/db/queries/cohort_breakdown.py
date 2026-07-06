@@ -18,6 +18,7 @@ from agent.db.queries.adt import inpatient_cohort_subquery_sql, patient_id_text_
 from agent.db.queries.cohort import (
     _build_non_diagnosis_filters,
     _diagnosis_event_where,
+    best_rank_isr_join_sql,
 )
 
 
@@ -207,8 +208,7 @@ def cohort_breakdown_sql(
     where_block = " AND ".join(where_clauses)
     from_block = (
         f"FROM {schema_prefix}internal_patient_profile_v p\n"
-        f"        JOIN {schema_prefix}internal_source_reference_v isr\n"
-        f"          ON isr.patient_id = p.patient_id AND isr.empi_rank = 1\n"
+        f"        {best_rank_isr_join_sql(schema_prefix)}\n"
         f"        {join_block}\n"
         f"        WHERE {where_block}"
     )
