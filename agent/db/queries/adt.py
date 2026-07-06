@@ -6,8 +6,11 @@ normalizes setting values to INPATIENT, OUTPATIENT, EMERGENCY, etc.
 
 Unlike every other federated_*_v view, federated_adt_v exposes only
 `patient_id` (no `source_id`). The agent's identity model is source_id-based,
-so we resolve source_id → patient_id through internal_source_reference_v
-at empi_rank = 1 — same pattern as patient.find_patient_sql.
+so we resolve source_id → patient_id through internal_source_reference_v at
+ANY empi_rank (best-ranked mapping wins; see _source_id_resolver_join_sql).
+A hard rank-1 resolution would return zero admissions for a patient selected
+under a sibling/old CID, and could never work for patients with no rank-1
+xref row at all.
 """
 
 from __future__ import annotations
@@ -61,6 +64,29 @@ def patient_id_text_sql(alias: str, column: str = "patient_id") -> str:
     whole query fail.
     """
     return f"CAST({alias}.{column} AS VARCHAR)"
+
+
+def _source_id_resolver_join_sql(schema_prefix: str) -> str:
+    """Resolve the entered :source_id to exactly one (patient_id, source_id) row.
+
+    Any empi_rank matches — this is identity RESOLUTION (which patient does the
+    entered CID belong to), not person-counting — with the best-ranked mapping
+    winning: lowest empi_rank first (COALESCE pins NULL ranks last on every
+    dialect), patient_id as a deterministic tie-break. The ROW_NUMBER cap to one
+    row also collapses the view's one-row-per-(source_id, source_name) fan-out.
+    """
+    return (
+        f"JOIN (\n"
+        f"                SELECT patient_id, source_id FROM (\n"
+        f"                  SELECT patient_id, source_id,\n"
+        f"                         ROW_NUMBER() OVER (\n"
+        f"                           ORDER BY COALESCE(empi_rank, 2147483647) ASC, patient_id ASC\n"
+        f"                         ) AS rn\n"
+        f"                  FROM {schema_prefix}internal_source_reference_v\n"
+        f"                  WHERE source_id = :source_id\n"
+        f"                ) ranked_isr WHERE rn = 1\n"
+        f"              ) isr"
+    )
 
 
 def visit_number_sql(alias: str) -> str:
@@ -304,9 +330,8 @@ def admissions_sql(
                 CASE WHEN {cancel_expr} THEN 1 ELSE 0 END AS is_cancel_admit,
                 {admit_rn_expr} AS admit_rn
             FROM {schema_prefix}federated_adt_v adt
-            JOIN {schema_prefix}internal_source_reference_v isr
-              ON {patient_id_text_sql("isr")} = adt.patient_id AND isr.empi_rank = 1
-            WHERE isr.source_id = :source_id
+            {_source_id_resolver_join_sql(schema_prefix)}
+              ON {patient_id_text_sql("isr")} = adt.patient_id
         ),
         visit_rollup AS (
             SELECT

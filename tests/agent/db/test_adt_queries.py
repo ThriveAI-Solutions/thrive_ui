@@ -178,15 +178,20 @@ def test_no_records_for_unknown_source(synthetic_db):
 
 
 def test_resolves_source_id_via_isr_join():
-    """Regression #196: federated_adt_v has no source_id column."""
+    """Regression #196: federated_adt_v has no source_id column. Identity is
+    resolved through internal_source_reference_v at ANY empi_rank (best-ranked
+    mapping wins) — a hard rank-1 join returned zero admissions for sibling/old
+    CIDs and for patients with no rank-1 xref row."""
     sql, _ = admissions_sql(source_id="any-cid", dialect="redshift", schema_prefix="dw.")
     n = " ".join(sql.split())
-    assert "WHERE source_id" not in n
     assert "adt.source_id" not in n
-    assert "JOIN dw.internal_source_reference_v isr" in n
+    assert "FROM dw.internal_source_reference_v" in n
+    assert "WHERE source_id = :source_id" in n  # filter lives on the xref view, not ADT
+    assert "empi_rank = 1" not in n  # any rank resolves
+    assert "ROW_NUMBER() OVER" in n
+    assert "COALESCE(empi_rank, 2147483647)" in n
+    assert "rn = 1" in n  # exactly one resolver row (no (source_id, source_name) fan-out)
     assert "CAST(isr.patient_id AS VARCHAR) = adt.patient_id" in n
-    assert "isr.empi_rank = 1" in n
-    assert "isr.source_id = :source_id" in n
     assert "isr.source_id AS source_id" in n
 
 
