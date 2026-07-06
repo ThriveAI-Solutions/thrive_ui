@@ -70,9 +70,10 @@ def test_assembled_description_under_budget():
     schema_context_for_sql; but the hook ships base + "\\n\\n" + schema, and an
     oversized description is what actually degrades small-model (gemma4:31b)
     tool-name retention. Bounding the assembled string is the invariant that
-    matches reality. Budget has ~500 chars of headroom over current (~6.5k);
+    matches reality. Budget has ~350 chars of headroom over current (~8.15k;
+    grew 2026-07-06 for the EMPI sibling-expansion CTE example + identity doc);
     if it trips, trim SCHEMA_DOCS / RUN_SQL_EXAMPLES or the run_sql docstring."""
-    _ASSEMBLED_BUDGET_CHARS = 7500
+    _ASSEMBLED_BUDGET_CHARS = 8500
     for prefix in ("dw.", ""):
         ctx = _make_ctx(prefix)
         out = _run(_augment_run_sql_description(ctx, _base_tool_def()))

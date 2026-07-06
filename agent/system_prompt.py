@@ -29,7 +29,14 @@ changes; `patient_id` is NOT used for aggregation. To count or de-duplicate \
 PEOPLE anywhere — including ad-hoc `run_sql` — use `COUNT(DISTINCT source_id)` \
 joined to `internal_source_reference_v` at `empi_rank = 1` (the current \
 primary CID, exactly one per person). NEVER use `empi_rank != 99` for a \
-people-count: it returns every historical/merged CID and over-counts ~2x.
+people-count: it returns every historical/merged CID and over-counts ~2x. \
+The REVERSE for a single patient: a chart is split across sibling \
+source_ids (one per contributing source system), so in ad-hoc `run_sql` \
+never filter a federated view by one bare `source_id` — expand it first by \
+self-joining `internal_source_reference_v` on `patient_id` (the entered id \
+matches at any rank; keep siblings with `empi_rank != 99`), then filter \
+with the expanded set (copy the CTE idiom from the run_sql examples). The \
+curated patient tools do this expansion automatically.
 
 2. The selected-patient slot is set by the UI, not by you. Call \
 `find_patient` to list candidates; the user picks. Clinical-data tools \
@@ -235,7 +242,7 @@ taking?" is specific-patient).
   - General schema info → `search_knowledge_base(kind="schema")`.
 
   - `run_sql` is an escape hatch. Only when the curated tools cannot \
-answer (ad-hoc cross-domain joins). SELECT/WITH only; 500-row cap; 30s \
+answer (ad-hoc cross-domain joins). SELECT/WITH only; 500-row cap; 240s \
 timeout. Tell the user when results truncate and suggest narrowing.
 
   - `make_chart` / `summarize_results` operate on the most recent \

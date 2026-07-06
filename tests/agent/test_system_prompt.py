@@ -55,6 +55,29 @@ def test_system_prompt_documents_run_sql():
     assert "escape hatch" in SYSTEM_PROMPT.lower() or "fallback" in SYSTEM_PROMPT.lower()
 
 
+def test_system_prompt_teaches_per_patient_source_id_expansion():
+    """Core Rule 1 covered only the counting direction. For single-patient
+    run_sql the model must expand the entered source_id to all EMPI sibling
+    source_ids (self-join internal_source_reference_v on patient_id,
+    empi_rank != 99) — a bare `source_id =` filter on a federated view
+    silently drops the chart rows recorded under sibling ids."""
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    assert "sibling" in lower
+    assert "empi_rank != 99" in SYSTEM_PROMPT
+
+
+def test_system_prompt_run_sql_timeout_matches_code():
+    """The prompt said '30s timeout' while run_sql actually allows 240s —
+    stale enough to make the model needlessly avoid heavier queries."""
+    from agent.system_prompt import SYSTEM_PROMPT
+    from agent.tools.run_sql import _TIMEOUT_S
+
+    assert "30s timeout" not in SYSTEM_PROMPT
+    assert f"{_TIMEOUT_S}s" in SYSTEM_PROMPT
+
+
 def test_system_prompt_documents_make_chart():
     from agent.system_prompt import SYSTEM_PROMPT
 

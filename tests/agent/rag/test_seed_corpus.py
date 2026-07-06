@@ -28,6 +28,15 @@ def test_identity_docs_present():
     assert any("source_id" in d["text"] and "empi_rank" in d["text"] for d in IDENTITY_DOCS)
 
 
+def test_identity_docs_teach_sibling_expansion_for_single_patient():
+    """Both directions of the identity rule must be taught: counting people
+    (rank 1) AND single-patient chart federation (expand the entered
+    source_id to all EMPI siblings before filtering federated views)."""
+    blob = " ".join(d["text"] for d in IDENTITY_DOCS).lower()
+    assert "sibling" in blob
+    assert "internal_source_reference_v" in blob
+
+
 def test_freshness_docs_present():
     assert any("bi-weekly" in d["text"].lower() for d in FRESHNESS_DOCS)
     assert any("monthly" in d["text"].lower() for d in FRESHNESS_DOCS)

@@ -197,7 +197,12 @@ IDENTITY_DOCS: List[_Doc] = [
             "(2) internal_patient_profile_v.patient_id is integer, warehouse-internal "
             "— used only for joins to internal_source_reference_v. To count distinct "
             "PEOPLE, COUNT(DISTINCT source_id) at empi_rank = 1 (current primary "
-            "CID); empi_rank != 99 over-counts people."
+            "CID); empi_rank != 99 over-counts people. The REVERSE for "
+            "single-patient queries: a chart is split across sibling source_ids, "
+            "so a bare source_id filter on a federated_*_v view drops the "
+            "siblings' rows — expand first via the internal_source_reference_v "
+            "self-join on patient_id (entered id at any rank; siblings "
+            "empi_rank != 99)."
         ),
     },
 ]
@@ -538,12 +543,20 @@ RUN_SQL_EXAMPLES: List[_Doc] = [
         "text": (
             "Q: For one source_id, the most recent A1C result (LOINC 4548-4).\n"
             "SQL:\n"
-            "  SELECT result, clean_result, unit, datetime\n"
-            "  FROM {p}federated_results_v\n"
-            "  WHERE source_id = :source_id\n"
-            "    AND code = '4548-4' AND code_type = 'LOINC'\n"
-            "  ORDER BY datetime DESC\n"
-            "  LIMIT 1;"
+            "  WITH pt AS (\n"
+            "    SELECT DISTINCT sib.source_id\n"
+            "    FROM {p}internal_source_reference_v me\n"
+            "    JOIN {p}internal_source_reference_v sib ON sib.patient_id = me.patient_id\n"
+            "    WHERE me.source_id = :source_id AND sib.empi_rank != 99\n"
+            "  )\n"
+            "  SELECT r.result, r.clean_result, r.unit, r.datetime\n"
+            "  FROM {p}federated_results_v r\n"
+            "  JOIN pt ON r.source_id = pt.source_id\n"
+            "  WHERE r.code = '4548-4' AND r.code_type = 'LOINC'\n"
+            "  ORDER BY r.datetime DESC NULLS LAST\n"
+            "  LIMIT 1;\n"
+            "The pt CTE is REQUIRED for every single-patient query. NULLS LAST "
+            "is required on DESC date sorts (NULL dates otherwise sort first)."
         ),
     },
 ]
