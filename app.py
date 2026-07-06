@@ -2,7 +2,7 @@ import streamlit as st
 
 from utils.discord_logging import add_discord_handler_if_configured, initialize_discord_logging_after_streamlit
 from utils.logging_config import setup_logging
-from utils.quick_logger import INFO, get_logger
+from utils.quick_logger import get_logger
 
 # Set the page configuration to wide mode
 st.set_page_config(layout="wide")
@@ -10,20 +10,14 @@ from streamlit_cookies_manager_ext import EncryptedCookieManager
 
 from utils.auth import check_authenticate
 
-# setup logging
-setup_logging(debug=True)
+# setup logging (once per process; opt into DEBUG via [logging].debug in secrets)
+setup_logging()
 
 logger = get_logger(__name__)
 
 # Initialize Discord logging after Streamlit is ready
 
 # add_discord_handler_if_configured(logger)
-
-# silence watchdog warnings
-get_logger("fsevents").setLevel(INFO)
-get_logger("chromadb").setLevel(INFO)
-get_logger("httpcore").setLevel(INFO)
-get_logger("httpx").setLevel(INFO)
 
 
 # Run pending DB migrations and seed defaults exactly once per process.

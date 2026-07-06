@@ -125,6 +125,9 @@ object_type = "tables"   # or "views"
 # expose_query_details_to = ["admin"]   # roles allowed to see SQL/raw rows in tool cards
 # ollama_think = true        # global thinking toggle; per-model override under [agent.ollama_think_per_model]
 
+[logging]
+# debug = false   # opt into DEBUG-level console/file logs (default INFO; noisy libs stay at WARNING)
+
 [sqlite]
 database = "./pgDatabase/db.sqlite3"
 

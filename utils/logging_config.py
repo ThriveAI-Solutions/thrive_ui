@@ -16,6 +16,21 @@ from .quick_logger import pvlog, set_speaking_log
 LOG_DIR = Path(__file__).with_name("logs")
 LOG_DIR.mkdir(exist_ok=True)
 
+_configured = False
+
+# Libraries whose DEBUG/INFO chatter dominates the file log when the root
+# logger is opened up (PIL logs one line per PNG chunk, httpx per request …).
+_NOISY_THIRD_PARTY_LOGGERS = (
+    "PIL",
+    "httpx",
+    "httpcore",
+    "openai",
+    "matplotlib",
+    "watchdog",
+    "fsevents",
+    "chromadb",
+)
+
 
 def _dict_config(debug: bool = False) -> dict:
     """Return a logging.config-compatible dict."""
@@ -48,7 +63,7 @@ def _dict_config(debug: bool = False) -> dict:
             # daily rolling log (14-day retention)
             "file.daily": {
                 "class": "logging.handlers.TimedRotatingFileHandler",
-                "level": "DEBUG",
+                "level": level,
                 "formatter": "file",
                 "filename": str(LOG_DIR / "app.log"),
                 "when": "midnight",
@@ -70,7 +85,7 @@ def _dict_config(debug: bool = False) -> dict:
         "loggers": {
             # root logger catches *everything*
             "": {
-                "level": "DEBUG",
+                "level": level,
                 "handlers": ["console", "file.daily", "file.error"],
             },
             # Silence noisy third-party loggers
@@ -79,22 +94,58 @@ def _dict_config(debug: bool = False) -> dict:
                 "handlers": [],
                 "propagate": False,
             },
+            **{name: {"level": "WARNING"} for name in _NOISY_THIRD_PARTY_LOGGERS},
         },
     }
 
 
-# Public API -------------------------------------------------------------
-def setup_logging(*, debug: bool = False) -> None:
+def _get_streamlit_logging_section() -> dict | None:
+    """Return the ``[logging]`` section from ``st.secrets``.
+
+    Module-level helper so tests can patch it. Raises if streamlit is
+    unavailable; ``_resolve_debug`` catches that and falls back to defaults.
     """
-    Configure logging.  Call exactly once, early in the main process.
+    import streamlit as st  # local: streamlit may not be importable in unit tests
+
+    return dict(st.secrets.get("logging", {}))
+
+
+def _resolve_debug(debug: bool | None) -> bool:
+    if debug is not None:
+        return bool(debug)
+    try:
+        section = _get_streamlit_logging_section() or {}
+        return bool(section.get("debug", False))
+    except Exception:
+        return False
+
+
+def _reset_for_tests() -> None:
+    """Allow ``setup_logging`` to run again. Test helper; not for app use."""
+    global _configured
+    _configured = False
+
+
+# Public API -------------------------------------------------------------
+def setup_logging(*, debug: bool | None = None) -> None:
+    """
+    Configure logging once per process; later calls are no-ops (Streamlit
+    re-executes app.py on every rerun). Level is INFO unless *debug* is
+    passed or ``[logging].debug`` is set in secrets.
     Initializes quick_logger with text-to-speech disabled.
     """
-    logging.config.dictConfig(_dict_config(debug))
+    global _configured
+    if _configured:
+        return
+
+    resolved_debug = _resolve_debug(debug)
+    logging.config.dictConfig(_dict_config(resolved_debug))
+    _configured = True
 
     # Disable text-to-speech — not needed in production
     set_speaking_log(False)
 
     # Discord handler will be added later when Streamlit secrets are available
-    pvlog("info", "Basic logging configuration complete - Discord handler will be added when secrets are available")
+    pvlog("debug", "Basic logging configuration complete - Discord handler will be added when secrets are available")
 
-    pvlog("debug", f"Logging configured (debug={debug})")
+    pvlog("debug", f"Logging configured (debug={resolved_debug})")
