@@ -467,10 +467,14 @@ EXAMPLES_DOCS: List[_Doc] = [
         "kind": "examples",
         "text": (
             "Q: 'List people in zip 14223 with high blood pressure.' "
-            "A: search_codes(vocabulary='icd10', query='hypertension') → "
-            "search_patients_by_criteria(diagnosis_codes=['I10'], zip_code='14223'). "
-            "Do NOT also pass condition_text — it AND-stacks against the code filter "
-            "and returns zero. Surface the geo reliability note from the result."
+            "A: search_codes(vocabulary='icd10', query='hypertension') → if the result "
+            "includes a SET (e.g. set_id 'dx:hypertension'), "
+            "search_patients_by_criteria(condition_sets=['dx:hypertension'], "
+            "zip_code='14223'); only fall back to "
+            "search_patients_by_criteria(diagnosis_codes=['I10'], zip_code='14223') "
+            "when no set was returned. Do NOT also pass condition_text — it AND-stacks "
+            "against the code filter and returns zero. Surface the geo reliability "
+            "note from the result."
         ),
     },
     {

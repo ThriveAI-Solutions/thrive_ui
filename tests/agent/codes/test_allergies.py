@@ -2,9 +2,17 @@
 """Tests for the curated allergy SNOMED code allow-list (Epic #203).
 
 The module is the shared source of truth for allergy SNOMED codes. These
-tests pin the categories the epic ships with, the contract of the helpers
-that other tools will consume, and the invariant that every curated code
-exists in agent/codes/data/snomed.json (drift guard).
+tests pin the categories the epic ships with and the contract of the
+helpers that other tools consume.
+
+Prior to Task 3 (2026-07-03 vocab port) this file also carried a drift
+guard asserting every curated code exists in the (now-deleted)
+agent/codes/data/snomed.json. That static fixture file no longer ships —
+vocabulary data lives in the vocab_* DB tables, populated from a chiron
+export (see scripts/import_vocab_dump.py) rather than a file committed to
+this repo — so there's no static artifact left to diff the allow-list
+against here. The equivalent check now belongs with the vocab import
+tooling (sanity floors in scripts/import_vocab_dump.py), not this module.
 """
 
 from __future__ import annotations
@@ -17,7 +25,6 @@ from agent.codes.allergies import (
     all_allergy_codes,
     codes_for_category,
 )
-from agent.codes.loader import VocabLoader
 
 
 EXPECTED_CATEGORIES = ("drug", "food", "environmental", "contact", "anaphylaxis")
@@ -58,16 +65,6 @@ def test_all_allergy_codes_have_no_cross_category_duplicates():
     the primary category. Reviewers will rely on this invariant."""
     flat = all_allergy_codes()
     assert len(flat) == len(set(flat)), f"duplicate codes across categories: {[c for c in flat if flat.count(c) > 1]}"
-
-
-def test_drift_guard_every_curated_code_exists_in_snomed_data():
-    """Every code in ALLERGY_SNOMED_BY_CATEGORY must exist in the
-    snomed.json data file — otherwise search_codes will silently drop
-    it via its phantom-code filter and downstream tools will end up with
-    a quietly empty result."""
-    data_codes = {row["code"] for row in VocabLoader().entries("snomed")}
-    missing = [c for c in all_allergy_codes() if c not in data_codes]
-    assert not missing, f"curated codes missing from snomed.json: {missing}"
 
 
 def test_drug_category_includes_penicillin_and_amoxicillin():
