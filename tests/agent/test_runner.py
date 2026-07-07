@@ -144,3 +144,48 @@ def test_runner_registers_search_patients_by_criteria():
     runner = AgenticRunner(model=TestModel())
     tool_names = {t.name for t in runner._agent._function_toolset.tools.values()}
     assert "search_patients_by_criteria" in tool_names
+
+
+# --- tool-result outcome classification (2026-07-06 incident) --------------
+#
+# FunctionToolResultEvent fires for BOTH ToolReturnPart (tool succeeded) and
+# RetryPromptPart (tool raised — pydantic ValidationError or ModelRetry). The
+# runner used to log every result as success=True / "empty_result", which
+# disguised the drug_supply_days validation blowup as an empty medication
+# list for a whole evening of forensics.
+
+from pydantic_ai.messages import RetryPromptPart, ToolReturnPart  # noqa: E402
+from agent.runner import _tool_result_outcome  # noqa: E402
+
+
+def test_tool_return_part_is_success():
+    part = ToolReturnPart(tool_name="t", content={"items": []}, tool_call_id="c1")
+    success, error = _tool_result_outcome(part)
+    assert success is True
+    assert error is None
+
+
+def test_retry_prompt_string_is_failure_with_message():
+    part = RetryPromptPart(content="No patient is currently selected.", tool_name="t", tool_call_id="c1")
+    success, error = _tool_result_outcome(part)
+    assert success is False
+    assert "No patient is currently selected" in error
+
+
+def test_retry_prompt_validation_errors_keep_loc_and_type_drop_input():
+    """Pydantic ErrorDetails carry the offending input value, which can be
+    PHI — the logged error must name the field and error type only."""
+    details = [
+        {
+            "type": "int_parsing",
+            "loc": ("items", 3, "drug_supply_days"),
+            "msg": "Input should be a valid integer, unable to parse string as an integer",
+            "input": "PHI-LADEN-VALUE",
+        }
+    ]
+    part = RetryPromptPart(content=details, tool_name="t", tool_call_id="c1")
+    success, error = _tool_result_outcome(part)
+    assert success is False
+    assert "items.3.drug_supply_days" in error
+    assert "int_parsing" in error
+    assert "PHI-LADEN-VALUE" not in error

@@ -23,6 +23,7 @@ from pydantic_ai import (
 from pydantic_ai.messages import (
     PartDeltaEvent,
     PartStartEvent,
+    RetryPromptPart,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -103,6 +104,33 @@ def _to_jsonable(obj: Any) -> Any:
     if hasattr(obj, "model_dump"):
         return obj.model_dump(mode="json")
     return obj
+
+
+def _retry_error_text(part: RetryPromptPart) -> str:
+    """PHI-safe error text from a retry prompt. Pydantic ErrorDetails carry the
+    offending input value, which can be PHI — keep loc/type/msg only. Plain
+    string content is tool-authored (ModelRetry) and safe as-is."""
+    content = part.content
+    if isinstance(content, str):
+        return content[:2000]
+    try:
+        bits = []
+        for detail in content:
+            loc = ".".join(str(x) for x in detail.get("loc", ()))
+            bits.append(f"{loc}: {detail.get('type')} — {detail.get('msg')}")
+        return "; ".join(bits)[:2000] or "tool_error"
+    except Exception:
+        return "tool_error"
+
+
+def _tool_result_outcome(part: Any) -> tuple[bool, Optional[str]]:
+    """Classify a FunctionToolResultEvent part. RetryPromptPart means the tool
+    raised (ValidationError or ModelRetry) — the call did NOT succeed, and
+    logging it as success/empty disguises real failures as empty data (see the
+    2026-07-06 drug_supply_days incident)."""
+    if isinstance(part, RetryPromptPart):
+        return False, _retry_error_text(part)
+    return True, None
 
 
 def _normalize_args(raw: Any) -> dict:
@@ -462,19 +490,24 @@ class AgenticRunner:
                                     # through to the type-tag branch and the streamed
                                     # event lose data_availability and the
                                     # row-count signals downstream graders rely on.
-                                    try:
-                                        summary_input = (
-                                            result_content
-                                            if isinstance(result_content, dict)
-                                            else (
-                                                result_content.model_dump(mode="json")
-                                                if hasattr(result_content, "model_dump")
-                                                else result_content
+                                    tool_success, tool_error = _tool_result_outcome(event.part)
+                                    if not tool_success:
+                                        summary_input = None
+                                        summary = f"tool_error: {(tool_error or '')[:300]}"
+                                    else:
+                                        try:
+                                            summary_input = (
+                                                result_content
+                                                if isinstance(result_content, dict)
+                                                else (
+                                                    result_content.model_dump(mode="json")
+                                                    if hasattr(result_content, "model_dump")
+                                                    else result_content
+                                                )
                                             )
-                                        )
-                                        summary = summarize_result(info["tool_name"], summary_input)
-                                    except Exception:
-                                        summary = f"result_type={type(result_content).__name__}"
+                                            summary = summarize_result(info["tool_name"], summary_input)
+                                        except Exception:
+                                            summary = f"result_type={type(result_content).__name__}"
 
                                     reliability_note = None
                                     rn_attr = getattr(result_content, "reliability_note", None)
@@ -499,10 +532,10 @@ class AgenticRunner:
                                         sel_src = getattr(selected, "source_id", None) if selected is not None else None
                                         result_for_log = (
                                             result_content
-                                            if isinstance(result_content, dict)
+                                            if isinstance(result_content, dict) and tool_success
                                             else (
                                                 result_content.model_dump(mode="json")
-                                                if hasattr(result_content, "model_dump")
+                                                if tool_success and hasattr(result_content, "model_dump")
                                                 else {}
                                             )
                                         )
@@ -514,8 +547,8 @@ class AgenticRunner:
                                             result_obj=result_for_log,
                                             sql_executed=sql_executed,
                                             elapsed_ms=elapsed_ms,
-                                            success=True,
-                                            error=None,
+                                            success=tool_success,
+                                            error=tool_error,
                                             selected_patient_source_id=sel_src,
                                             started_event_seq=info.get("started_event_seq"),
                                         )
@@ -527,9 +560,9 @@ class AgenticRunner:
                                     yield ToolCallCompleted(
                                         tool_name=info["tool_name"],
                                         result_summary=summary,
-                                        success=True,
+                                        success=tool_success,
                                         elapsed_ms=elapsed_ms,
-                                        error=None,
+                                        error=tool_error,
                                         reliability_note=reliability_note,
                                         sql_executed=sql_executed,
                                         result_payload=result_payload,

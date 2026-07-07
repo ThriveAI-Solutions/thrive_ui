@@ -238,11 +238,16 @@ class AgentRunLogger:
             else:
                 arguments_json, *_ = cap_json(arguments, self.config.max_logged_result_bytes)
 
-            # Summary always cheap + PHI-safe.
-            try:
-                result_summary = summarize_result(tool_name, result_obj)
-            except Exception:
-                result_summary = f"result_type={type(result_obj).__name__}"
+            # Summary always cheap + PHI-safe. A failed call must say so —
+            # summarizing its (empty) result as "empty_result" disguises tool
+            # errors as empty data (2026-07-06 drug_supply_days incident).
+            if not success and error:
+                result_summary = f"tool_error: {error[:200]}"
+            else:
+                try:
+                    result_summary = summarize_result(tool_name, result_obj)
+                except Exception:
+                    result_summary = f"result_type={type(result_obj).__name__}"
 
             # Full result + SQL: only stored in full mode.
             if scrubbed:
