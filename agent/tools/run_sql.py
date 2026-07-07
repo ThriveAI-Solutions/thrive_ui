@@ -18,9 +18,11 @@ from pydantic_ai.exceptions import ModelRetry
 from pydantic_ai.tools import ToolDefinition
 from sqlalchemy.exc import SQLAlchemyError
 
+from agent.codes.service import UnknownCodeSetError, VocabNotLoadedError
 from agent.dataframe_adapters import run_sql_result_to_df
 from agent.db.sql_context import schema_context_for_sql
 from agent.deps import AgentDeps, QueryMeta
+from agent.tools.sql_macros import expand_code_macros
 
 
 _ROW_CAP = 500
@@ -116,17 +118,30 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
     per-patient clinical question, and prefer search_patients_by_criteria
     with `breakdown` for single-dimension population breakdowns.
 
+    Filter clinical code sets via the {{codes:<set_id>}} macro (set_id from
+    search_codes), e.g. `WHERE code IN {{codes:dx:diabetes-mellitus}}` —
+    expanded server-side to dotted + undotted match-forms. NEVER use LIKE
+    '%condition%' on a code column; resolve a set via search_codes instead.
+
     Results are capped at 500 rows. If truncated, refine the query for
     a smaller result.
     """
-    _ast_guard(input.sql)
+    original_sql = input.sql
+    try:
+        expansion = expand_code_macros(input.sql, ctx.deps.sqlite_session)
+    except (UnknownCodeSetError, VocabNotLoadedError) as exc:
+        raise ModelRetry(
+            f"{exc} — call search_codes first and use an exact set_id it returned inside {{{{codes:<set_id>}}}}."
+        ) from exc
+
+    _ast_guard(expansion.sql)
 
     adapter = ctx.deps.analytics_db
     if adapter is None:
         raise ModelRetry("Analytics database is not configured for this session.")
 
     try:
-        columns, rows, truncated = adapter.run_arbitrary_sql(sql=input.sql, row_cap=_ROW_CAP, timeout_s=_TIMEOUT_S)
+        columns, rows, truncated = adapter.run_arbitrary_sql(sql=expansion.sql, row_cap=_ROW_CAP, timeout_s=_TIMEOUT_S)
     except ValueError as exc:
         # Adapter-level read-only guard tripped; re-raise as ModelRetry
         # so the LLM gets a chance to fix instead of crashing the run.
@@ -147,17 +162,23 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
             "(add filters, smaller date range, or aggregate) for completeness."
         )
 
+    macro_note = None
+    if expansion.expansions:
+        macro_note = ", ".join(
+            f"{{{{codes:{sid}}}}} expanded to {n} code match-forms" for sid, n in expansion.expansions.items()
+        )
+
     result = RunSqlResult(
-        sql=input.sql,
+        sql=original_sql,
         columns=columns,
         rows=rows,
         row_count=len(rows),
         truncated=truncated,
-        reliability_note=reliability,
+        reliability_note=(f"{macro_note}; {reliability}" if macro_note and reliability else macro_note or reliability),
     )
 
     ctx.deps.last_dataframe = run_sql_result_to_df(result)
-    ctx.deps.last_sql = input.sql
+    ctx.deps.last_sql = expansion.sql
     ctx.deps.last_query_meta = QueryMeta(
         tool_name="run_sql",
         row_count=result.row_count,

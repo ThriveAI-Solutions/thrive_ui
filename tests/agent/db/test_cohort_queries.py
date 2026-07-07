@@ -83,6 +83,19 @@ def test_diagnosis_codes_join(synthetic_db):
     assert len(rows) >= 3, f"expected ≥3 diabetic patients via metric join; got {len(rows)}"
 
 
+def test_diagnosis_codes_carry_dotted_and_undotted_match_forms():
+    """Given ["E11.9"], the dx IN-list params must carry both the dotted
+    ('E11.9') and undotted ('E119') spellings — the warehouse stores ICD
+    codes both ways and exact IN-matching must carry both forms or it
+    silently misses rows (Task 4 brief, agent/codes/match_forms.py)."""
+    from agent.db.queries.cohort import _diagnosis_event_where
+
+    dx_filter, params = _diagnosis_event_where(_make(diagnosis_codes=["E11.9"]))
+    dx_values = [v for k, v in params.items() if k.startswith("dx_") and k not in ("dx_start", "dx_end")]
+    assert "E11.9" in dx_values
+    assert "E119" in dx_values
+
+
 def test_diagnosis_with_facility_and_age(synthetic_db):
     """The acceptance question: diabetic patients over 65 at Kaleida."""
     sql, params = cohort_sql(

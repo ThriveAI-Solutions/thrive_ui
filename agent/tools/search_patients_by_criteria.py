@@ -32,6 +32,13 @@ class CohortCriteria(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     diagnosis_codes: Optional[List[str]] = None
+    condition_sets: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Code-set handles from search_codes (e.g. 'dx:diabetes-mellitus'); expanded to "
+            "the full member code list server-side — prefer this over copying long code lists"
+        ),
+    )
     diagnosis_date_range: Optional[DateRange] = None
     medication_rxnorm_codes: Optional[List[str]] = None
     condition_text: Optional[str] = None
@@ -60,6 +67,7 @@ class CohortCriteria(BaseModel):
         if not any(
             (
                 self.diagnosis_codes,
+                self.condition_sets,
                 dr_active,
                 self.medication_rxnorm_codes,
                 self.condition_text,
@@ -77,7 +85,7 @@ class CohortCriteria(BaseModel):
         ):
             raise ValueError(
                 "search_patients_by_criteria requires at least one criterion "
-                "(diagnosis_codes, medication_rxnorm_codes, condition_text, "
+                "(diagnosis_codes, condition_sets, medication_rxnorm_codes, condition_text, "
                 "age_min/age_max, gender, facility, last_visit_after, "
                 "last_visit_before, zip_code, city, state, or inpatient_admission). "
                 "Do not call without a filter."
@@ -120,6 +128,7 @@ from pydantic_ai import RunContext
 from pydantic_ai.exceptions import ModelRetry
 from sqlalchemy.exc import SQLAlchemyError
 
+from agent.codes.service import UnknownCodeSetError, VocabNotLoadedError, expand_sets
 from agent.dataframe_adapters import cohort_result_to_df
 from agent.db.queries.cohort import cohort_sql
 from agent.db.queries.cohort_breakdown import (
@@ -188,6 +197,8 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
 
     Criteria fields:
       - diagnosis_codes: ICD-10 or SNOMED codes; matched in metric_federated_data_v.
+      - condition_sets: prefer a set_id from search_codes over copying long code
+        lists; unioned with diagnosis_codes server-side.
       - diagnosis_date_range: DateRange (start/end, inclusive) over diagnosis
         start_date. Works WITH diagnosis_codes (narrows those codes to the
         window) OR ALONE — a bare range counts patients with ANY ICD-10/SNOMED
@@ -225,6 +236,17 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
     filter is set, reliability_note carries a coverage caveat that the agent
     MUST surface to the user.
     """
+    if criteria.condition_sets:
+        try:
+            expanded = expand_sets(ctx.deps.sqlite_session, criteria.condition_sets)
+        except (UnknownCodeSetError, VocabNotLoadedError) as exc:
+            raise ModelRetry(
+                f"{exc} — call search_codes first and use an exact set_id it returned in condition_sets."
+            ) from exc
+        existing = list(criteria.diagnosis_codes or [])
+        merged = existing + [c for c in expanded if c not in existing]
+        criteria = criteria.model_copy(update={"diagnosis_codes": merged})
+
     adapter = ctx.deps.analytics_db
     schema_prefix = getattr(adapter, "schema_prefix", "")
 

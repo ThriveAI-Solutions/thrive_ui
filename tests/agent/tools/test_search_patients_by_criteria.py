@@ -491,3 +491,76 @@ def test_time_breakdown_missing_anchor_signals(synthetic_db):
     assert result.breakdown_status == "missing_diagnosis_anchor"
     assert result.buckets == []
     assert result.notes_to_agent and "diagnosis" in result.notes_to_agent.lower()
+
+
+# condition_sets tests -----------------------------------------------------
+# The vocab_session fixture (tests/conftest.py) seeds dx:diabetes-mellitus
+# with members E11.9 and E11.65. Security-sensitive: expansion must union
+# INTO diagnosis_codes server-side, from DB values only, and must not run
+# code_match_forms here (that stays in the query layer, agent/db/queries/cohort.py).
+
+
+def _deps_with_vocab(synthetic_db, vocab_session):
+    deps = _deps(synthetic_db, selected=None)
+    deps.sqlite_session = vocab_session
+    return deps
+
+
+def test_condition_sets_alone_satisfies_at_least_one_criterion():
+    from agent.tools.search_patients_by_criteria import CohortCriteria
+
+    # Must not raise — condition_sets is a standalone criterion.
+    c = CohortCriteria(condition_sets=["dx:diabetes-mellitus"])
+    assert c.condition_sets == ["dx:diabetes-mellitus"]
+
+
+def test_condition_sets_expands_and_matches_diagnosis_codes_result(synthetic_db, vocab_session):
+    """condition_sets=['dx:diabetes-mellitus'] (members E11.9, E11.65) must
+    find at least as many patients as diagnosis_codes=['E11.9'] alone —
+    the acceptance fixture from test_diabetic_kaleida_over_65_acceptance."""
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+
+    ctx = MagicMock()
+    ctx.deps = _deps_with_vocab(synthetic_db, vocab_session)
+    result = search_patients_by_criteria(
+        ctx,
+        CohortCriteria(condition_sets=["dx:diabetes-mellitus"], age_min=65, facility="Kaleida"),
+    )
+    assert result.total_count >= 2
+    src_ids = {m.source_id for m in result.sample}
+    assert {"src-mary-1956", "src-susan-1955"} <= src_ids
+
+
+def test_condition_sets_unions_into_diagnosis_codes_without_dupes(synthetic_db, vocab_session, monkeypatch):
+    """diagnosis_codes=['E11.9'] + condition_sets expanding to ['E11.9', 'E11.65']
+    must union to exactly ['E11.9', 'E11.65'] — no duplicate 'E11.9', order preserved."""
+    import agent.tools.search_patients_by_criteria as mod
+
+    captured: dict = {}
+
+    def fake_cohort_sql(criteria, schema_prefix="", dialect="sqlite"):
+        captured["diagnosis_codes"] = list(criteria.diagnosis_codes or [])
+        return "SELECT 0 AS total_count", {}
+
+    monkeypatch.setattr(mod, "cohort_sql", fake_cohort_sql)
+
+    ctx = MagicMock()
+    ctx.deps = _deps_with_vocab(synthetic_db, vocab_session)
+    mod.search_patients_by_criteria(
+        ctx,
+        mod.CohortCriteria(diagnosis_codes=["E11.9"], condition_sets=["dx:diabetes-mellitus"], sample_size=0),
+    )
+    assert captured["diagnosis_codes"] == ["E11.9", "E11.65"]
+
+
+def test_condition_sets_unknown_set_raises_actionable_model_retry(synthetic_db, vocab_session):
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+    from pydantic_ai.exceptions import ModelRetry
+
+    ctx = MagicMock()
+    ctx.deps = _deps_with_vocab(synthetic_db, vocab_session)
+    with pytest.raises(ModelRetry) as excinfo:
+        search_patients_by_criteria(ctx, CohortCriteria(condition_sets=["dx:not-a-real-set"]))
+    msg = str(excinfo.value)
+    assert "not-a-real-set" in msg
+    assert "search_codes first" in msg

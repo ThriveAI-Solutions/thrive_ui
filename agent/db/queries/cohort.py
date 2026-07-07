@@ -15,6 +15,7 @@ expanding bindparam — see agent/db/queries/labs.py for the same idiom.
 from __future__ import annotations
 from typing import Tuple
 
+from agent.codes.match_forms import code_match_forms
 from agent.db.queries.adt import inpatient_cohort_subquery_sql, patient_id_text_sql
 
 
@@ -92,7 +93,10 @@ def _diagnosis_event_where(criteria) -> tuple[list[str], dict] | None:
     params: dict = {}
     dx_filter = ["code_type IN ('ICD-10', 'ICD10', 'SNOMED')"]
     if getattr(criteria, "diagnosis_codes", None):
-        codes = list(criteria.diagnosis_codes)
+        # code_match_forms carries both dotted and undotted spellings — the
+        # warehouse stores the same ICD code both ways (E11.9 vs E119);
+        # exact IN-matching must carry both forms or it silently misses rows.
+        codes = code_match_forms(list(criteria.diagnosis_codes))
         placeholders = ", ".join(f":dx_{i}" for i in range(len(codes)))
         for i, c in enumerate(codes):
             params[f"dx_{i}"] = c
