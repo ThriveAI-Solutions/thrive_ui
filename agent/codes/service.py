@@ -50,6 +50,12 @@ class UnknownCodeSetError(ValueError):
 class SetHit(BaseModel):
     set_id: str
     name: str
+    # Scoped to the vocabulary being searched (the `members` query below
+    # filters on VocabCode.vocabulary == vocabulary) — NOT the set's total
+    # membership. A set spanning multiple vocabularies (e.g. dx:diabetes-mellitus
+    # carries ICD-10, ICD-9, and SNOMED members) will report a smaller count
+    # here than expand_sets() returns, since expand_sets applies no vocabulary
+    # filter and expands every member (observed 478 vs 546 for that set).
     member_count: int
     sample_codes: list[str]
 

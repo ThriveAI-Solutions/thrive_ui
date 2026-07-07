@@ -34,8 +34,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import chromadb  # noqa: E402
-from sqlalchemy import create_engine  # noqa: E402
-from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from datetime import date, datetime  # noqa: E402
 
@@ -55,7 +53,7 @@ from agent.state import (  # noqa: E402
     ToolCallCompleted,
     ToolCallStarted,
 )
-from orm.models import RoleTypeEnum  # noqa: E402
+from orm.models import RoleTypeEnum, SessionLocal  # noqa: E402
 
 
 class C:
@@ -152,9 +150,14 @@ def _build_deps(role: str) -> AgentDeps:
         )
         rag = _NullRagAdapter()
 
-    # In-memory ORM session — AuditLogger writes here are throwaway and
-    # are tolerated to fail silently in the runner.
-    sqlite_session = sessionmaker(bind=create_engine("sqlite:///:memory:"))()
+    # A bare in-memory SQLite engine has no vocab_codes table at all, which the
+    # vocab service surfaces as an unhandled OperationalError (tools only catch
+    # VocabNotLoadedError) — every cohort/code-set question then crashes instead
+    # of soft-failing. SessionLocal() points at the real app DB (same pattern as
+    # scripts/run_representative_regression.py): vocab loaded → real behavior,
+    # vocab empty → VocabNotLoadedError → graceful soft-fail. AuditLogger writes
+    # here are still throwaway/tolerated to fail silently in the runner.
+    sqlite_session = SessionLocal()
 
     user_role = {
         "admin": RoleTypeEnum.ADMIN,

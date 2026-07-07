@@ -18,3 +18,7 @@ def test_snomed_numeric_passes_through_untouched():
 def test_dedup_and_order_preserved():
     forms = code_match_forms(["E11.9", "E119"])
     assert len(forms) == len(set(forms))
+    # E119's own expansion (undotted "E119", dotted "E11.9") both dup-match
+    # entries already emitted by E11.9's expansion, so nothing new is appended
+    # for the second input — first-seen order is preserved exactly.
+    assert forms == ["E11.9", "E119"]

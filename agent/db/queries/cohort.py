@@ -15,6 +15,7 @@ expanding bindparam — see agent/db/queries/labs.py for the same idiom.
 from __future__ import annotations
 from typing import Tuple
 
+from agent.code_normalizer import variants_for
 from agent.codes.match_forms import code_match_forms
 from agent.db.queries.adt import inpatient_cohort_subquery_sql, patient_id_text_sql
 
@@ -91,7 +92,17 @@ def _diagnosis_event_where(criteria) -> tuple[list[str], dict] | None:
         return None
 
     params: dict = {}
-    dx_filter = ["code_type IN ('ICD-10', 'ICD10', 'SNOMED')"]
+    # Vocab code sets deliberately carry ICD-9 members (e.g. dx:diabetes-mellitus
+    # has 68) alongside ICD-10 and SNOMED, so the code_type filter must admit all
+    # three vocabularies' warehouse spellings or matched ICD-9 codes get injected
+    # into the IN-list above only to be silently excluded here. Pull the variant
+    # spellings from agent/code_normalizer.py (single source of truth shared with
+    # the run_sql {{codes:...}} macro path) rather than hand-typing them.
+    ct_variants = variants_for("icd10") + variants_for("icd9") + variants_for("snomed")
+    ct_placeholders = ", ".join(f":dxct_{i}" for i in range(len(ct_variants)))
+    for i, v in enumerate(ct_variants):
+        params[f"dxct_{i}"] = v
+    dx_filter = [f"code_type IN ({ct_placeholders})"]
     if getattr(criteria, "diagnosis_codes", None):
         # code_match_forms carries both dotted and undotted spellings — the
         # warehouse stores the same ICD code both ways (E11.9 vs E119);

@@ -6,10 +6,12 @@ expansion). Replaces the embedded-JSON loader that used to ship under
 agent/codes/data/*.json — data now lives in the vocab_* tables, populated
 via `scripts/import_vocab_dump.py`.
 
-SNOMED coverage in this build is currently allergy-focused (Epic #203);
-the curated category buckets live in agent/codes/allergies.py and are
-reachable via curated set/code synonyms in the vocab DB, e.g. "penicillin
-allergy", "peanut allergy", and "any food allergy".
+SNOMED coverage is DB-backed and comprehensive (~112k codes loaded via
+scripts/import_vocab_dump.py), not limited to any one clinical domain. The
+allergy-specific curated category buckets in agent/codes/allergies.py are
+one example of curated set/code synonyms layered on top of that data, e.g.
+"penicillin allergy", "peanut allergy", and "any food allergy" — but they
+are a convenience layer, not the extent of SNOMED coverage.
 """
 
 from __future__ import annotations
@@ -34,6 +36,13 @@ class CodeSearchInput(BaseModel):
 class CodeSetMatch(BaseModel):
     set_id: str
     name: str
+    # Scoped to the vocabulary in this query (query.vocabulary), not the set's
+    # total membership across all vocabularies. A set spanning multiple
+    # vocabularies (e.g. dx:diabetes-mellitus carries ICD-10, ICD-9, and SNOMED
+    # members) will report a smaller number here than the full expansion used
+    # server-side by search_patients_by_criteria/run_sql's {{codes:...}} macro
+    # (agent.codes.service.expand_sets, which applies no vocabulary filter —
+    # observed 478 vs 546 for that set).
     member_count: int
     sample_codes: list[str]
 
