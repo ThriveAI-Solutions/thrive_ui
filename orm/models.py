@@ -738,7 +738,7 @@ class VocabCode(Base):
     code_norm = Column(String(64), nullable=False)  # UPPER, dots stripped
     display = Column(Text, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
-    source_version = Column(String(64))
+    source_version = Column(String(64), nullable=False)
 
     synonyms = relationship("VocabSynonym", back_populates="code_ref", cascade="all, delete-orphan")
     set_memberships = relationship("VocabCodeSetMember", back_populates="code_ref", cascade="all, delete-orphan")
@@ -755,7 +755,7 @@ class VocabSynonym(Base):
     code_id = Column(Integer, ForeignKey("vocab_codes.id", ondelete="CASCADE"), nullable=False)
     term = Column(Text, nullable=False)
     term_norm = Column(Text, nullable=False)  # lower, trimmed
-    source = Column(String(32))  # loinc_relatednames|loinc_consumer|rxnorm|cvx|curated
+    source = Column(String(32), nullable=False)  # loinc_relatednames|loinc_consumer|rxnorm|cvx|curated
     is_lay = Column(Boolean, nullable=False, default=False)
 
     code_ref = relationship("VocabCode", back_populates="synonyms")
@@ -767,7 +767,7 @@ class VocabCodeSet(Base):
     set_id = Column(String(128), primary_key=True)  # 'ccsr:END002', 'dx:diabetes-mellitus', 'vg:MMR'
     name = Column(Text, nullable=False)
     source = Column(String(32), nullable=False)  # ccsr|ccs9|cvx_group|curated (later: vsac)
-    source_version = Column(String(64))
+    source_version = Column(String(64), nullable=False)
 
     members = relationship("VocabCodeSetMember", back_populates="set_ref", cascade="all, delete-orphan")
     set_synonyms = relationship("VocabSetSynonym", back_populates="set_ref", cascade="all, delete-orphan")

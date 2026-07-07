@@ -36,7 +36,7 @@ def upgrade() -> None:
             sa.Column("set_id", sa.String(length=128), nullable=False),
             sa.Column("name", sa.Text(), nullable=False),
             sa.Column("source", sa.String(length=32), nullable=False),
-            sa.Column("source_version", sa.String(length=64), nullable=True),
+            sa.Column("source_version", sa.String(length=64), nullable=False),
             sa.PrimaryKeyConstraint("set_id"),
         )
 
@@ -49,7 +49,7 @@ def upgrade() -> None:
             sa.Column("code_norm", sa.String(length=64), nullable=False),
             sa.Column("display", sa.Text(), nullable=False),
             sa.Column("is_active", sa.Boolean(), nullable=False),
-            sa.Column("source_version", sa.String(length=64), nullable=True),
+            sa.Column("source_version", sa.String(length=64), nullable=False),
             sa.PrimaryKeyConstraint("id"),
         )
         op.create_index("ix_vocab_codes_vocab_norm", "vocab_codes", ["vocabulary", "code_norm"], unique=True)
@@ -91,7 +91,7 @@ def upgrade() -> None:
             sa.Column("code_id", sa.Integer(), nullable=False),
             sa.Column("term", sa.Text(), nullable=False),
             sa.Column("term_norm", sa.Text(), nullable=False),
-            sa.Column("source", sa.String(length=32), nullable=True),
+            sa.Column("source", sa.String(length=32), nullable=False),
             sa.Column("is_lay", sa.Boolean(), nullable=False),
             sa.ForeignKeyConstraint(["code_id"], ["vocab_codes.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
