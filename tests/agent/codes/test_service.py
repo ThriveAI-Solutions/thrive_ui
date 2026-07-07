@@ -55,9 +55,12 @@ def test_limit_respected(session):
 
 
 def test_empty_vocabulary_raises_import_script_remedy(session):
+    # loinc has zero rows in the vocab_session fixture (unlike snomed, which
+    # Task 3 seeded with a penicillin-allergy fixture code for the
+    # search_codes end-to-end test) -- still a genuinely unloaded vocabulary.
     with pytest.raises(VocabNotLoadedError, match="scripts/import_vocab_dump.py") as exc:
-        search_vocab(session, vocabulary="snomed", query="diabetes")
-    assert "no 'snomed' rows in vocab_codes" in str(exc.value)
+        search_vocab(session, vocabulary="loinc", query="diabetes")
+    assert "no 'loinc' rows in vocab_codes" in str(exc.value)
 
 
 def test_expand_sets_returns_member_codes(session):

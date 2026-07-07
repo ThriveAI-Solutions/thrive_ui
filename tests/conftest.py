@@ -387,6 +387,29 @@ def vocab_session():
                 ),
             ]
         )
+
+        # SNOMED allergy-intent fixture (Epic #203 carryover): proves the
+        # "penicillin allergy" lookup still resolves end-to-end through
+        # search_codes once it's rewired onto the vocab DB service.
+        penicillin_allergy = VocabCode(
+            vocabulary="snomed",
+            code="91936005",
+            code_norm="91936005",
+            display="Allergy to penicillin",
+            is_active=True,
+            source_version="t",
+        )
+        s.add(penicillin_allergy)
+        s.flush()
+        s.add(
+            VocabSynonym(
+                code_id=penicillin_allergy.id,
+                term="penicillin allergy",
+                term_norm="penicillin allergy",
+                source="curated",
+                is_lay=True,
+            )
+        )
         s.commit()
         yield s
     engine.dispose()

@@ -4,8 +4,8 @@ This module is the shared source of truth for allergy SNOMED codes used
 across the agent. It backs three consumers:
 
 1. `search_codes` — the allergy-intent shortcut (e.g., "penicillin allergy",
-   "any food allergy") routes through `synonyms.json` for the `snomed`
-   vocabulary to the curated subsets defined here.
+   "any food allergy") routes through curated set/code synonyms in the
+   vocab DB for the `snomed` vocabulary to the curated subsets defined here.
 2. The `federated_problems_v` fallback path on the allergies domain of
    `get_patient_clinical_data` (Epic #201) — when the dedicated
    `federated_allergies_v` view is unavailable, the agent identifies
