@@ -266,3 +266,127 @@ def in_memory_orm_session(monkeypatch):
     yield TestingSessionLocal
 
     engine.dispose()
+
+
+# search_codes vocabulary fixture --------------------------------------------
+@pytest.fixture()
+def vocab_session():
+    """In-memory SQLite session pre-seeded with vocab_* fixture data.
+
+    Ported from chiron tests/core/conftest.py:17-42 (spec 2026-07-03). Lives
+    here (not tests/agent/codes/conftest.py) in case future tests outside
+    tests/agent/codes/ need it too — same rationale chiron used for placing
+    it at the fixtures' common ancestor. Uses a standalone engine/session
+    (not in_memory_orm_session above) since vocab tables have no FK
+    relationship to thrive_user/thrive_user_role and callers don't need
+    SessionLocal patched for this data.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from orm.models import (
+        Base,
+        VocabCode,
+        VocabCodeSet,
+        VocabCodeSetMember,
+        VocabSetSynonym,
+        VocabSynonym,
+    )
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as s:
+        codes = {
+            "E11.9": VocabCode(
+                vocabulary="icd10",
+                code="E11.9",
+                code_norm="E119",
+                display="Type 2 diabetes mellitus without complications",
+                is_active=True,
+                source_version="t",
+            ),
+            "E11.65": VocabCode(
+                vocabulary="icd10",
+                code="E11.65",
+                code_norm="E1165",
+                display="Type 2 diabetes mellitus with hyperglycemia",
+                is_active=True,
+                source_version="t",
+            ),
+            "I10": VocabCode(
+                vocabulary="icd10",
+                code="I10",
+                code_norm="I10",
+                display="Essential (primary) hypertension",
+                is_active=True,
+                source_version="t",
+            ),
+        }
+        s.add_all(codes.values())
+        s.flush()
+        s.add(
+            VocabSynonym(
+                code_id=codes["I10"].id,
+                term="high blood pressure",
+                term_norm="high blood pressure",
+                source="curated",
+                is_lay=True,
+            )
+        )
+        dm = VocabCodeSet(set_id="dx:diabetes-mellitus", name="Diabetes mellitus", source="curated", source_version="t")
+        s.add(dm)
+        s.flush()
+        s.add_all(
+            [
+                VocabCodeSetMember(set_id=dm.set_id, code_id=codes["E11.9"].id),
+                VocabCodeSetMember(set_id=dm.set_id, code_id=codes["E11.65"].id),
+                VocabSetSynonym(set_id=dm.set_id, term="DM", term_norm="dm"),
+                VocabSetSynonym(set_id=dm.set_id, term="diabetes", term_norm="diabetes"),
+            ]
+        )
+
+        # Finding 1 fixture: 3 prefix-only sets inserted *before* the one
+        # exact-synonym set, so an unordered/capped scan would displace the
+        # exact match if tier 2 doesn't rank exact-before-prefix.
+        flu_clinics = [
+            VocabCodeSet(
+                set_id=f"vg:FLU-{letter}", name=f"Flu Shot Clinic {letter}", source="curated", source_version="t"
+            )
+            for letter in ("A", "B", "C")
+        ]
+        influenza = VocabCodeSet(set_id="vg:INFLUENZA", name="Influenza", source="curated", source_version="t")
+        s.add_all([*flu_clinics, influenza])
+        s.flush()
+        s.add_all(
+            [
+                *(VocabCodeSetMember(set_id=cs.set_id, code_id=codes["I10"].id) for cs in flu_clinics),
+                VocabCodeSetMember(set_id=influenza.set_id, code_id=codes["I10"].id),
+                VocabSetSynonym(set_id=influenza.set_id, term="flu", term_norm="flu"),
+            ]
+        )
+
+        # Finding 2 fixture: real vocab displays containing literal LIKE
+        # metacharacters (`%`, `_`).
+        s.add_all(
+            [
+                VocabCode(
+                    vocabulary="rxnorm",
+                    code="D5W",
+                    code_norm="D5W",
+                    display="Dextrose 5% Injectable Solution",
+                    is_active=True,
+                    source_version="t",
+                ),
+                VocabCode(
+                    vocabulary="rxnorm",
+                    code="RX50",
+                    code_norm="RX50",
+                    display="50mg Tablet",
+                    is_active=True,
+                    source_version="t",
+                ),
+            ]
+        )
+        s.commit()
+        yield s
+    engine.dispose()
