@@ -142,14 +142,16 @@ CREATE TABLE federated_meds_v (
     med_strength_unit TEXT,
     med_form TEXT,
     med_sig TEXT,
-    drug_supply_days INTEGER,
+    -- drug_supply_days is VARCHAR in the real warehouse and carries '' for
+    -- missing values (not NULL) — keep it TEXT here so tests exercise that.
+    drug_supply_days TEXT,
     number_of_refills INTEGER,
     status TEXT,
     date_stopped TIMESTAMP
 );
 INSERT INTO federated_meds_v VALUES
-    ('src-john-1962', '00093-1054-01', '6809', 'Metformin', '2026-03-15 10:00', '1234567890', '500', 'mg', 'Tab', 'Take 1 tab BID', 90, 3, 'active', NULL),
-    ('src-john-1962', '00093-7146-56', '18631', 'Azithromycin', '2026-04-02 14:00', '1234567890', '250', 'mg', 'Tab', 'Take 2 tabs day 1, 1 tab daily x4', 5, 0, 'completed', '2026-04-07 00:00'),
+    ('src-john-1962', '00093-1054-01', '6809', 'Metformin', '2026-03-15 10:00', '1234567890', '500', 'mg', 'Tab', 'Take 1 tab BID', '90', 3, 'active', NULL),
+    ('src-john-1962', '00093-7146-56', '18631', 'Azithromycin', '2026-04-02 14:00', '1234567890', '250', 'mg', 'Tab', 'Take 2 tabs day 1, 1 tab daily x4', '', 0, 'completed', '2026-04-07 00:00'),
     -- src-mary-1956 has a Sulfa allergy (federated_allergies_v below) plus an
     -- active sulfamethoxazole prescription → drug-allergy conflict signal test.
     ('src-mary-1956', '49281-0790-15', '10180', 'Sulfamethoxazole', '2026-05-01 09:00', '0987654321', '800', 'mg', 'Tab', 'Take 1 tab BID x10', 10, 0, 'active', NULL);

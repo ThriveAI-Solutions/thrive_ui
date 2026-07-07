@@ -169,6 +169,24 @@ def test_medications_surface_status(synthetic_db):
     assert by_name["Azithromycin"].status == "completed"
 
 
+def test_medications_blank_numeric_strings_coerce_to_none(synthetic_db):
+    """The warehouse delivers drug_supply_days as VARCHAR with '' for missing
+    (2026-07-06 prod incident: every meds call for ADT-feed patients died in
+    MedicationItem validation, sending the agent into retry loops)."""
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, MedicationsQuery())
+    by_name = {i.med_name: i for i in result.items}
+    assert by_name["Azithromycin"].drug_supply_days is None
+    assert by_name["Metformin"].drug_supply_days == 90
+
+
+def test_medication_item_blank_and_numeric_string_coercion():
+    assert MedicationItem(source_id="x", drug_supply_days="", number_of_refills=" ").drug_supply_days is None
+    assert MedicationItem(source_id="x", number_of_refills="  ").number_of_refills is None
+    assert MedicationItem(source_id="x", drug_supply_days="30").drug_supply_days == 30
+
+
 from agent.tools.get_patient_clinical_data import ImmunizationsQuery, ImmunizationItem
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Annotated, Any, List, Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 from pydantic_ai import ModelRetry, RunContext
 
 from agent.deps import AgentDeps
@@ -220,6 +220,16 @@ class DiagnosisItem(BaseModel):
     service_provider_npi: Optional[str] = None
 
 
+def _blank_str_to_none(v: Any) -> Any:
+    """Warehouse varchar columns deliver missing numerics as '' (not NULL)."""
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
+
+
+BlankableInt = Annotated[Optional[int], BeforeValidator(_blank_str_to_none)]
+
+
 class MedicationItem(BaseModel):
     item_type: Literal["medication"] = "medication"
     source_id: str
@@ -232,8 +242,8 @@ class MedicationItem(BaseModel):
     med_strength_unit: Optional[str] = None
     med_form: Optional[str] = None
     med_sig: Optional[str] = None
-    drug_supply_days: Optional[int] = None
-    number_of_refills: Optional[int] = None
+    drug_supply_days: BlankableInt = None
+    number_of_refills: BlankableInt = None
     status: Optional[str] = None
     date_stopped: Optional[str] = None
 
