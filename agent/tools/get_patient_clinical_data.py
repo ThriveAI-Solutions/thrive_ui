@@ -174,12 +174,23 @@ DataAvailability = Literal[
 ]
 
 
+def _blank_str_to_none(v: Any) -> Any:
+    """Warehouse varchar columns deliver missing numerics as '' (not NULL)."""
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
+
+
+BlankableInt = Annotated[Optional[int], BeforeValidator(_blank_str_to_none)]
+BlankableDate = Annotated[Optional[date], BeforeValidator(_blank_str_to_none)]
+
+
 class DemographicsItem(BaseModel):
     item_type: Literal["demographics"] = "demographics"
     source_id: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    date_of_birth: Optional[date] = None
+    date_of_birth: BlankableDate = None
     gender: Optional[str] = None
 
 
@@ -218,16 +229,6 @@ class DiagnosisItem(BaseModel):
     diagnosis_datetime: Optional[str] = None
     chronic_ind: Optional[str] = None
     service_provider_npi: Optional[str] = None
-
-
-def _blank_str_to_none(v: Any) -> Any:
-    """Warehouse varchar columns deliver missing numerics as '' (not NULL)."""
-    if isinstance(v, str) and not v.strip():
-        return None
-    return v
-
-
-BlankableInt = Annotated[Optional[int], BeforeValidator(_blank_str_to_none)]
 
 
 class MedicationItem(BaseModel):

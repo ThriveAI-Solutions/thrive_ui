@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import get_args
 from unittest.mock import MagicMock
 import pytest
 
@@ -185,6 +186,54 @@ def test_medication_item_blank_and_numeric_string_coercion():
     assert MedicationItem(source_id="x", drug_supply_days="", number_of_refills=" ").drug_supply_days is None
     assert MedicationItem(source_id="x", number_of_refills="  ").number_of_refills is None
     assert MedicationItem(source_id="x", drug_supply_days="30").drug_supply_days == 30
+
+
+from agent.tools.get_patient_clinical_data import (  # noqa: E402
+    AdmissionStay,
+    AllergyItem,
+    DemographicsItem,
+    DiagnosisItem,
+    EncounterItem,
+    ImagingItem,
+    ImmunizationItem,
+    LabItem,
+    ProcedureItem,
+    SurgeryItem,
+)
+
+_ITEM_MODELS = [
+    DemographicsItem,
+    EncounterItem,
+    LabItem,
+    DiagnosisItem,
+    MedicationItem,
+    ImmunizationItem,
+    ProcedureItem,
+    SurgeryItem,
+    ImagingItem,
+    AdmissionStay,
+    AllergyItem,
+]
+
+
+@pytest.mark.parametrize("model", _ITEM_MODELS, ids=lambda m: m.__name__)
+def test_item_models_tolerate_blank_strings(model):
+    """Warehouse varchar columns deliver '' (not NULL) for missing values, and
+    item fields are raw column passthroughs. Any str/int/date field must accept
+    '' without a ValidationError (2026-07-06: drug_supply_days='' killed every
+    meds retrieval). bool and Literal fields are computed/normalized in
+    Python or SQL, never fed raw varchar, so they're exempt."""
+    kwargs = {}
+    for fname, f in model.model_fields.items():
+        ann = str(f.annotation)
+        if "Literal" in ann:
+            if f.is_required():
+                kwargs[fname] = get_args(f.annotation)[0]
+            continue
+        if "bool" in ann:
+            continue
+        kwargs[fname] = "x" if f.is_required() else ""
+    model(**kwargs)
 
 
 from agent.tools.get_patient_clinical_data import ImmunizationsQuery, ImmunizationItem
