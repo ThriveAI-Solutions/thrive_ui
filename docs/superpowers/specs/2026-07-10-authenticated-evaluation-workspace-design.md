@@ -1,7 +1,7 @@
 # Authenticated Evaluation Workspace Design
 
 **Date:** 2026-07-10
-**Status:** Revised design pending final spec approval
+**Status:** Approved design
 **Scope:** Agentic answer feedback plus evaluation launched and reviewed through Thrive's authenticated UI
 
 ## Context
