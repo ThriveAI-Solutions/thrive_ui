@@ -11,6 +11,10 @@ Then: uv run python scripts/generate_eval_report.py evals/results/<run_id>.json
 
 Requires .streamlit/secrets.toml with [ai_keys], [analytics_db], [agent].
 Deps pattern follows scripts/agent_replay.py (headless, stub RAG fallback).
+
+This is a thin CLI adapter over `evals.cases` (source-neutral case
+normalization) and `evals.executor` (source-neutral execution) — the same
+contracts a future authenticated Admin launcher will use.
 """
 
 from __future__ import annotations
@@ -27,14 +31,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.db.analytics_adapter import AnalyticsDbAdapter
-from agent.deps import AgentDeps
 from agent.observability import configure_observability
 from agent.runner import AgenticRunner
-from evals.collect import run_turn
+from evals.cases import NormalizedCase, normalize_curated_conversation
 from evals.discovery import format_roster_snippet, suggest_patients
-from evals.judge import build_judge, judge_turn
+from evals.executor import CaseExecution, EvaluationResources, execute_cases
+from evals.judge import build_judge
 from evals.matrix import PlannedConversation, build_matrix, load_questions, load_roster
-from evals.patients import resolve_patient
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _QUESTIONS = _REPO_ROOT / "evals/questions.yaml"
@@ -66,27 +69,6 @@ def _build_rag():
         return _NullRagAdapter()
 
 
-def _build_deps(adapter, rag, selected_patient, session_id: str) -> AgentDeps:
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from orm.models import RoleTypeEnum
-
-    return AgentDeps(
-        user_id=0,
-        user_role=RoleTypeEnum.DOCTOR,
-        session_id=session_id,
-        selected_patient=selected_patient,
-        last_dataframe=None,
-        last_sql=None,
-        last_query_meta=None,
-        analytics_db=adapter,
-        rag=rag,
-        sqlite_session=sessionmaker(bind=create_engine("sqlite:///:memory:"))(),
-        run_logger=None,
-    )
-
-
 def _model_info() -> dict:
     import streamlit as st
 
@@ -111,53 +93,71 @@ def _write_results(path: Path, results: dict) -> None:
     os.replace(tmp, path)
 
 
-async def _run_conversation(
-    runner: AgenticRunner,
-    adapter: AnalyticsDbAdapter,
-    rag,
-    planned: PlannedConversation,
-    judge,
-    run_id: str,
-) -> dict:
-    record = {
-        "conversation_id": planned.conversation_id,
+def _legacy_record(execution: CaseExecution, planned: PlannedConversation) -> dict:
+    """Adapt a source-neutral `CaseExecution` back into the per-conversation
+    record shape `evals/report.py` and its embedded JS renderer expect."""
+    ok = execution.status == "completed"
+    return {
+        "conversation_id": execution.case_id,
         "question_id": planned.question_id,
         "question_title": planned.question_title,
         "reviewer_note": planned.reviewer_note,
-        "patient": {"source_id": planned.source_id, "display_name": "", "label": planned.patient_label},
-        "status": "ok",
-        "error": None,
-        "turns": [],
+        "patient": execution.patient,
+        "status": "ok" if ok else "error",
+        "error": None if ok else f"{execution.error_type}: {execution.error_message}",
+        "turns": list(execution.turns),
     }
-    try:
-        selected = resolve_patient(adapter, planned.source_id)
-        # Clears the lookup query AND any stale entries left if a prior
-        # conversation errored mid-turn, so turn 1 attribution starts clean.
-        adapter.pop_sql_log()
-        record["patient"]["display_name"] = selected.display_name
-        deps = _build_deps(adapter, rag, selected, session_id=f"{run_id}-{planned.conversation_id}")
 
-        message_history = None
-        for index, planned_turn in enumerate(planned.turns):
-            turn, all_messages = await run_turn(runner, deps, planned_turn.prompt, message_history=message_history)
-            turn["index"] = index
-            turn["role"] = planned_turn.role
-            if judge is not None:
-                summaries = [
-                    f"{tc['tool_name']}: {tc.get('result_summary', '')}"
-                    for tc in turn["tool_calls"]
-                    if tc.get("completed")
-                ]
-                turn["judge"] = await judge_turn(judge, planned_turn.prompt, turn["answer"], summaries)
-            else:
-                turn["judge"] = None
-            record["turns"].append(turn)
-            if all_messages:
-                message_history = all_messages
+
+def _run_live(matrix: list[PlannedConversation], out_path: Path, run_id: str, defaults: dict, skip_judge: bool) -> int:
+    by_id: dict[str, PlannedConversation] = {c.conversation_id: c for c in matrix}
+    cases: list[NormalizedCase] = [normalize_curated_conversation(c) for c in matrix]
+
+    try:
+        configure_observability()
+        adapter = AnalyticsDbAdapter.from_streamlit_secrets()
+        rag = _build_rag()
+        runner = AgenticRunner()
+        judge = None if skip_judge else build_judge()
     except Exception as exc:
-        record["status"] = "error"
-        record["error"] = f"{type(exc).__name__}: {exc}"
-    return record
+        print(
+            f"error: failed to initialize ({type(exc).__name__}: {exc}) — "
+            f"check [ai_keys], [analytics_db], [agent] in .streamlit/secrets.toml"
+        )
+        return 2
+    resources = EvaluationResources(runner=runner, adapter=adapter, rag=rag, judge=judge)
+
+    results = {
+        "run_id": run_id,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "model": _model_info(),
+        "defaults": defaults,
+        "conversations": [],
+    }
+    _write_results(out_path, results)
+
+    progress = {"done": 0}
+
+    def _on_case_complete(execution: CaseExecution) -> None:
+        progress["done"] += 1
+        record = _legacy_record(execution, by_id[execution.case_id])
+        results["conversations"].append(record)
+        _write_results(out_path, results)
+        status = "ok" if record["status"] == "ok" else "error"
+        summary = f"{len(record['turns'])} turns" if status == "ok" else status
+        print(f"[{progress['done']}/{len(cases)}] {record['conversation_id']} -> {summary}", flush=True)
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(execute_cases(cases, resources, _on_case_complete))
+    finally:
+        loop.close()
+
+    errors = sum(1 for c in results["conversations"] if c["status"] == "error")
+    print(f"\ndone: {len(results['conversations'])} conversations ({errors} errored)")
+    print(f"results: {out_path}")
+    print(f"next:    uv run python scripts/generate_eval_report.py {out_path}")
+    return 0
 
 
 def main() -> int:
@@ -211,45 +211,7 @@ def main() -> int:
         out_path = _RESULTS_DIR / f"{run_id}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
-        configure_observability()
-        adapter = AnalyticsDbAdapter.from_streamlit_secrets()
-        rag = _build_rag()
-        runner = AgenticRunner()
-        judge = None if args.skip_judge else build_judge()
-    except Exception as exc:
-        print(
-            f"error: failed to initialize ({type(exc).__name__}: {exc}) — "
-            f"check [ai_keys], [analytics_db], [agent] in .streamlit/secrets.toml"
-        )
-        return 2
-
-    results = {
-        "run_id": run_id,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "model": _model_info(),
-        "defaults": defaults,
-        "conversations": [],
-    }
-    _write_results(out_path, results)
-
-    loop = asyncio.new_event_loop()
-    try:
-        for i, convo in enumerate(matrix, 1):
-            print(f"[{i}/{len(matrix)}] {convo.conversation_id} ...", flush=True)
-            record = loop.run_until_complete(_run_conversation(runner, adapter, rag, convo, judge, run_id))
-            results["conversations"].append(record)
-            _write_results(out_path, results)
-            status = record["status"] if record["status"] != "ok" else f"{len(record['turns'])} turns"
-            print(f"    -> {status}", flush=True)
-    finally:
-        loop.close()
-
-    errors = sum(1 for c in results["conversations"] if c["status"] == "error")
-    print(f"\ndone: {len(results['conversations'])} conversations ({errors} errored)")
-    print(f"results: {out_path}")
-    print(f"next:    uv run python scripts/generate_eval_report.py {out_path}")
-    return 0
+    return _run_live(matrix, out_path, run_id, defaults, args.skip_judge)
 
 
 if __name__ == "__main__":
