@@ -744,8 +744,12 @@ def render_followup_button(group_id: str, messages: list = None):
                             help=description,
                             width="stretch",
                         ):
-                            # Execute the follow-up command
-                            set_question(f"/followup {cmd}")
+                            # Execute the follow-up command. render=False +
+                            # rerun: rendering here would draw the user bubble
+                            # inside this popover; the rerun lets the history
+                            # loop show it in the transcript before processing.
+                            set_question(f"/followup {cmd}", render=False)
+                            st.rerun()
 
             # Add AI Questions section if we have context
             if summary_message:

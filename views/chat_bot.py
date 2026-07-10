@@ -557,10 +557,14 @@ if st.session_state.get("show_question_history", True):
             st.caption("No questions asked yet.")
         else:
             for past_question in filtered_messages[:10]:
+                # render=False: on_click callbacks run before the script body,
+                # so anything they render lands at the very top of the page.
+                # The message is appended to session_state.messages here and
+                # the history loop below renders it in place.
                 st.button(
                     past_question.content,
                     on_click=set_question,
-                    args=(past_question.content,),
+                    args=(past_question.content, False),
                     key=f"qh_{past_question.id}",
                     width="stretch",
                 )
@@ -603,9 +607,6 @@ with messages_container:
         render_message_group(group_messages, group_index, message_index, is_last_group=is_last_group)
         message_index += len(group_messages)
 
-# Footer placeholder that always stays at the end
-tail_placeholder = st.empty()
-
 # Always show chat input — with optional 🎤 and 💡 icon-popovers above it (#143).
 tool_col_voice, tool_col_suggested, _input_col = st.columns([1, 1, 20])
 if st.session_state.get("voice_input", False):
@@ -616,6 +617,9 @@ if st.session_state.get("voice_input", False):
                 if text:
                     st.toast(f"Recognized text: {text}")
                     set_question(text, False)
+                    # Rerun so the transcript shows the new user message
+                    # before the flow starts processing it.
+                    st.rerun()
                 else:
                     st.error("No input detected.")
 if st.session_state.get("show_suggested", False):
@@ -635,7 +639,11 @@ chat_input = st.chat_input("Ask me a question about your data")
 
 ######### Handle new chat input #########
 if chat_input:
-    set_question(chat_input)
+    # Render the new user message INSIDE the history container so it appends
+    # to the transcript. set_question is called after st.chat_input in script
+    # order, so without the container it would render at the tail of the DOM.
+    with messages_container:
+        set_question(chat_input)
 
 # Get question from session state
 my_question = st.session_state.get("my_question", None)
@@ -652,12 +660,25 @@ if my_question:
         previous_df = st.session_state.get("df")
     else:
         previous_df = get_last_assistant_dataframe()
-    magic_response = is_magic_do_magic(my_question, previous_df=previous_df)
-    if magic_response == True:
-        st.stop()
 
-    normal_message_flow(my_question)
-    # normal_message_flow calls st.rerun() at the end, so code after this won't execute
+    # All live rendering for the turn (acknowledgement, thinking placeholders,
+    # tool cards, streamed summary, …) must land inside messages_container.
+    # If it renders at the tail of the script instead, the next rerun draws
+    # the same messages from history up in the container while the previous
+    # run's tail elements linger as grayed-out "ghosts" pinned at the bottom
+    # of the scroll area for the whole (LLM-slow) turn.
+    with messages_container:
+        magic_response = is_magic_do_magic(my_question, previous_df=previous_df)
+        if magic_response is True:
+            st.stop()
+
+        normal_message_flow(my_question)
+
+    # The Vanna success path reruns inside normal_message_flow and never gets
+    # here. The agentic flow and Vanna's SQL-error path return normally, so
+    # rerun now to replace the turn's live-rendered elements with their
+    # persisted history render — otherwise they'd ghost on the next question.
+    st.rerun()
 
 # Check if we need to continue processing community questions after a rerun
 # This runs when my_question is None (cleared after processing)
@@ -671,15 +692,17 @@ if not my_question and st.session_state.get("processing_community_questions", Fa
     if next_index < len(community_questions):
         # Update index and process next question
         st.session_state.community_question_index = next_index
-        with st.chat_message(RoleType.ASSISTANT.value):
-            st.info(f"Processing question {next_index + 1} of {len(community_questions)}...")
+        with messages_container:
+            with st.chat_message(RoleType.ASSISTANT.value):
+                st.info(f"Processing question {next_index + 1} of {len(community_questions)}...")
         time.sleep(1)  # Brief pause between questions
         set_question(community_questions[next_index], False)
         st.rerun()
     else:
         # All questions processed
-        with st.chat_message(RoleType.ASSISTANT.value):
-            st.success(f"✅ Completed processing all {len(community_questions)} community questions!")
+        with messages_container:
+            with st.chat_message(RoleType.ASSISTANT.value):
+                st.success(f"✅ Completed processing all {len(community_questions)} community questions!")
         st.session_state.processing_community_questions = False
         st.session_state.community_question_index = 0
 
