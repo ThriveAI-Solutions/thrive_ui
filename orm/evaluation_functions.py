@@ -24,12 +24,13 @@ from sqlalchemy.orm import Session, joinedload
 
 from orm.evaluation_models import (
     AdminNotification,
+    AgentRunFeedback,
     EvaluationCase,
     EvaluationCaseResult,
     EvaluationReviewEvent,
     EvaluationRun,
 )
-from orm.models import RoleTypeEnum, SessionLocal, User
+from orm.models import AgentRun, RoleTypeEnum, SessionLocal, User
 
 FINAL_VERDICTS = ("correct", "incorrect", "cant_tell")
 
@@ -170,6 +171,44 @@ def request_cancellation(run_id: str, admin_user_id: int) -> EvaluationRunView:
                 return _run_view(run)
             run.cancel_requested = True
             session.commit()
+            return _run_view(run)
+        except Exception:
+            session.rollback()
+            raise
+
+
+def resume_run(run_id: str, admin_user_id: int) -> EvaluationRunView:
+    """Requeue a run that was interrupted or requeued so the async worker
+    re-executes its unfinished cases. No-op for terminal-success runs."""
+    with SessionLocal() as session:
+        try:
+            _require_admin(session, admin_user_id)
+            run = session.query(EvaluationRun).filter(EvaluationRun.run_id == run_id).one_or_none()
+            if run is None:
+                raise EvaluationServiceError(f"Evaluation run {run_id} not found.")
+            has_unfinished = (
+                session.query(EvaluationCaseResult)
+                .filter(
+                    EvaluationCaseResult.evaluation_run_id == run.id,
+                    EvaluationCaseResult.status.in_(tuple(_RUNNABLE_RESULT_STATUSES)),
+                )
+                .count()
+                > 0
+            )
+            if has_unfinished and run.status not in ("running",):
+                run.status = "queued"
+                run.cancel_requested = False
+                for result in (
+                    session.query(EvaluationCaseResult)
+                    .filter(
+                        EvaluationCaseResult.evaluation_run_id == run.id,
+                        EvaluationCaseResult.status == "running",
+                    )
+                    .all()
+                ):
+                    result.status = "pending"
+                    result.started_at = None
+                session.commit()
             return _run_view(run)
         except Exception:
             session.rollback()
@@ -474,3 +513,215 @@ def purge_expired_evaluation_payloads(now: datetime) -> int:
         except Exception:
             session.rollback()
             raise
+
+
+# --------------------------------------------------------------------------- #
+# Authenticated report, notifications, and launch catalog (Task 7/8).
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class NotificationView:
+    """PHI-free notification payload — never carries patient, question, answer,
+    or tool evidence, only run identity, status, counts, and timestamps."""
+
+    notification_id: int
+    run_id: str
+    kind: str
+    status: str
+    total_cases: int
+    completed_cases: int
+    failed_cases: int
+    created_at: Optional[datetime]
+    read_at: Optional[datetime]
+
+    @property
+    def text(self) -> str:
+        return f"Evaluation {self.run_id} completed: {self.completed_cases}/{self.total_cases} cases."
+
+
+def list_admin_notifications(admin_user_id: int, unread_only: bool = True) -> list[NotificationView]:
+    """Return the admin's notifications as PHI-free views, newest first."""
+    with SessionLocal() as session:
+        _require_admin(session, admin_user_id)
+        query = (
+            session.query(AdminNotification, EvaluationRun)
+            .join(EvaluationRun, AdminNotification.evaluation_run_id == EvaluationRun.id)
+            .filter(AdminNotification.user_id == admin_user_id)
+        )
+        if unread_only:
+            query = query.filter(AdminNotification.read_at.is_(None))
+        rows = query.order_by(AdminNotification.created_at.desc(), AdminNotification.id.desc()).all()
+        return [
+            NotificationView(
+                notification_id=note.id,
+                run_id=run.run_id,
+                kind=note.kind,
+                status=run.status,
+                total_cases=run.total_cases,
+                completed_cases=run.completed_cases,
+                failed_cases=run.failed_cases,
+                created_at=note.created_at,
+                read_at=note.read_at,
+            )
+            for note, run in rows
+        ]
+
+
+def mark_notification_read(notification_id: int, admin_user_id: int) -> None:
+    """Mark one of the admin's own notifications read (idempotent)."""
+    with SessionLocal() as session:
+        try:
+            _require_admin(session, admin_user_id)
+            note = (
+                session.query(AdminNotification)
+                .filter(
+                    AdminNotification.id == notification_id,
+                    AdminNotification.user_id == admin_user_id,
+                )
+                .one_or_none()
+            )
+            if note is None:
+                raise EvaluationServiceError("Notification not found for this admin.")
+            if note.read_at is None:
+                note.read_at = datetime.now(timezone.utc)
+                session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+
+def get_evaluation_run_report(run_id: str, actor_user_id: int) -> dict:
+    """Return the full authenticated report for a run. Admin-gated: a non-admin
+    is rejected before any PHI-bearing payload is read. Returns plain
+    dictionaries (no attached SQLAlchemy rows)."""
+    with SessionLocal() as session:
+        _require_admin(session, actor_user_id)
+        run = session.query(EvaluationRun).filter(EvaluationRun.run_id == run_id).one_or_none()
+        if run is None:
+            raise EvaluationServiceError(f"Evaluation run {run_id} not found.")
+
+        results = (
+            session.query(EvaluationCaseResult, EvaluationCase)
+            .join(EvaluationCase, EvaluationCaseResult.evaluation_case_id == EvaluationCase.id)
+            .filter(EvaluationCaseResult.evaluation_run_id == run.id)
+            .order_by(EvaluationCaseResult.ordinal, EvaluationCaseResult.id)
+            .all()
+        )
+
+        case_reports = []
+        for result, case in results:
+            case_payload = {}
+            if case.status != "expired" and case.payload_json:
+                try:
+                    case_payload = json.loads(case.payload_json)
+                except (TypeError, ValueError):
+                    case_payload = {}
+            rerun = {}
+            if result.result_json:
+                try:
+                    rerun = json.loads(result.result_json)
+                except (TypeError, ValueError):
+                    rerun = {}
+            case_reports.append(
+                {
+                    "result_id": result.id,
+                    "ordinal": result.ordinal,
+                    "case_id": case.case_id,
+                    "source_type": case.source_type,
+                    "status": result.status,
+                    "expired": case.status == "expired",
+                    "concern": case_payload.get("reviewer_guidance", ""),
+                    "title": case_payload.get("title", ""),
+                    "original_answer": case_payload.get("original_answer"),
+                    "original_evidence": case_payload.get("original_evidence", []),
+                    "rerun_turns": rerun.get("turns", []),
+                    "rerun_patient": rerun.get("patient", {}),
+                    "error_type": result.error_type,
+                    "error_message": result.error_message,
+                    "judge_verdict": result.judge_verdict,
+                    "judge_reason": result.judge_reason,
+                    "final_verdict": result.final_verdict,
+                    "review_note": result.review_note,
+                }
+            )
+
+        return {
+            "run_id": run.run_id,
+            "run_type": run.run_type,
+            "execution_mode": run.execution_mode,
+            "status": run.status,
+            "total_cases": run.total_cases,
+            "completed_cases": run.completed_cases,
+            "failed_cases": run.failed_cases,
+            "cancel_requested": run.cancel_requested,
+            "cases": case_reports,
+        }
+
+
+def list_feedback_candidates(admin_user_id: int, days: Optional[int] = None) -> list[dict]:
+    """List thumbs-down agent feedback available to snapshot into cases. PHI
+    (question, patient) is included but stays inside the admin-gated page."""
+    from datetime import timedelta
+
+    with SessionLocal() as session:
+        _require_admin(session, admin_user_id)
+        query = (
+            session.query(AgentRunFeedback, AgentRun, User)
+            .join(AgentRun, AgentRunFeedback.agent_run_id == AgentRun.id)
+            .join(User, AgentRunFeedback.user_id == User.id)
+            .filter(AgentRunFeedback.rating == "down")
+        )
+        if days is not None:
+            query = query.filter(AgentRunFeedback.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
+        rows = query.order_by(AgentRunFeedback.created_at.desc()).all()
+        return [
+            {
+                "feedback_id": fb.id,
+                "username": user.username,
+                "organization": user.organization,
+                "category": fb.category,
+                "comment": fb.comment,
+                "created_at": fb.created_at,
+                "question": run.question,
+                "patient": run.selected_patient_display_name,
+                "logging_mode": run.logging_mode,
+                # A snapshot needs a completed, non-disabled run to replay.
+                "replayable": bool(
+                    run.logging_mode != "disabled" and run.selected_patient_source_id and run.final_answer_text
+                ),
+            }
+            for fb, run, user in rows
+        ]
+
+
+def list_curated_cases(admin_user_id: int, include_drafts: bool = False) -> list[dict]:
+    """List curated evaluation cases (active by default; drafts optional)."""
+    with SessionLocal() as session:
+        _require_admin(session, admin_user_id)
+        statuses = ("active", "draft") if include_drafts else ("active",)
+        rows = (
+            session.query(EvaluationCase)
+            .filter(EvaluationCase.source_type == "curated", EvaluationCase.status.in_(statuses))
+            .order_by(EvaluationCase.created_at.desc())
+            .all()
+        )
+        out = []
+        for case in rows:
+            title = ""
+            try:
+                title = json.loads(case.payload_json).get("title", "")
+            except (TypeError, ValueError):
+                pass
+            out.append({"id": case.id, "case_id": case.case_id, "status": case.status, "title": title})
+        return out
+
+
+def launch_evaluation(case_ids: list[int], admin_user_id: int, resources=None) -> EvaluationRunView:
+    """Create a run and, for a single feedback case, execute it synchronously
+    in-request; every other selection is queued for the async worker. Returns
+    the resulting run view."""
+    view = create_evaluation_run(case_ids, admin_user_id)
+    if view.execution_mode == "synchronous":
+        return execute_synchronous_run(view.run_id, admin_user_id, resources=resources)
+    return view
