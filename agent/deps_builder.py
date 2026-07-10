@@ -136,7 +136,7 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
     st.session_state["agent_current_run_id"] = run_id
     group_id = st.session_state.get("current_group_id")
     run_logger = None
-    if config.enabled:
+    if config.enabled or config.mode == "disabled":
         run_logger = AgentRunLogger(
             session=sqlite_session,
             config=config,

@@ -97,6 +97,8 @@ class AgentRunLogger:
         tool_name: Optional[str] = None,
         elapsed_ms: Optional[int] = None,
     ) -> int:
+        if self.config.mode == "disabled":
+            return self._seq
         seq = self._next_seq()
         try:
             text, truncated, nbytes, digest = (None, False, 0, None)
@@ -146,10 +148,23 @@ class AgentRunLogger:
     ) -> None:
         self.group_id = group_id
         try:
-            history_text = None
-            if message_history is not None and self.config.mode == "full":
-                history_text, *_ = cap_json(message_history, self.config.max_logged_event_bytes)
-            sp = selected_patient or {}
+            if self.config.mode == "disabled":
+                history_text = None
+                sp = {}
+                question_for_log = None
+                llm_provider = None
+                llm_model = None
+                user_message_id = None
+                system_prompt_hash = None
+                tool_schema_hash = None
+                app_git_sha = None
+                environment = None
+            else:
+                history_text = None
+                if message_history is not None and self.config.mode == "full":
+                    history_text, *_ = cap_json(message_history, self.config.max_logged_event_bytes)
+                sp = selected_patient or {}
+                question_for_log = question
             run = AgentRun(
                 run_id=self.run_id,
                 session_id=self.session_id,
@@ -159,7 +174,7 @@ class AgentRunLogger:
                 user_message_id=user_message_id,
                 user_id=self.user_id,
                 user_role=self.user_role,
-                question=question,
+                question=question_for_log,
                 selected_patient_source_id=sp.get("source_id"),
                 selected_patient_display_name=sp.get("display_name"),
                 selected_patient_dob=sp.get("dob"),
@@ -180,6 +195,8 @@ class AgentRunLogger:
             self._safe_commit()
         except Exception:
             pass
+        if self.config.mode == "disabled":
+            return
         self._append_event("run_started", payload={"question": question})
         if selected_patient and selected_patient.get("source_id"):
             self._record_access(
@@ -228,6 +245,8 @@ class AgentRunLogger:
         selected_patient_source_id: Optional[str],
         started_event_seq: Optional[int] = None,
     ) -> None:
+        if self.config.mode == "disabled":
+            return
         self._call_index += 1
         call_index = self._call_index
         scrubbed = self.config.mode == "scrubbed"
@@ -313,6 +332,8 @@ class AgentRunLogger:
             pass
 
     def log_chooser_candidates(self, payload: dict) -> None:
+        if self.config.mode == "disabled":
+            return
         if self.config.mode == "scrubbed":
             return
         for sid, name in extract_source_ids(payload):
@@ -333,6 +354,22 @@ class AgentRunLogger:
         error: Optional[str] = None,
         stack_trace: Optional[str] = None,
     ) -> None:
+        if self.config.mode == "disabled":
+            try:
+                run = self.session.query(AgentRun).filter_by(run_id=self.run_id).first()
+                if run is not None:
+                    run.status = status
+                    run.success = status == "success"
+                    run.final_message_id = final_message_id
+                    run.tool_call_count = 0
+                    run.event_count = 0
+                    run.cap_reached = cap_reached
+                    run.completed_at = func.now()
+                    self.session.add(run)
+                    self._safe_commit()
+            except Exception:
+                pass
+            return
         if status == "cap_reached":
             self._append_event("cap_reached", payload={"reason": cap_reached})
         if status == "failed":
@@ -434,6 +471,28 @@ def mark_run_fallback_invoked(
                 payload_summary=f"fallback_sql_chars={len(fallback_sql or '')}",
             )
         )
+        session.commit()
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+
+
+def mark_run_final_message_id(session: Session, *, run_id: str, final_message_id: int | None) -> None:
+    """Attach the persisted final chat message to an AgentRun after UI render.
+
+    The agent loop finalizes before Streamlit persists the visible final message,
+    so the script thread patches this non-PHI foreign key after rendering.
+    """
+    if not run_id or final_message_id is None:
+        return
+    try:
+        run = session.query(AgentRun).filter_by(run_id=run_id).first()
+        if run is None:
+            return
+        run.final_message_id = int(final_message_id)
+        session.add(run)
         session.commit()
     except Exception:
         try:

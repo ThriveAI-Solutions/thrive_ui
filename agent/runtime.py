@@ -16,10 +16,9 @@ import streamlit as st
 from agent.deps_builder import build_agent_deps
 from agent.fallback import should_fallback
 from agent.observability import configure_observability
-from agent.run_logger import mark_run_fallback_invoked
+from agent.run_logger import mark_run_fallback_invoked, mark_run_final_message_id
 from agent.runner import AgenticRunner
 from agent.state import (
-    AgentResponse,
     AssistantTextCompletedEvent,
     AssistantTextDeltaEvent,
     CapReachedEvent,
@@ -441,7 +440,7 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
         if slot is not None:
             slot["outer"].empty()
         if event.text.strip():
-            add_message(
+            persisted = add_message(
                 Message(
                     RoleType.ASSISTANT,
                     event.text,
@@ -452,6 +451,7 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
             # can skip its own response.text row if the model echoed the
             # same content via TextPart on the final turn.
             state["last_persisted_text"] = event.text
+            state["last_persisted_text_message_id"] = getattr(persisted, "id", None)
         return
 
     if isinstance(event, ThinkingCompletedEvent):
@@ -557,14 +557,24 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
         # answer twice. Strip-equality is enough — both come from the same
         # model output and won't drift in whitespace meaningfully.
         last_streamed = state.get("last_persisted_text", "")
+        final_message_id = state.get("last_persisted_text_message_id")
         if response.text.strip() and response.text.strip() != last_streamed.strip():
-            add_message(
+            persisted = add_message(
                 Message(
                     RoleType.ASSISTANT,
                     response.text,
                     MessageType.TEXT,
                 )
             )
+            final_message_id = getattr(persisted, "id", None)
+        if event.run_id and final_message_id is not None:
+            session = None
+            try:
+                session = SessionLocal()
+                mark_run_final_message_id(session, run_id=event.run_id, final_message_id=final_message_id)
+            finally:
+                if session is not None:
+                    session.close()
         # Honor clear_selection: drop both the slot AND the conversation
         # history, since "start fresh" means no carry-over context.
         if response.clear_selection:

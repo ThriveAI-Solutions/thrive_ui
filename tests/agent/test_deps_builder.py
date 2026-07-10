@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock, patch
 from agent.deps import AgentDeps
 from orm.models import RoleTypeEnum
@@ -79,9 +78,10 @@ def test_build_deps_attaches_run_logger(monkeypatch):
     assert deps.group_id == "g-xyz"
 
 
-def test_build_deps_run_logger_none_when_disabled(monkeypatch):
+def test_build_deps_run_logger_minimal_when_disabled(monkeypatch):
     import streamlit as st
     from agent.deps_builder import build_agent_deps
+    from agent.run_logger import AgentRunLogger
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from orm.models import Base
@@ -100,7 +100,8 @@ def test_build_deps_run_logger_none_when_disabled(monkeypatch):
     )
 
     deps = build_agent_deps(session)
-    assert deps.run_logger is None
+    assert isinstance(deps.run_logger, AgentRunLogger)
+    assert deps.run_logger.config.mode == "disabled"
 
 
 @patch("agent.deps_builder._analytics_db")
