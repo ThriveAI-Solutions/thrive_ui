@@ -237,3 +237,4 @@ scripts/synthea/output/
 mempalace.yaml
 .verify-evidence/
 .ma-worktrees/
+.ma/
