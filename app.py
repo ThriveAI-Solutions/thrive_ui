@@ -42,6 +42,20 @@ if _bootstrap_err is not None:
     st.error(f"Database initialization failed: {_bootstrap_err}")
     st.stop()
 
+
+# Start the process-local evaluation worker exactly once, only after the
+# database bootstrap above succeeds. The worker is a cached singleton so
+# Streamlit reruns cannot spawn duplicates.
+@st.cache_resource
+def _start_evaluation_worker() -> bool:
+    from evals.worker import start_evaluation_worker
+
+    start_evaluation_worker()
+    return True
+
+
+_start_evaluation_worker()
+
 # Initialize the cookie manager. The prefix is configurable so that multiple
 # deployments behind the same hostname (e.g. prod at "/" and a dev instance at
 # "/dev") don't read each other's cookies — a shared prefix points one app at a
