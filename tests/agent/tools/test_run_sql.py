@@ -259,3 +259,98 @@ def test_run_sql_wraps_db_errors_as_model_retry(synthetic_db):
     # Underlying DB error should be surfaced verbatim so the model can
     # actually act on it.
     assert "no_such_column" in msg.lower() or "no such column" in msg.lower()
+
+
+# {{codes:<set_id>}} macro tests -----------------------------------------
+# expand_code_macros itself is pure-mock tested in test_sql_macros.py; these
+# tests verify the tool wires it in correctly: expansion happens BEFORE the
+# AST guard, the executed SQL is the expanded form, result.sql echoes the
+# original macro-form SQL, and unknown sets / macro-free SQL are handled
+# per the security-sensitive invariants in the Task 4 brief.
+
+
+def test_run_sql_macro_expands_before_guard_and_executes(synthetic_db, vocab_session):
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    ctx = MagicMock()
+    deps = _deps(synthetic_db, _selected_john())
+    deps.sqlite_session = vocab_session
+    ctx.deps = deps
+
+    result = run_sql(
+        ctx,
+        RunSqlInput(sql="SELECT 'E11.9' AS code WHERE 'E11.9' IN {{codes:dx:diabetes-mellitus}}"),
+    )
+
+    # The executed (expanded) SQL is recorded for provenance and contains
+    # the quoted dotted + undotted match-forms fetched from the vocab DB.
+    assert "'E11.9'" in ctx.deps.last_sql
+    assert "'E119'" in ctx.deps.last_sql
+    assert "{{codes:" not in ctx.deps.last_sql
+    # result.sql echoes the ORIGINAL macro-form SQL (chiron parity).
+    assert "{{codes:dx:diabetes-mellitus}}" in result.sql
+    assert result.row_count == 1
+    assert result.rows[0] == ["E11.9"]
+
+
+def test_run_sql_macro_unknown_set_raises_actionable_model_retry(synthetic_db, vocab_session):
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    ctx = MagicMock()
+    deps = _deps(synthetic_db, _selected_john())
+    deps.sqlite_session = vocab_session
+    ctx.deps = deps
+
+    with pytest.raises(ModelRetry) as excinfo:
+        run_sql(ctx, RunSqlInput(sql="SELECT 1 WHERE 1 IN {{codes:dx:not-a-real-set}}"))
+    msg = str(excinfo.value)
+    assert "not-a-real-set" in msg
+    assert "search_codes first" in msg
+    assert "{{codes:<set_id>}}" in msg
+
+
+def test_run_sql_macro_reliability_note_combines_with_truncation_note(synthetic_db, vocab_session):
+    """reliability_note carries the macro-expansion note AND the truncation
+    note, joined with '; ', per the brief's combining-logic requirement."""
+    from sqlalchemy import text
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    with synthetic_db.connect() as conn:
+        conn.execute(text("CREATE TABLE macro_big_table (a INTEGER)"))
+        for i in range(600):
+            conn.execute(text("INSERT INTO macro_big_table (a) VALUES (:a)"), {"a": i})
+        conn.commit()
+
+    ctx = MagicMock()
+    deps = _deps(synthetic_db, _selected_john())
+    deps.sqlite_session = vocab_session
+    ctx.deps = deps
+
+    result = run_sql(
+        ctx,
+        RunSqlInput(sql="SELECT a FROM macro_big_table WHERE 'E11.9' IN {{codes:dx:diabetes-mellitus}} OR 1=1"),
+    )
+    assert result.truncated is True
+    assert result.reliability_note is not None
+    assert "expanded to" in result.reliability_note
+    assert "code match-forms" in result.reliability_note
+    assert "Results truncated at 500 rows" in result.reliability_note
+    assert "; " in result.reliability_note
+
+
+def test_run_sql_macro_free_sql_makes_zero_db_calls(synthetic_db):
+    """Macro-free SQL must not touch the vocab session at all."""
+    from agent.tools.run_sql import run_sql, RunSqlInput
+
+    session = MagicMock(name="sqlite_session")
+    ctx = MagicMock()
+    deps = _deps(synthetic_db, _selected_john())
+    deps.sqlite_session = session
+    ctx.deps = deps
+
+    result = run_sql(ctx, RunSqlInput(sql="SELECT 1 AS a"))
+
+    assert result.row_count == 1
+    session.assert_not_called()
+    session.get.assert_not_called()
+    session.scalars.assert_not_called()

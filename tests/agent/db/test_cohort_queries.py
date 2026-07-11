@@ -83,6 +83,39 @@ def test_diagnosis_codes_join(synthetic_db):
     assert len(rows) >= 3, f"expected ≥3 diabetic patients via metric join; got {len(rows)}"
 
 
+def test_diagnosis_codes_carry_dotted_and_undotted_match_forms():
+    """Given ["E11.9"], the dx IN-list params must carry both the dotted
+    ('E11.9') and undotted ('E119') spellings — the warehouse stores ICD
+    codes both ways and exact IN-matching must carry both forms or it
+    silently misses rows (Task 4 brief, agent/codes/match_forms.py)."""
+    from agent.db.queries.cohort import _diagnosis_event_where
+
+    dx_filter, params = _diagnosis_event_where(_make(diagnosis_codes=["E11.9"]))
+    dx_values = [v for k, v in params.items() if k.startswith("dx_") and k not in ("dx_start", "dx_end")]
+    assert "E11.9" in dx_values
+    assert "E119" in dx_values
+
+
+def test_diagnosis_event_where_admits_icd9_code_type():
+    """Vocab code sets deliberately carry ICD-9 members (e.g. dx:diabetes-mellitus
+    has 68) alongside ICD-10/SNOMED. If the code_type filter excludes ICD-9, those
+    matched codes get injected into the code IN-list only to be silently dropped
+    by this WHERE — a cohort undercount (final-review I1). Variants come from
+    agent.code_normalizer, the single source of truth also used by the run_sql
+    {{codes:...}} macro path."""
+    from agent.db.queries.cohort import _diagnosis_event_where
+
+    dx_filter, params = _diagnosis_event_where(_make(diagnosis_codes=["250.00"]))
+    ct_values = [v for k, v in params.items() if k.startswith("dxct_")]
+    assert "ICD-9" in ct_values
+    assert "ICD9" in ct_values
+    # ICD-10 and SNOMED variants must still be present — this is additive, not
+    # a replacement of the existing vocabularies.
+    assert "ICD-10" in ct_values
+    assert "SNOMED" in ct_values
+    assert any(clause.startswith("code_type IN (") for clause in dx_filter)
+
+
 def test_diagnosis_with_facility_and_age(synthetic_db):
     """The acceptance question: diabetic patients over 65 at Kaleida."""
     sql, params = cohort_sql(

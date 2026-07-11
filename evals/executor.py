@@ -41,11 +41,14 @@ class CaseExecution:
 
 
 def _build_deps(adapter, rag, selected_patient, session_id: str):
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
+    # A bare in-memory SQLite engine has no vocab_codes table at all, which the
+    # vocab service surfaces as an unhandled OperationalError (tools only catch
+    # VocabNotLoadedError) — every cohort/code-set question then crashes instead
+    # of soft-failing. SessionLocal() points at the real app DB (same pattern as
+    # scripts/run_representative_regression.py): vocab loaded → real behavior,
+    # vocab empty → VocabNotLoadedError → graceful soft-fail.
     from agent.deps import AgentDeps
-    from orm.models import RoleTypeEnum
+    from orm.models import RoleTypeEnum, SessionLocal
 
     return AgentDeps(
         user_id=0,
@@ -57,7 +60,7 @@ def _build_deps(adapter, rag, selected_patient, session_id: str):
         last_query_meta=None,
         analytics_db=adapter,
         rag=rag,
-        sqlite_session=sessionmaker(bind=create_engine("sqlite:///:memory:"))(),
+        sqlite_session=SessionLocal(),
         run_logger=None,
     )
 

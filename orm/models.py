@@ -722,6 +722,85 @@ class PatientSelectionEvent(Base):
     created_at = Column(TIMESTAMP, server_default=func.now(), nullable=False)
 
 
+# ============== Vocabulary Search Models ==============
+# Ported from chiron core/db/models.py (search_codes vocabulary backend,
+# spec 2026-07-03). Global reference data: no per-user/tenant scoping,
+# loaded only by the vocab ingest script (later task). Tables are empty
+# until that script runs — this task only creates the schema.
+
+
+class VocabCode(Base):
+    __tablename__ = "vocab_codes"
+    __table_args__ = (Index("ix_vocab_codes_vocab_norm", "vocabulary", "code_norm", unique=True),)
+
+    id = Column(Integer, primary_key=True)
+    vocabulary = Column(String(16), nullable=False)  # icd10|icd9|loinc|cvx|rxnorm|snomed|cpt
+    code = Column(String(64), nullable=False)  # canonical (dotted for ICD)
+    code_norm = Column(String(64), nullable=False)  # UPPER, dots stripped
+    display = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    source_version = Column(String(64), nullable=False)
+
+    synonyms = relationship("VocabSynonym", back_populates="code_ref", cascade="all, delete-orphan")
+    set_memberships = relationship("VocabCodeSetMember", back_populates="code_ref", cascade="all, delete-orphan")
+
+
+class VocabSynonym(Base):
+    __tablename__ = "vocab_synonyms"
+    __table_args__ = (
+        Index("ix_vocab_synonyms_term_norm", "term_norm"),
+        Index("ix_vocab_synonyms_code_id", "code_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    code_id = Column(Integer, ForeignKey("vocab_codes.id", ondelete="CASCADE"), nullable=False)
+    term = Column(Text, nullable=False)
+    term_norm = Column(Text, nullable=False)  # lower, trimmed
+    source = Column(String(32), nullable=False)  # loinc_relatednames|loinc_consumer|rxnorm|cvx|curated
+    is_lay = Column(Boolean, nullable=False, default=False)
+
+    code_ref = relationship("VocabCode", back_populates="synonyms")
+
+
+class VocabCodeSet(Base):
+    __tablename__ = "vocab_code_sets"
+
+    set_id = Column(String(128), primary_key=True)  # 'ccsr:END002', 'dx:diabetes-mellitus', 'vg:MMR'
+    name = Column(Text, nullable=False)
+    source = Column(String(32), nullable=False)  # ccsr|ccs9|cvx_group|curated (later: vsac)
+    source_version = Column(String(64), nullable=False)
+
+    members = relationship("VocabCodeSetMember", back_populates="set_ref", cascade="all, delete-orphan")
+    set_synonyms = relationship("VocabSetSynonym", back_populates="set_ref", cascade="all, delete-orphan")
+
+
+class VocabCodeSetMember(Base):
+    __tablename__ = "vocab_code_set_members"
+    __table_args__ = (
+        Index("ix_vocab_set_members_set_code", "set_id", "code_id", unique=True),
+        Index("ix_vocab_set_members_code_id", "code_id"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    set_id = Column(String(128), ForeignKey("vocab_code_sets.set_id", ondelete="CASCADE"), nullable=False)
+    code_id = Column(Integer, ForeignKey("vocab_codes.id", ondelete="CASCADE"), nullable=False)
+
+    set_ref = relationship("VocabCodeSet", back_populates="members")
+    code_ref = relationship("VocabCode", back_populates="set_memberships")
+
+
+class VocabSetSynonym(Base):
+    __tablename__ = "vocab_set_synonyms"
+    __table_args__ = (Index("ix_vocab_set_synonyms_term_norm", "term_norm"),)
+
+    id = Column(Integer, primary_key=True)
+    set_id = Column(String(128), ForeignKey("vocab_code_sets.set_id", ondelete="CASCADE"), nullable=False)
+    term = Column(Text, nullable=False)
+    term_norm = Column(Text, nullable=False)
+
+    set_ref = relationship("VocabCodeSet", back_populates="set_synonyms")
+
+
 def seed_initial_data(session):
     # Seed User Roles
     roles_to_seed = [

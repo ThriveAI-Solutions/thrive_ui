@@ -1,0 +1,55 @@
+{
+  "exported_at": "2026-07-07T03:14:48.712254+00:00",
+  "tables": {
+    "vocab_code_set_members": {
+      "row_count": 462718,
+      "source_versions": null
+    },
+    "vocab_code_sets": {
+      "row_count": 2859,
+      "source_versions": [
+        "ccs9-2015",
+        "ccsr-2026-1",
+        "curated-1",
+        "cvx-2026-07",
+        "warehouse-2026-07"
+      ]
+    },
+    "vocab_codes": {
+      "row_count": 508954,
+      "source_versions": [
+        "curated-1",
+        "cvx-2026-07",
+        "icd10cm-fy2026",
+        "icd9cm-v32",
+        "rxnorm-prescribe-06012026",
+        "warehouse-2026-07"
+      ]
+    },
+    "vocab_set_synonyms": {
+      "row_count": 512,
+      "source_versions": null
+    },
+    "vocab_synonyms": {
+      "row_count": 1122,
+      "source_versions": null
+    }
+  },
+  "vocab_code_counts": {
+    "cpt": 2363,
+    "cvx": 289,
+    "hcpcs": 404,
+    "icd10": 75236,
+    "icd10pcs": 9613,
+    "icd9": 16362,
+    "icd9pcs": 200,
+    "loinc": 18667,
+    "ndc": 222599,
+    "pos": 37,
+    "rxnorm": 50083,
+    "snomed": 112216,
+    "sop": 155,
+    "ubrev": 442,
+    "ubtob": 288
+  }
+}

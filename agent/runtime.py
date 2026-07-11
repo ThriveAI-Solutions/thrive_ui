@@ -399,6 +399,24 @@ def _write_slot(slot: dict[str, Any], header: str | None = None) -> None:
             st.markdown(body)
 
 
+def _looks_like_structured_output(text: str) -> bool:
+    """True when a streamed TextPart is actually the final AgentResponse JSON.
+
+    Some model/output-mode combinations stream the structured final response
+    as a plain text part ('{"cap_reached":false,...,"text":"..."}'). Rendering
+    or persisting that blob duplicates the answer FinalResponseEvent already
+    delivers as clean text.
+    """
+    stripped = text.lstrip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(parsed, dict) and "text" in parsed
+
+
 def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> None:
     from utils.chat_bot_helper import add_message
 
@@ -432,6 +450,11 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
         # apart at a glance. Persisted on the matching AssistantTextCompletedEvent.
         slot = _open_slot(state, "text", event.turn_index)
         slot["buf"] += event.delta
+        # In prompted/native structured-output modes the final AgentResponse
+        # arrives as a raw-JSON TextPart. Keep accumulating (the completed
+        # event decides whether to persist) but don't live-render the blob.
+        if slot["buf"].lstrip().startswith("{"):
+            return
         _write_slot(slot)
         return
 
@@ -439,6 +462,12 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
         slot = state["text"].pop(event.turn_index, None)
         if slot is not None:
             slot["outer"].empty()
+        if _looks_like_structured_output(event.text):
+            # The raw JSON of the final structured response streamed as text.
+            # Skip persisting it — FinalResponseEvent carries the clean
+            # response.text and will add that row instead. (Deliberately do
+            # NOT set last_persisted_text: the JSON never rendered.)
+            return
         if event.text.strip():
             persisted = add_message(
                 Message(

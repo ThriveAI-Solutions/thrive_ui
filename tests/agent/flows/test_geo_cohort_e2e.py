@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -25,6 +26,29 @@ from agent.state import (
     ToolCallCompleted,
     ToolCallStarted,
 )
+from orm.models import Base
+
+
+def _make_empty_vocab_session() -> Session:
+    """search_codes (turn 1 of the scripted flow below) is now DB-backed
+    (agent/codes/service.py) and requires a real sqlite_session — an empty
+    vocab_codes table is fine here since the scripted FunctionModel ignores
+    search_codes's return value and hardcodes turn 2's args regardless; the
+    point of this session is just to let the call soft-fail via
+    VocabNotLoadedError instead of raising AttributeError on None.
+
+    StaticPool + check_same_thread=False for the same reason as
+    _make_threadsafe_db above: pydantic-ai runs tool calls in a worker
+    thread, and a bare ":memory:" engine hands each new connection a
+    distinct, empty in-memory DB unless pinned to a single shared
+    connection."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return Session(engine)
 
 
 _SQL_FILE = Path(__file__).parents[2] / "agent" / "redshift_synthetic.sql"
@@ -57,7 +81,7 @@ def _deps(engine) -> AgentDeps:
         last_query_meta=None,
         analytics_db=AnalyticsDbAdapter(engine=engine, dialect="sqlite"),
         rag=MagicMock(),
-        sqlite_session=None,
+        sqlite_session=_make_empty_vocab_session(),
         run_logger=MagicMock(),
     )
 
