@@ -32,6 +32,12 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 
 ModelProvider = Literal["ollama", "anthropic", "bedrock"]
 
+# Providers build_model() can actually construct. The in-app model picker's
+# registry offers others (e.g. openai, used by the legacy Vanna path), so
+# callers threading a user selection must gate on this set — otherwise an
+# unsupported provider id falls through to build_model's ValueError. See #236.
+SUPPORTED_PROVIDERS: frozenset[str] = frozenset({"ollama", "anthropic", "bedrock"})
+
 
 # Default 2 in both the openai and anthropic SDKs. Bumped to 3 to absorb one
 # more transient blip from a busy Ollama / Anthropic endpoint without

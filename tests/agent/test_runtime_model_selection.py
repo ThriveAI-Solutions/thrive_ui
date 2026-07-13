@@ -75,11 +75,31 @@ def test_selected_model_none_for_unknown_provider(monkeypatch):
 
 
 def test_selected_model_none_for_unconfigured_provider(monkeypatch):
-    _patch_registry(monkeypatch, configured_providers=set())
+    # A supported provider (ollama) that isn't configured must still fall back,
+    # so this genuinely exercises the is_configured branch (not the support gate).
+    monkeypatch.setattr(
+        "utils.llm_registry.registry.get_registry",
+        lambda: SimpleNamespace(get_provider=lambda pid: SimpleNamespace(is_configured=lambda s: False)),
+        raising=True,
+    )
     monkeypatch.setattr(
         runtime_mod,
         "st",
-        _St({"selected_llm_provider": "known-but-unconfigured", "selected_llm_model": "x"}),
+        _St({"selected_llm_provider": "ollama", "selected_llm_model": "x"}),
+        raising=True,
+    )
+    assert runtime_mod._selected_model() == (None, None)
+
+
+def test_selected_model_none_for_provider_agent_cannot_build(monkeypatch):
+    # The picker offers 'openai' (used by the Vanna path), but the agent's
+    # build_model can't construct it — selecting it must fall back to secrets,
+    # not crash the run with ValueError (#236, review finding).
+    _patch_registry(monkeypatch, configured_providers={"openai"})
+    monkeypatch.setattr(
+        runtime_mod,
+        "st",
+        _St({"selected_llm_provider": "openai", "selected_llm_model": "gpt-4o"}),
         raising=True,
     )
     assert runtime_mod._selected_model() == (None, None)

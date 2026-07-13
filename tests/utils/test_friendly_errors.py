@@ -715,6 +715,9 @@ def test_looks_like_model_unavailable_negative():
     assert not cbh.looks_like_model_unavailable(RuntimeError('relation "patients" not found'))
     assert not cbh.looks_like_model_unavailable(ValueError("column not found"))
     assert not cbh.looks_like_model_unavailable(RuntimeError("kaboom from generate_sql"))
+    # The signal is "does not support thinking", not a bare "does not support",
+    # so ordinary DB/driver "does not support" phrasings don't get misrouted.
+    assert not cbh.looks_like_model_unavailable(RuntimeError("function json_agg does not support DISTINCT"))
 
 
 class _RaisesModelNotFound:

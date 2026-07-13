@@ -15,6 +15,7 @@ import streamlit as st
 
 from agent.deps_builder import build_agent_deps
 from agent.fallback import should_fallback
+from agent.models import SUPPORTED_PROVIDERS
 from agent.observability import configure_observability
 from agent.run_logger import mark_run_fallback_invoked, mark_run_final_message_id
 from agent.runner import AgenticRunner
@@ -177,15 +178,26 @@ def _selected_model() -> tuple[str | None, str | None]:
     override the secrets defaults (issue #236).
 
     Returns the persisted ``selected_llm_provider`` / ``selected_llm_model``
-    only when the provider is a real, *configured* registry provider; otherwise
-    ``(None, None)`` so the agent falls back to the secrets model. Model
-    availability is NOT checked here (that would cost a network round-trip on
-    every selection change) — an unavailable model surfaces as a graceful error
-    at run time instead.
+    only when the provider is a real, *configured* registry provider that the
+    agent's ``build_model`` can actually construct; otherwise ``(None, None)``
+    so the agent falls back to the secrets model. Model availability is NOT
+    checked here (that would cost a network round-trip on every selection
+    change) — an unavailable model surfaces as a graceful error at run time
+    instead.
+
+    The provider gate matters: the picker's registry offers providers the agent
+    can't build (e.g. ``openai``, which the legacy Vanna path uses). Threading
+    such a selection into ``build_model`` would raise ``ValueError``, so we fall
+    back to secrets rather than crash the run (#236).
     """
     provider = st.session_state.get("selected_llm_provider")
     model = st.session_state.get("selected_llm_model")
     if not provider or not model:
+        return (None, None)
+    if provider not in SUPPORTED_PROVIDERS:
+        logger.debug(
+            "Agent doesn't support selected provider %r; falling back to the secrets model.", provider
+        )
         return (None, None)
     try:
         from utils.llm_registry.registry import get_registry

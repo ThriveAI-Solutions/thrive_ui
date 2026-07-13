@@ -1352,7 +1352,7 @@ _MODEL_UNAVAILABLE_SIGNALS = frozenset(
         "not_found_error",
         "model_not_found",
         "model not found",
-        "does not support",
+        "does not support thinking",
         "no such model",
     }
 )
