@@ -18,6 +18,7 @@ import streamlit as st
 from views import (
     admin_analytics_consolidated,
     admin_audit,
+    admin_evaluations,
     admin_feedback,
     admin_training,
     admin_users,
@@ -52,7 +53,7 @@ with control_cols[1]:
 
 days_int = {"7 days": 7, "30 days": 30, "90 days": 90}.get(days or "30 days", 30)
 
-tabs = st.tabs(["Users", "Training", "Analytics", "Audit", "Feedback"])
+tabs = st.tabs(["Users", "Training", "Analytics", "Audit", "Feedback", "Evaluations"])
 with tabs[0]:
     admin_users.render(days_int)
 with tabs[1]:
@@ -63,3 +64,5 @@ with tabs[3]:
     admin_audit.render(days_int)
 with tabs[4]:
     admin_feedback.render(days_int)
+with tabs[5]:
+    admin_evaluations.render(days_int)

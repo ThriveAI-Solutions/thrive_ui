@@ -46,14 +46,28 @@ def build_judge(model=None) -> Agent:
     return Agent(model, output_type=JudgeVerdict, instructions=JUDGE_INSTRUCTIONS, retries=2)
 
 
-def render_judge_prompt(question: str, answer: str, tool_summaries: list[str]) -> str:
+def render_judge_prompt(
+    question: str,
+    answer: str,
+    tool_summaries: list[str],
+    reviewer_guidance: Optional[str] = None,
+) -> str:
     evidence = "\n".join(f"- {s}" for s in tool_summaries) or "- (no tool calls were made)"
-    return f"QUESTION ASKED:\n{question}\n\nASSISTANT'S REPLY:\n{answer}\n\nTOOL RESULT SUMMARIES:\n{evidence}"
+    prompt = f"QUESTION ASKED:\n{question}\n\nASSISTANT'S REPLY:\n{answer}\n\nTOOL RESULT SUMMARIES:\n{evidence}"
+    if reviewer_guidance:
+        prompt += f"\n\nUSER FEEDBACK CONCERN:\n{reviewer_guidance}"
+    return prompt
 
 
-async def judge_turn(judge, question: str, answer: str, tool_summaries: list[str]) -> Optional[dict]:
+async def judge_turn(
+    judge,
+    question: str,
+    answer: str,
+    tool_summaries: list[str],
+    reviewer_guidance: Optional[str] = None,
+) -> Optional[dict]:
     try:
-        result = await judge.run(render_judge_prompt(question, answer, tool_summaries))
+        result = await judge.run(render_judge_prompt(question, answer, tool_summaries, reviewer_guidance))
         return result.output.model_dump()
     except Exception as exc:
         # Log only the exception type: pydantic-ai error messages can embed

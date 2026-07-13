@@ -68,3 +68,86 @@ Notes:
 - The sample data has empty `status`/`date_stopped` and synthetic (often very
   old) `date_prescribed` values — widen the roster `date_start` if a question
   filters by date.
+
+## Authenticated Evaluation Workspace (in-app)
+
+The CLI above is a developer tool. The **authenticated evaluation workspace**
+is the product surface: admins launch, monitor, and review agent evaluations
+inside the app, and end users leave thumbs feedback on completed agentic
+answers. Design + plan:
+`docs/superpowers/specs/2026-07-10-authenticated-evaluation-workspace-design.md`
+and `docs/superpowers/plans/2026-07-10-authenticated-evaluation-workspace.md`.
+
+### Agentic feedback vs Vanna training
+
+- Thumbs up/down on a **completed agentic answer** (`views/agent_feedback.py`)
+  records *product feedback only* — it is owned by the user who left it,
+  auditable (`thrive_agent_run_feedback` + `_event`), and **never invokes Vanna
+  training**. Only the originating user can change or clear their feedback.
+- The legacy Vanna thumbs/training flow (`views/admin_feedback.py`,
+  `utils.vanna_calls.write_to_file_and_training`) is unchanged and independent.
+
+### Cases: feedback snapshots and curated
+
+- A thumbs-down interaction is snapshotted into an **immutable
+  `EvaluationCase`** (`evals/cases.py::snapshot_feedback_case`) capturing the
+  exact question, patient source_id, history, tool evidence, original answer,
+  and the reviewer's concern. Later feedback edits or log retention cannot
+  change what a re-run replays. If the originating run had
+  `[agent_logging].mode = "disabled"`, exact replay is unavailable and
+  snapshotting raises `SnapshotUnavailable`.
+- Curated cases are the parameterized YAML conversations (same normalization).
+  Promotion (`promote_feedback_case`) generalizes a reviewed feedback case into
+  a **draft curated case** — it persists an app draft and **never edits
+  `evals/questions.yaml`**.
+
+### Synchronous vs asynchronous selection
+
+- Exactly **one feedback case** runs **synchronously** in the request.
+- **Every other selection** — two or more feedback cases, any curated
+  selection, or the full curated suite — runs **asynchronously** on the worker.
+- Only **one active asynchronous run per deployment** is permitted; it is
+  enforced transactionally in SQLite (`BEGIN IMMEDIATE` in the claim), so extra
+  queued runs wait rather than run concurrently.
+
+### Durable statuses, worker, and recovery
+
+- Runs (`thrive_evaluation_run`) and per-case results
+  (`thrive_evaluation_case_result`) are durable, so browser reruns and process
+  restarts never lose progress. Run statuses: `queued`, `running`,
+  `completed`, `completed_with_errors`, `failed`, `cancelled`.
+- A **process-local daemon worker** (`evals/worker.py`) starts once after DB
+  bootstrap (`app.py`), polls every 5 s, claims one queued async run at a time,
+  heartbeats before/after each case, and commits each case result
+  independently. If a worker dies, a run whose heartbeat is older than the
+  timeout (120 s) is requeued and resumes only its unfinished cases. The
+  database claim stays authoritative even if more than one app process runs.
+  Cancellation stops after the current case and marks remaining cases
+  `cancelled`.
+
+### Verdicts, logging mode, and retention
+
+- The local-LLM judge is **triage only** (`looks_correct` / `looks_wrong` /
+  `unsure`). The authoritative verdict is an admin's `correct`, `incorrect`, or
+  `cant_tell`, with full change history in `thrive_evaluation_review_event`.
+- `[agent_logging].mode` fidelity is honored: `scrubbed` snapshots carry only
+  PHI-safe summaries (no full result rows); `disabled` cannot be replayed.
+- Retention: expired case payloads and result rows are purged (case status
+  `expired`); run identity/status/counts/timestamps and review audit rows are
+  always retained.
+- **Notifications are PHI-free** — only run id, status, counts, and timestamps
+  (`Evaluation <run_id> completed: <completed>/<total> cases.`). Production
+  reports remain **authenticated application pages** — the standalone JSON/HTML
+  the CLI writes is a developer capability, never the production report store.
+
+### Worker configuration
+
+Add to `.streamlit/secrets.toml` (defaults shown; the worker runs with these
+even if the section is absent):
+
+```toml
+[agent_evaluations]
+worker_enabled = true
+poll_interval_s = 5
+heartbeat_timeout_s = 120
+```

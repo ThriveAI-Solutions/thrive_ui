@@ -1,6 +1,7 @@
 import enum
 import json
 import os
+import sys
 from decimal import Decimal
 from pathlib import Path
 
@@ -935,3 +936,17 @@ def init_db() -> None:
         seed_initial_data(session)
     finally:
         session.close()
+
+
+# Import extension models once so shared Base.metadata includes them for
+# create_all() callers and Alembic autogeneration without changing runtime paths.
+if "orm.evaluation_models" not in sys.modules:
+    from orm.evaluation_models import (  # noqa: E402,F401
+        AdminNotification,
+        AgentRunFeedback,
+        AgentRunFeedbackEvent,
+        EvaluationCase,
+        EvaluationCaseResult,
+        EvaluationReviewEvent,
+        EvaluationRun,
+    )

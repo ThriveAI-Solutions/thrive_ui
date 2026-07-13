@@ -236,3 +236,5 @@ scripts/synthea/output/
 /sample_warehouse.db
 mempalace.yaml
 .verify-evidence/
+.ma-worktrees/
+.ma/

@@ -16,6 +16,22 @@ def test_prompt_includes_question_answer_and_evidence():
     assert "data_present" in p
 
 
+def test_prompt_includes_reviewer_guidance_when_given():
+    p = render_judge_prompt(
+        question="Q?",
+        answer="A.",
+        tool_summaries=[],
+        reviewer_guidance="User said the date was wrong.",
+    )
+    assert "USER FEEDBACK CONCERN:" in p
+    assert "User said the date was wrong." in p
+
+
+def test_prompt_omits_feedback_concern_section_when_absent():
+    p = render_judge_prompt(question="Q?", answer="A.", tool_summaries=[])
+    assert "USER FEEDBACK CONCERN" not in p
+
+
 def test_judge_turn_returns_verdict_dict():
     judge = build_judge(model=TestModel())
     out = asyncio.run(judge_turn(judge, question="Q?", answer="A.", tool_summaries=[]))

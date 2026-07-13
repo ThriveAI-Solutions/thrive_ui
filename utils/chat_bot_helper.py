@@ -795,6 +795,11 @@ def render_message_group(messages: list, group_index: int, start_index: int, is_
             for i, message in enumerate(messages):
                 render_message(message, start_index + i)
 
+        # Show one agentic feedback control set after a completed grouped answer.
+        from views.agent_feedback import render_agent_feedback_for_group
+
+        render_agent_feedback_for_group(messages)
+
         # Show follow-up button after the last group if it has data results
         if is_last_group and group_has_data_results(messages):
             group_id = getattr(messages[0], "group_id", None)
@@ -1273,6 +1278,7 @@ def add_message(message: Message, render=True):
 
     if len(st.session_state.messages) > 0 and render:
         render_message(st.session_state.messages[-1], len(st.session_state.messages) - 1)
+    return message
 
 
 def add_acknowledgement():

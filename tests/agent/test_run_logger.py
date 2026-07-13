@@ -174,3 +174,42 @@ def test_logging_failure_never_raises(monkeypatch):
     # Force a write error; the call must swallow it.
     monkeypatch.setattr(lg, "session", None)
     lg.log_event("thinking_completed", payload={"t": "x"}, turn_index=1, elapsed_ms=1)  # no raise
+
+
+def test_disabled_mode_persists_minimal_run_identity_only():
+    s = _session()
+    lg = _logger(s, mode="disabled")
+    lg.start_run(
+        question="contains PHI",
+        llm_provider="anthropic",
+        llm_model="claude",
+        selected_patient={"source_id": "src-1", "display_name": "Ann"},
+        group_id="g1",
+        message_history=[{"role": "user", "content": "secret"}],
+    )
+    lg.log_event("thinking_completed", payload={"text": "secret"})
+    lg.log_tool_completed(
+        tool_name="run_sql",
+        tool_call_id="tc-1",
+        turn_index=1,
+        arguments={"sql": "select 'secret'"},
+        result_obj={"rows": [{"name": "Ann"}]},
+        sql_executed=[{"sql": "select 'secret'"}],
+        elapsed_ms=1,
+        success=True,
+        error=None,
+        selected_patient_source_id="src-1",
+    )
+    lg.finalize_run(status="success", final_answer_text="answer", usage={"total_tokens": 99}, total_elapsed_ms=9, cap_reached=None)
+
+    run = s.query(AgentRun).one()
+    assert run.logging_mode == "disabled"
+    assert run.group_id == "g1"
+    assert run.question is None
+    assert run.llm_provider is None
+    assert run.final_answer_text is None
+    assert run.message_history_json is None
+    assert run.selected_patient_source_id is None
+    assert s.query(AgentRunEvent).count() == 0
+    assert s.query(ToolCall).count() == 0
+    assert s.query(AgentPatientAccess).count() == 0
