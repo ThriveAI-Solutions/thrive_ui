@@ -1339,6 +1339,44 @@ def looks_like_model_timeout(e: BaseException) -> bool:
     return "request timed out" in str(e).lower()
 
 
+# Substrings a provider surfaces when the configured/selected model can't be
+# served: Ollama returns `404 {'message': "model 'X' not found", 'type':
+# 'not_found_error'}` and `400 "X" does not support thinking`; OpenAI uses the
+# `model_not_found` code. Matched on the message text (lowercased) because
+# pydantic-ai wraps these as a generic ModelHTTPError whose class name alone
+# doesn't distinguish "unavailable model" from other HTTP failures. Kept
+# specific (not a bare "not found") so ordinary SQL/data errors like "relation
+# not found" don't get misrouted to the model-picker hint. See issue #236.
+_MODEL_UNAVAILABLE_SIGNALS = frozenset(
+    {
+        "not_found_error",
+        "model_not_found",
+        "model not found",
+        "does not support",
+        "no such model",
+    }
+)
+
+
+def looks_like_model_unavailable(e: BaseException) -> bool:
+    """Return True when the failure is the selected/configured LLM model being
+    unavailable (not installed/pulled, unknown, or unsupported for a requested
+    capability) rather than a transient timeout.
+
+    Walks the cause/context chain and matches on message text so it stays
+    independent of pydantic-ai / provider SDK classes on the hot path.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = e
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        text = str(cur).lower()
+        if any(signal in text for signal in _MODEL_UNAVAILABLE_SIGNALS):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
 def normal_message_flow(my_question: str):
     """Top-level entry point — wraps the flow in a safety net so that any
     unexpected exception surfaces as a friendly ERROR card instead of
@@ -1360,7 +1398,14 @@ def normal_message_flow(my_question: str):
         # the first attempt — the generic "Something went wrong" message
         # gave them no signal to wait. Branch the wording so a known-
         # transient cause reads as "wait, then retry" instead of "broken".
-        if looks_like_model_timeout(e):
+        if looks_like_model_unavailable(e):
+            body = (
+                "The selected AI model appears unavailable — it may not be installed on the "
+                "server, or the provider may be misconfigured. Pick a different model under "
+                "Settings → LLM, or check the model set in secrets.toml.\n\n"
+                f"{e}"
+            )
+        elif looks_like_model_timeout(e):
             body = "The AI model is slow or temporarily unreachable. Please wait a moment and try again."
         else:
             body = f"Something went wrong while processing your question.\n\n{e}"

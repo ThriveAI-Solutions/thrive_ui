@@ -69,7 +69,8 @@ def _patch_runtime(monkeypatch, fake_state, runner):
 
     monkeypatch.setattr(runtime_mod, "SessionLocal", lambda: _FakeSession())
     monkeypatch.setattr(runtime_mod, "build_agent_deps", lambda s: MagicMock())
-    monkeypatch.setattr(runtime_mod, "_runner", lambda: runner)
+    # _runner now takes the resolved (provider, model) override (#236).
+    monkeypatch.setattr(runtime_mod, "_runner", lambda *a, **kw: runner)
     monkeypatch.setattr("utils.chat_bot_helper.add_message", lambda *a, **kw: None, raising=False)
 
     class _StSeam:

@@ -193,13 +193,23 @@ class AgenticRunner:
     in AgentDeps, not on the runner.
     """
 
-    def __init__(self, model: Optional[Model] = None) -> None:
+    def __init__(
+        self,
+        model: Optional[Model] = None,
+        *,
+        provider_override: str | None = None,
+        model_override: str | None = None,
+    ) -> None:
         # retries=5: small local models (qwen3.6:27b, gemma) often need
         # several attempts to produce a valid date_range / array shape
         # for the discriminated-union clinical query. Two retries was
         # too tight — well-routed runs were aborting on a 3rd malformed
         # call. See the regression run notes in the Phase 2 plan.
-        model_obj = model or build_model()
+        #
+        # `model` is a fully-built Model for test injection and wins outright.
+        # Otherwise build from secrets, letting the caller override just the
+        # provider/model identity to honor the user's in-app selection (#236).
+        model_obj = model or build_model(provider=provider_override, model=model_override)
         self._agent: Agent[AgentDeps, AgentResponse] = Agent(
             model=model_obj,
             deps_type=AgentDeps,

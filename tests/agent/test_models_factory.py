@@ -56,6 +56,52 @@ def test_build_model_unknown_provider_raises(monkeypatch):
         build_model()
 
 
+# --- Issue #236: caller can override the secrets provider/model -------------
+
+
+def test_build_model_model_override_wins_over_secrets(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {"ai_keys": {"provider": "ollama", "ollama_model": "secrets-model"}},
+    )
+    model = build_model(provider="ollama", model="picked-model")
+    assert model.model_name == "picked-model"
+
+
+def test_build_model_no_override_uses_secrets_model(monkeypatch):
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {"ai_keys": {"provider": "ollama", "ollama_model": "secrets-model"}},
+    )
+    assert build_model().model_name == "secrets-model"
+
+
+def test_build_model_provider_override_switches_provider(monkeypatch):
+    # Secrets say ollama, but the caller selected an anthropic model.
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {
+            "ai_keys": {
+                "provider": "ollama",
+                "ollama_model": "secrets-model",
+                "anthropic_api_key": "sk-test",
+                "anthropic_model": "secrets-anthropic",
+            }
+        },
+    )
+    model = build_model(provider="anthropic", model="claude-picked")
+    assert model.model_name == "claude-picked"
+
+
+def test_build_model_partial_override_keeps_secrets_provider(monkeypatch):
+    # Only the model is overridden; provider still comes from secrets.
+    monkeypatch.setattr(
+        "agent.models._read_secrets",
+        lambda: {"ai_keys": {"provider": "ollama", "ollama_model": "secrets-model"}},
+    )
+    assert build_model(model="picked-model").model_name == "picked-model"
+
+
 def _ollama_secrets(model_name: str, agent_cfg: dict) -> dict:
     return {
         "ai_keys": {"provider": "ollama", "ollama_model": model_name},

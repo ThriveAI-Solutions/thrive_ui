@@ -668,3 +668,83 @@ def test_safety_net_renders_model_slow_message_for_timeout(monkeypatch):
     # Must NOT leak the raw exception text into the user-facing message —
     # the whole point is to replace "Request timed out." with actionable copy.
     assert "Request timed out" not in body
+
+
+# --- Issue #236: unavailable-model error UX ----------------------------------
+
+
+def test_looks_like_model_unavailable_positive():
+    """The real provider phrasings for an unservable model must all match."""
+    import utils.chat_bot_helper as cbh
+
+    cases = [
+        # Ollama 404 body: type=not_found_error
+        "status_code: 404, body: {'message': \"model 'gpt-oss:20b' not found\", 'type': 'not_found_error'}",
+        # Ollama 400 unsupported capability
+        'status_code: 400, body: {\'message\': \'"qwen3-coder-hermes:latest" does not support thinking\'}',
+        # OpenAI-style error code
+        "Error code: 404 - {'error': {'code': 'model_not_found'}}",
+        "No such model: foo",
+    ]
+    for msg in cases:
+        assert cbh.looks_like_model_unavailable(RuntimeError(msg)), f"expected match for: {msg!r}"
+
+
+def test_looks_like_model_unavailable_walks_chain():
+    """The signal may be on a wrapped cause, not the outer exception."""
+    import utils.chat_bot_helper as cbh
+
+    inner = type("ModelHTTPError", (Exception,), {})("body: {'type': 'not_found_error'}")
+    try:
+        try:
+            raise inner
+        except Exception as e:
+            raise RuntimeError("agent run failed") from e
+    except RuntimeError as e:
+        outer = e
+
+    assert cbh.looks_like_model_unavailable(outer)
+
+
+def test_looks_like_model_unavailable_negative():
+    """Timeouts and ordinary data errors must NOT be misclassified — otherwise a
+    SQL 'relation not found' would tell the user to pick a different model."""
+    import utils.chat_bot_helper as cbh
+
+    assert not cbh.looks_like_model_unavailable(RuntimeError("Request timed out."))
+    assert not cbh.looks_like_model_unavailable(RuntimeError('relation "patients" not found'))
+    assert not cbh.looks_like_model_unavailable(ValueError("column not found"))
+    assert not cbh.looks_like_model_unavailable(RuntimeError("kaboom from generate_sql"))
+
+
+class _RaisesModelNotFound:
+    """Mock VannaService that raises an Ollama-shaped 404 model-not-found."""
+
+    def is_sql_valid(self, sql):
+        return True
+
+    def generate_sql(self, question):
+        raise type("ModelHTTPError", (Exception,), {})(
+            "status_code: 404, body: {'message': \"model 'gpt-oss:20b' not found\", 'type': 'not_found_error'}"
+        )
+
+
+def test_safety_net_renders_model_unavailable_message(monkeypatch):
+    """A model-not-found failure must surface the actionable 'pick another model
+    / check secrets.toml' copy, not the generic or timeout message."""
+    import utils.chat_bot_helper as cbh
+
+    fake_st = _fake_st()
+    monkeypatch.setattr(cbh, "st", fake_st)
+    monkeypatch.setattr(cbh.Message, "save", lambda self: self, raising=True)
+    monkeypatch.setattr(cbh, "get_vn", lambda: _RaisesModelNotFound())
+
+    cbh.set_question("Q with bad model", render=False)
+    cbh.normal_message_flow("Q with bad model")  # must not raise
+
+    error_msgs = [m for m in fake_st.session_state["messages"] if getattr(m, "type", None) == "error"]
+    assert error_msgs, "expected a friendly ERROR message"
+    body = error_msgs[-1].content.lower()
+    assert "unavailable" in body and "settings" in body and "secrets.toml" in body, (
+        f"unavailable-model body should point to the picker + secrets; got: {body!r}"
+    )

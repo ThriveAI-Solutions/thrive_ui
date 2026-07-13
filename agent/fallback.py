@@ -109,9 +109,11 @@ async def classify_answer_adequacy(
     orchestrator can fail-closed.
 
     The ``model`` kwarg exists for test injection. In production, leave it
-    ``None`` and the function builds the configured model via
-    ``agent.models.build_model()`` — so the user's selected provider /
-    model is honored implicitly.
+    ``None`` and the function builds the model via
+    ``agent.models.build_model()`` using the secrets defaults. Note this
+    classifier always runs on the secrets-configured model — the user's
+    in-app model selection (#236) is threaded into the main agent runner, not
+    into this fallback classifier.
 
     When ``scrubbed=True`` the prompt should be PHI-scrubbed before the
     LLM call. Real wiring deferred — see TODO below.

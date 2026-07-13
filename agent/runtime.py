@@ -172,10 +172,40 @@ def _maybe_invoke_vanna_fallback(
         logger.exception("Vanna fallback invocation failed")
 
 
+def _selected_model() -> tuple[str | None, str | None]:
+    """Resolve the user's in-app LLM selection into a (provider, model) pair to
+    override the secrets defaults (issue #236).
+
+    Returns the persisted ``selected_llm_provider`` / ``selected_llm_model``
+    only when the provider is a real, *configured* registry provider; otherwise
+    ``(None, None)`` so the agent falls back to the secrets model. Model
+    availability is NOT checked here (that would cost a network round-trip on
+    every selection change) — an unavailable model surfaces as a graceful error
+    at run time instead.
+    """
+    provider = st.session_state.get("selected_llm_provider")
+    model = st.session_state.get("selected_llm_model")
+    if not provider or not model:
+        return (None, None)
+    try:
+        from utils.llm_registry.registry import get_registry
+
+        prov = get_registry().get_provider(provider)
+        if prov is None or not prov.is_configured(dict(st.secrets)):
+            return (None, None)
+    except Exception:
+        # Registry/secrets hiccup must never break a run — just fall back.
+        return (None, None)
+    return (provider, model)
+
+
 @st.cache_resource
-def _runner() -> AgenticRunner:
+def _runner(provider: str | None = None, model: str | None = None) -> AgenticRunner:
+    # Keyed on (provider, model): a new selection builds a fresh runner rather
+    # than reusing the cached singleton, so switching models in the UI actually
+    # takes effect. (None, None) is the secrets-driven default.
     configure_observability()
-    return AgenticRunner()
+    return AgenticRunner(provider_override=provider, model_override=model)
 
 
 _LOOP: asyncio.AbstractEventLoop | None = None
@@ -263,7 +293,7 @@ def run_agentic_message_flow(my_question: str) -> None:
         # not touch it from this (calling) thread once produce() owns it.
         sqlite_session = SessionLocal()
         deps = build_agent_deps(sqlite_session)
-        runner = _runner()
+        runner = _runner(*_selected_model())
         prior_history = st.session_state.get("agent_message_history") or None
 
         # Hand events from the loop thread back to this script thread. We
