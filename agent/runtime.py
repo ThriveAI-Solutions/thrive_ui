@@ -195,9 +195,7 @@ def _selected_model() -> tuple[str | None, str | None]:
     if not provider or not model:
         return (None, None)
     if provider not in SUPPORTED_PROVIDERS:
-        logger.debug(
-            "Agent doesn't support selected provider %r; falling back to the secrets model.", provider
-        )
+        logger.debug("Agent doesn't support selected provider %r; falling back to the secrets model.", provider)
         return (None, None)
     try:
         from utils.llm_registry.registry import get_registry
