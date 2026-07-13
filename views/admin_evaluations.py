@@ -19,6 +19,7 @@ import streamlit as st
 from evals.cases import CuratedCaseDraft, SnapshotUnavailable, promote_feedback_case, snapshot_feedback_case
 from orm.evaluation_functions import (
     EvaluationServiceError,
+    activate_curated_case,
     get_evaluation_run_report,
     launch_evaluation,
     list_admin_notifications,
@@ -196,10 +197,36 @@ def _render_feedback_source(admin_id: int, days_int: int) -> None:
             _launch(case_ids, admin_id)
 
 
+def _render_curated_drafts(admin_id: int, drafts: list[dict]) -> None:
+    """Show promoted-but-inactive curated drafts, each with an activation button.
+
+    Activating flips the draft to ``active`` so it joins the runnable suite."""
+    if not drafts:
+        return
+    with st.expander(f"Draft curated cases ({len(drafts)}) — review, then activate", expanded=False):
+        st.caption("Promoted feedback cases are saved as drafts. Activate one to add it to the runnable suite.")
+        for draft in drafts:
+            cols = st.columns([0.8, 0.2])
+            cols[0].write(draft["title"] or draft["case_id"])
+            if cols[1].button("Activate", key=f"activate_draft_{draft['id']}"):
+                try:
+                    activate_curated_case(draft["id"], admin_id)
+                except EvaluationServiceError as exc:
+                    st.error(str(exc))
+                else:
+                    st.toast("Curated case activated.")
+                    st.rerun()
+
+
 def _render_curated_source(admin_id: int) -> None:
-    cases = list_curated_cases(admin_id)
+    all_cases = list_curated_cases(admin_id, include_drafts=True)
+    drafts = [c for c in all_cases if c["status"] == "draft"]
+    cases = [c for c in all_cases if c["status"] == "active"]
+
+    _render_curated_drafts(admin_id, drafts)
+
     if not cases:
-        st.info("No active curated evaluation cases. Promote a reviewed feedback case to build the suite.")
+        st.info("No active curated evaluation cases. Promote a reviewed feedback case, then activate the draft.")
         return
 
     df = pd.DataFrame(cases)

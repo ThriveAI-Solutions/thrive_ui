@@ -232,9 +232,7 @@ def record_final_verdict(
     with SessionLocal() as session:
         try:
             _require_admin(session, admin_user_id)
-            result = (
-                session.query(EvaluationCaseResult).filter(EvaluationCaseResult.id == result_id).one_or_none()
-            )
+            result = session.query(EvaluationCaseResult).filter(EvaluationCaseResult.id == result_id).one_or_none()
             if result is None:
                 raise EvaluationServiceError(f"Evaluation result {result_id} not found.")
             old_verdict = result.final_verdict
@@ -277,9 +275,7 @@ def _persist_case_execution(session: Session, run: EvaluationRun, result: Evalua
     increment)."""
     result.status = execution.status  # "completed" | "failed"
     result.completed_at = datetime.now(timezone.utc)
-    result.result_json = json.dumps(
-        {"patient": execution.patient, "turns": list(execution.turns)}, default=str
-    )
+    result.result_json = json.dumps({"patient": execution.patient, "turns": list(execution.turns)}, default=str)
     result.error_type = execution.error_type
     result.error_message = execution.error_message
     if execution.status == "completed":
@@ -383,9 +379,7 @@ async def run_evaluation_cases(run_id: str, resources, *, heartbeat=None) -> Eva
                 session.commit()
                 return view
 
-            case_row = (
-                session.query(EvaluationCase).filter(EvaluationCase.id == result.evaluation_case_id).one()
-            )
+            case_row = session.query(EvaluationCase).filter(EvaluationCase.id == result.evaluation_case_id).one()
             payload = json.loads(case_row.payload_json)
             result.status = "running"
             result.started_at = datetime.now(timezone.utc)
@@ -715,6 +709,35 @@ def list_curated_cases(admin_user_id: int, include_drafts: bool = False) -> list
                 pass
             out.append({"id": case.id, "case_id": case.case_id, "status": case.status, "title": title})
         return out
+
+
+def activate_curated_case(case_id: int, admin_user_id: int) -> None:
+    """Promote a draft curated case to ``active`` so it joins the runnable suite.
+
+    Idempotent for already-active cases; raises if the case is missing, not
+    curated, or in a non-activatable status (e.g. ``expired``)."""
+    with SessionLocal() as session:
+        try:
+            _require_admin(session, admin_user_id)
+            case = (
+                session.query(EvaluationCase)
+                .filter(
+                    EvaluationCase.id == case_id,
+                    EvaluationCase.source_type == "curated",
+                )
+                .one_or_none()
+            )
+            if case is None:
+                raise EvaluationServiceError("Curated case not found.")
+            if case.status == "active":
+                return
+            if case.status != "draft":
+                raise EvaluationServiceError(f"Only draft curated cases can be activated (status: {case.status}).")
+            case.status = "active"
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
 
 
 def launch_evaluation(case_ids: list[int], admin_user_id: int, resources=None) -> EvaluationRunView:
