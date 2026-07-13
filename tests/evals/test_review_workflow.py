@@ -152,3 +152,99 @@ def test_final_verdict_flows_into_report(eval_db, monkeypatch):
     report = get_evaluation_run_report(run_id, admin_id)
     assert report["cases"][0]["final_verdict"] == "incorrect"
     assert report["cases"][0]["review_note"] == "date wrong"
+
+
+def _curated_draft(session, admin_id, case_id="cd1"):
+    payload = NormalizedCase(
+        case_id=case_id,
+        version=1,
+        source_type="curated",
+        title="draft title",
+        patient_source_id="",
+        patient_label="",
+        turns=(NormalizedTurn(role="main", prompt="Reusable Q?"),),
+    ).to_payload()
+    case = EvaluationCase(
+        case_id=case_id,
+        version=1,
+        source_type="curated",
+        status="draft",
+        payload_json=json.dumps(payload),
+        created_by=admin_id,
+    )
+    session.add(case)
+    session.flush()
+    return case
+
+
+def test_activate_curated_case_flips_draft_to_active(eval_db):
+    from orm.evaluation_functions import activate_curated_case, list_curated_cases
+
+    with eval_db() as s:
+        admin = _user(s, role=RoleTypeEnum.ADMIN, username="admin")
+        draft = _curated_draft(s, admin.id)
+        s.commit()
+        admin_id, case_pk = admin.id, draft.id
+
+    # Draft absent from the active suite, present once drafts are included.
+    assert list_curated_cases(admin_id) == []
+    assert [c["status"] for c in list_curated_cases(admin_id, include_drafts=True)] == ["draft"]
+
+    activate_curated_case(case_pk, admin_id)
+
+    active = list_curated_cases(admin_id)
+    assert [c["id"] for c in active] == [case_pk]
+    assert active[0]["status"] == "active"
+
+
+def test_activate_curated_case_is_idempotent(eval_db):
+    from orm.evaluation_functions import activate_curated_case
+
+    with eval_db() as s:
+        admin = _user(s, role=RoleTypeEnum.ADMIN, username="admin")
+        draft = _curated_draft(s, admin.id)
+        s.commit()
+        admin_id, case_pk = admin.id, draft.id
+
+    activate_curated_case(case_pk, admin_id)
+    activate_curated_case(case_pk, admin_id)  # no error the second time
+
+
+def test_activate_curated_case_rejects_missing(eval_db):
+    from orm.evaluation_functions import EvaluationServiceError, activate_curated_case
+
+    with eval_db() as s:
+        admin = _user(s, role=RoleTypeEnum.ADMIN, username="admin")
+        s.commit()
+        admin_id = admin.id
+
+    with pytest.raises(EvaluationServiceError):
+        activate_curated_case(9999, admin_id)
+
+
+def test_activate_curated_case_rejects_expired(eval_db):
+    from orm.evaluation_functions import EvaluationServiceError, activate_curated_case
+
+    with eval_db() as s:
+        admin = _user(s, role=RoleTypeEnum.ADMIN, username="admin")
+        draft = _curated_draft(s, admin.id)
+        draft.status = "expired"
+        s.commit()
+        admin_id, case_pk = admin.id, draft.id
+
+    with pytest.raises(EvaluationServiceError):
+        activate_curated_case(case_pk, admin_id)
+
+
+def test_activate_curated_case_rejects_non_admin(eval_db):
+    from orm.evaluation_functions import activate_curated_case
+
+    with eval_db() as s:
+        admin = _user(s, role=RoleTypeEnum.ADMIN, username="admin")
+        doctor = _user(s, role=RoleTypeEnum.DOCTOR, username="doc")
+        draft = _curated_draft(s, admin.id)
+        s.commit()
+        doc_id, case_pk = doctor.id, draft.id
+
+    with pytest.raises(PermissionError):
+        activate_curated_case(case_pk, doc_id)
