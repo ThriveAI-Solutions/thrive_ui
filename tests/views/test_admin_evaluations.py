@@ -37,6 +37,24 @@ def test_guard_allows_admin(fake_st):
     ae._guard_admin()  # no raise
 
 
+def test_admin_id_reads_json_cookie(fake_st):
+    # Local auth stores user_id in the cookie manager as a JSON string, not
+    # directly in session_state — _admin_id must resolve it or every
+    # service call fails admin authorization.
+    fake_st.session_state["cookies"] = {"user_id": "16"}
+    assert ae._admin_id() == 16
+
+
+def test_admin_id_prefers_direct_session_value(fake_st):
+    fake_st.session_state["user_id"] = 7
+    fake_st.session_state["cookies"] = {"user_id": "16"}
+    assert ae._admin_id() == 7
+
+
+def test_admin_id_defaults_to_zero_when_absent(fake_st):
+    assert ae._admin_id() == 0
+
+
 def test_single_case_launch_is_synchronous_and_routes_to_report(fake_st, monkeypatch):
     view = types.SimpleNamespace(run_id="r1", execution_mode="synchronous", status="completed", total_cases=1)
     calls = {}

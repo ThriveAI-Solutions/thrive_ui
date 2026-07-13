@@ -11,6 +11,8 @@ not the only gate.
 
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import streamlit as st
 
@@ -42,7 +44,32 @@ def _guard_admin() -> None:
 
 
 def _admin_id() -> int:
-    return int(st.session_state.get("user_id") or 0)
+    """Resolve the logged-in admin's user id.
+
+    The local-auth flow stores the id in the cookie manager as a JSON string
+    (``orm.functions.verify_user_credentials``), not directly in session_state,
+    so reading only ``session_state['user_id']`` always yielded 0 and every
+    service call failed database-backed admin authorization. Mirror the
+    resolution the rest of the app uses (see ``views.agent_feedback``): prefer a
+    direct session_state value, then fall back to the JSON-encoded cookie.
+    """
+    direct = st.session_state.get("user_id")
+    if direct is not None:
+        try:
+            return int(direct)
+        except (TypeError, ValueError):
+            pass
+    cookies = st.session_state.get("cookies")
+    raw = cookies.get("user_id") if cookies is not None else None
+    if raw is not None:
+        try:
+            return int(json.loads(raw))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            try:
+                return int(raw)
+            except (TypeError, ValueError):
+                pass
+    return 0
 
 
 # --------------------------------------------------------------------------- #
