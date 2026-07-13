@@ -32,6 +32,12 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 
 ModelProvider = Literal["ollama", "anthropic", "bedrock"]
 
+# Providers build_model() can actually construct. The in-app model picker's
+# registry offers others (e.g. openai, used by the legacy Vanna path), so
+# callers threading a user selection must gate on this set — otherwise an
+# unsupported provider id falls through to build_model's ValueError. See #236.
+SUPPORTED_PROVIDERS: frozenset[str] = frozenset({"ollama", "anthropic", "bedrock"})
+
 
 # Default 2 in both the openai and anthropic SDKs. Bumped to 3 to absorb one
 # more transient blip from a busy Ollama / Anthropic endpoint without
@@ -127,19 +133,25 @@ def _ollama_http_client() -> httpx.AsyncClient:
     )
 
 
-def build_model() -> Any:
+def build_model(provider: str | None = None, model: str | None = None) -> Any:
     """Return a configured Pydantic AI Model for the active provider.
 
-    Provider is determined by ``ai_keys.provider`` in secrets.toml.
-    Supported values: ``ollama``, ``anthropic``, ``bedrock``.
+    Provider defaults to ``ai_keys.provider`` in secrets.toml and the model to
+    the provider's ``ai_keys.*_model`` line. Both can be overridden by the
+    caller — this is how the agent honors the user's in-app model selection
+    (issue #236): only the provider+model *identity* is overridden, while
+    credentials (``ollama_host``, api keys, region) and thinking config stay
+    sourced from secrets. Passing ``None`` for either keeps the secrets value.
+
+    Supported providers: ``ollama``, ``anthropic``, ``bedrock``.
     """
     secrets = _read_secrets()
     ai_keys = secrets.get("ai_keys", {})
-    provider = ai_keys.get("provider")
+    provider = provider or ai_keys.get("provider")
 
     if provider == "ollama":
         host = ai_keys.get("ollama_host", "http://localhost:11434")
-        model_name = ai_keys.get("ollama_model", "qwen3.6:27b")
+        model_name = model or ai_keys.get("ollama_model", "qwen3.6:27b")
         # Use `reasoning_effort` (Ollama OpenAI-compat documented field) to
         # control thinking, not the native /api/chat `think` boolean.
         # Verified empirically against qwen3.6:27b on Ollama 0.23.2:
@@ -183,7 +195,7 @@ def build_model() -> Any:
 
     if provider == "anthropic":
         api_key = ai_keys.get("anthropic_api_key") or ai_keys.get("anthropic_api")
-        model_name = ai_keys.get("anthropic_model", "claude-sonnet-4-6")
+        model_name = model or ai_keys.get("anthropic_model", "claude-sonnet-4-6")
         anthropic_client = AsyncAnthropic(
             api_key=api_key,
             max_retries=_model_max_retries(secrets),
@@ -199,7 +211,7 @@ def build_model() -> Any:
         from pydantic_ai.models.bedrock import BedrockConverseModel
         from pydantic_ai.providers.bedrock import BedrockProvider
 
-        model_id = ai_keys.get("bedrock_model_id", "anthropic.claude-sonnet-4-6-v1:0")
+        model_id = model or ai_keys.get("bedrock_model_id", "anthropic.claude-sonnet-4-6-v1:0")
         region = ai_keys.get("aws_region", "us-east-1")
         return BedrockConverseModel(
             model_id,

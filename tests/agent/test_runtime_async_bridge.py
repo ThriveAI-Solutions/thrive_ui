@@ -143,7 +143,7 @@ def test_run_agentic_flow_closes_sqlite_session_on_exception(monkeypatch):
             raise RuntimeError("simulated agent failure")
             yield  # unreachable, makes this an async generator
 
-    monkeypatch.setattr(runtime_mod, "_runner", lambda: _BoomRunner())
+    monkeypatch.setattr(runtime_mod, "_runner", lambda *a, **kw: _BoomRunner())
     # Avoid touching st.session_state in add_message
     monkeypatch.setattr("utils.chat_bot_helper.add_message", lambda *a, **kw: None, raising=False)
 
