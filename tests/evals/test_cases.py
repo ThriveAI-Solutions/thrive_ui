@@ -115,6 +115,26 @@ class TestSnapshotFeedbackCase:
         assert "incorrect_answer" in payload["reviewer_guidance"]
         assert "Wrong date" in payload["reviewer_guidance"]
 
+    def test_summary_string_message_history_is_dropped_not_exploded(self, session_factory):
+        # The runtime logs message_history as a summary string
+        # ("N prior messages", agent/runner.py), not a list. tuple() over that
+        # string would explode it into single characters and crash every replay
+        # with "'str' object has no attribute 'conversation_id'". The snapshot
+        # must drop it to an empty history instead.
+        with session_factory() as session:
+            admin = _make_user(session, role=RoleTypeEnum.ADMIN, username="admin1")
+            owner = _make_user(session, role=RoleTypeEnum.DOCTOR, username="doc1")
+            run = _make_run(session, user=owner)
+            run.message_history_json = json.dumps("5 prior messages")
+            session.flush()
+            feedback = _make_feedback(session, run=run, user=owner)
+            session.commit()
+            feedback_id, admin_id = feedback.id, admin.id
+
+        case = snapshot_feedback_case(feedback_id, admin_id)
+        payload = json.loads(case.payload_json)
+        assert payload["message_history"] == []
+
     def test_immutable_after_feedback_changes(self, session_factory):
         with session_factory() as session:
             admin = _make_user(session, role=RoleTypeEnum.ADMIN, username="admin2")

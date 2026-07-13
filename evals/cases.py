@@ -191,12 +191,24 @@ def snapshot_feedback_case(feedback_id: int, admin_user_id: int) -> EvaluationCa
         if not run.final_answer_text:
             raise SnapshotUnavailable("The originating run has no final answer to replay.")
 
+        # The runtime logs message history as a human-readable SUMMARY string
+        # ("N prior messages", see agent/runner.py) — never serialized
+        # ModelMessage objects. So message_history_json is a JSON string, not a
+        # replayable list. Accept only a genuine list of message dicts; anything
+        # else (the summary string) must be dropped, because tuple() would
+        # explode it into single characters and feed them to pydantic-ai as
+        # bogus messages, crashing every replay with
+        # "'str' object has no attribute 'conversation_id'". Exact replay
+        # re-resolves the persisted patient and re-asks the question; the prior
+        # conversational context is not reconstructable from the log.
         message_history: list = []
         if run.message_history_json:
             try:
-                message_history = json.loads(run.message_history_json)
+                decoded = json.loads(run.message_history_json)
             except (TypeError, ValueError):
-                message_history = []
+                decoded = None
+            if isinstance(decoded, list) and all(isinstance(m, dict) for m in decoded):
+                message_history = decoded
 
         reviewer_guidance = feedback.comment or ""
         if feedback.category:
