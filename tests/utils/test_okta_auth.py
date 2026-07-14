@@ -465,7 +465,7 @@ def test_populate_session_state_from_user_writes_expected_keys(in_memory_orm_ses
 
 
 def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_session):
-    """If st.user.is_logged_in is False, render a login button and stop the page."""
+    """After an auto-login attempt, an unauthenticated rerun renders the button."""
     from types import SimpleNamespace
     from unittest.mock import MagicMock, patch
 
@@ -478,6 +478,9 @@ def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_se
 
     with (
         patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", {"_oidc_auto_login_attempted": True}),
+        patch("streamlit.query_params", {}),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
         patch("streamlit.button", button_mock),
         patch("streamlit.login", login_mock),
         patch("streamlit.stop", stop_mock),
@@ -508,6 +511,9 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
 
     with (
         patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", {"_oidc_auto_login_attempted": True}),
+        patch("streamlit.query_params", {}),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
         patch("streamlit.button", button_mock),
         patch("streamlit.login", login_mock),
         patch("streamlit.stop", MagicMock(side_effect=SystemExit)),
@@ -520,6 +526,7 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
             pass
 
     login_mock.assert_called_once()
+    button_mock.assert_called_once()  # login came from the click, not auto
 
 
 def test_handle_oidc_auth_when_logged_in_runs_sync_and_populates_state(
@@ -894,3 +901,198 @@ def test_organization_from_email_helper_handles_subdomain():
     # Malformed cases fall back to "unknown" — defensive, not user-facing.
     assert _organization_from_email("no-at-symbol") == "unknown"
     assert _organization_from_email("foo@") == "unknown"
+
+
+# ── Auto-login (seamless SSO): st.login() fires without a button click ────
+
+
+def _not_logged_in_patches(session_state, query_params, secrets):
+    """Common patch set for the not-logged-in handle_oidc_auth paths."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    fake_user = SimpleNamespace(is_logged_in=False)
+    mocks = SimpleNamespace(
+        button=MagicMock(return_value=False),
+        login=MagicMock(),
+        stop=MagicMock(side_effect=SystemExit),
+    )
+    patches = [
+        patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", session_state),
+        patch("streamlit.query_params", query_params),
+        patch("streamlit.secrets", new=secrets),
+        patch("streamlit.button", mocks.button),
+        patch("streamlit.login", mocks.login),
+        patch("streamlit.stop", mocks.stop),
+        patch("streamlit.title"),
+        patch("streamlit.markdown"),
+    ]
+    return patches, mocks
+
+
+def test_handle_oidc_auth_auto_login_fires_without_button(in_memory_orm_session):
+    """Fresh unauthenticated session → st.login() is called immediately, no button."""
+    import contextlib
+
+    from utils.okta_auth import handle_oidc_auth
+
+    session_state = {}
+    patches, mocks = _not_logged_in_patches(session_state, {}, {"auth": {"mode": "oidc"}})
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+
+    mocks.login.assert_called_once()
+    mocks.button.assert_not_called()
+    mocks.stop.assert_called_once()
+    assert session_state.get("_oidc_auto_login_attempted") is True
+
+
+def test_handle_oidc_auth_auto_login_only_once_per_session(in_memory_orm_session):
+    """If auto-login was already attempted this session, fall back to the button."""
+    import contextlib
+
+    from utils.okta_auth import handle_oidc_auth
+
+    session_state = {"_oidc_auto_login_attempted": True}
+    patches, mocks = _not_logged_in_patches(session_state, {}, {"auth": {"mode": "oidc"}})
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+
+
+def test_handle_oidc_auth_no_auto_login_after_logout(in_memory_orm_session):
+    """Arriving with ?logged_out=1 (post-logout) must not silently re-login."""
+    import contextlib
+
+    from utils.okta_auth import handle_oidc_auth
+
+    session_state = {}
+    patches, mocks = _not_logged_in_patches(session_state, {"logged_out": "1"}, {"auth": {"mode": "oidc"}})
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+
+
+def test_handle_oidc_auth_auto_login_disabled_by_config(in_memory_orm_session):
+    """[auth].auto_login = false restores the button-first behavior."""
+    import contextlib
+
+    from utils.okta_auth import handle_oidc_auth
+
+    session_state = {}
+    patches, mocks = _not_logged_in_patches(session_state, {}, {"auth": {"mode": "oidc", "auto_login": False}})
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+
+
+def test_handle_oidc_logout_appends_logged_out_param_for_self_redirect(in_memory_orm_session):
+    """When post-logout lands back on our own host, tag it so auto-login stands down."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+    markdown_mock = MagicMock()
+
+    secrets = {
+        "auth": {
+            "post_logout_redirect_url": "https://wnyhealtheintelligence.com/",
+            "redirect_uri": "https://wnyhealtheintelligence.com/oauth2callback",
+        }
+    }
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown", markdown_mock),
+        patch("streamlit.secrets", new=secrets),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
+
+    redirect_calls = [str(c) for c in markdown_mock.call_args_list if "http-equiv" in str(c)]
+    assert redirect_calls, "expected a meta-refresh redirect"
+    assert any("logged_out=1" in c for c in redirect_calls)
+
+
+def test_handle_oidc_logout_foreign_redirect_left_untouched(in_memory_orm_session):
+    """A foreign post-logout URL (e.g. the HeC Portal) gets no logged_out param."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+    markdown_mock = MagicMock()
+
+    secrets = {
+        "auth": {
+            "post_logout_redirect_url": "https://portal.example/",
+            "redirect_uri": "https://wnyhealtheintelligence.com/oauth2callback",
+        }
+    }
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown", markdown_mock),
+        patch("streamlit.secrets", new=secrets),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
+
+    redirect_calls = [str(c) for c in markdown_mock.call_args_list if "http-equiv" in str(c)]
+    assert redirect_calls, "expected a meta-refresh redirect"
+    assert any("https://portal.example/" in c for c in redirect_calls)
+    assert not any("logged_out" in c for c in redirect_calls)
+
+
+def test_handle_oidc_logout_unconfigured_url_still_tags_logged_out(in_memory_orm_session):
+    """No post_logout_redirect_url → redirect to the app itself with ?logged_out=1."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+    markdown_mock = MagicMock()
+
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown", markdown_mock),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
+
+    redirect_calls = [str(c) for c in markdown_mock.call_args_list if "http-equiv" in str(c)]
+    assert redirect_calls, "expected a meta-refresh redirect even with no configured URL"
+    assert any("logged_out=1" in c for c in redirect_calls)

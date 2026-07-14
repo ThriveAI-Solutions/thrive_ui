@@ -69,6 +69,16 @@ DEFAULT_ROLE_IF_NO_GROUP_MATCH: RoleTypeEnum = RoleTypeEnum.DOCTOR
 # password login while still satisfying legacy SQLite NOT NULL schemas.
 OIDC_PASSWORD_SENTINEL = "__OIDC_AUTH_ONLY__"
 
+# Session-state marker: auto-login is attempted at most once per Streamlit
+# session so a user who bounces back unauthenticated gets the button, not a
+# redirect loop.
+AUTO_LOGIN_ATTEMPTED_KEY = "_oidc_auto_login_attempted"
+
+# Query param set by our own logout redirect. Its presence suppresses
+# auto-login — st.logout() clears only our cookie, not Okta's session, so
+# without this a logout would silently sign the user straight back in.
+LOGGED_OUT_QUERY_PARAM = "logged_out"
+
 
 def auth_secrets_section() -> Mapping[str, Any] | None:
     """Return Streamlit ``[auth]`` as a mapping, or None if missing or invalid.
@@ -353,10 +363,53 @@ def populate_session_state_from_user(user) -> None:
         logger.warning("set_user_preferences_in_session_state failed: %s", exc)
 
 
+def _should_auto_login() -> bool:
+    """True when an unauthenticated visit should be sent straight to Okta.
+
+    Auto-login is on by default (``[auth].auto_login = false`` disables it)
+    and stands down when this session already attempted it or when the user
+    just logged out (``?logged_out=1``).
+    """
+    import streamlit as st
+
+    auth = auth_secrets_section()
+    if auth is not None and not auth.get("auto_login", True):
+        return False
+    try:
+        if st.query_params.get(LOGGED_OUT_QUERY_PARAM):
+            return False
+    except Exception:  # pragma: no cover - query params unavailable (bare mode)
+        pass
+    return not st.session_state.get(AUTO_LOGIN_ATTEMPTED_KEY, False)
+
+
+def _post_logout_redirect_target() -> str:
+    """Where the logout meta-refresh should send the browser.
+
+    Redirects that land back on this app (or an unconfigured URL, which
+    defaults to the app itself) carry ``?logged_out=1`` so auto-login does
+    not immediately sign the user back in. Foreign URLs (e.g. the HeC
+    Portal) are passed through untouched.
+    """
+    from urllib.parse import urlsplit
+
+    auth = auth_secrets_section()
+    configured = (auth.get("post_logout_redirect_url") or "").strip() if auth is not None else ""
+    if not configured:
+        return f"?{LOGGED_OUT_QUERY_PARAM}=1"
+    redirect_uri = (auth.get("redirect_uri") or "").strip() if auth is not None else ""
+    if redirect_uri and urlsplit(configured).netloc == urlsplit(redirect_uri).netloc:
+        sep = "&" if "?" in configured else "?"
+        return f"{configured}{sep}{LOGGED_OUT_QUERY_PARAM}=1"
+    return configured
+
+
 def handle_oidc_auth() -> None:
     """OIDC entry point. Called from utils/auth.check_authenticate when in OIDC mode.
 
-    If the user is not logged in, render a single SSO button and stop the page.
+    If the user is not logged in, redirect to Okta immediately (auto-login);
+    the SSO button renders only as a fallback — after a logout, after a failed
+    auto attempt, or when ``[auth].auto_login = false``.
     If the user is logged in, sync the User row, populate session state, and
     render the sidebar welcome banner + Log Out button (replacing what
     _handle_local_auth does in the local path).
@@ -364,6 +417,11 @@ def handle_oidc_auth() -> None:
     import streamlit as st
 
     if not getattr(st.user, "is_logged_in", False):
+        if _should_auto_login():
+            st.session_state[AUTO_LOGIN_ATTEMPTED_KEY] = True
+            st.login()
+            st.stop()
+            return  # for tests where st.stop is mocked
         st.markdown(
             """
             <style>
@@ -483,14 +541,12 @@ def handle_oidc_logout() -> None:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Failed to clear mirrored cookies on OIDC logout: %s", exc)
 
-    # 4. Emit a meta-refresh redirect to the post-logout URL.
-    auth = auth_secrets_section()
-    redirect_url = auth.get("post_logout_redirect_url") if auth is not None else None
-    if redirect_url:
-        st.markdown(
-            f'<meta http-equiv="refresh" content="0; url={redirect_url}">',
-            unsafe_allow_html=True,
-        )
+    # 4. Emit a meta-refresh redirect to the post-logout URL. Self-targeted
+    # (or unconfigured) URLs carry ?logged_out=1 so auto-login stands down.
+    st.markdown(
+        f'<meta http-equiv="refresh" content="0; url={_post_logout_redirect_target()}">',
+        unsafe_allow_html=True,
+    )
 
     # 5. Drop Streamlit's auth cookie.
     st.logout()
