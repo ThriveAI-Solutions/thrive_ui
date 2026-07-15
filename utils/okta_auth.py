@@ -29,6 +29,7 @@ provisioning path in :func:`sync_okta_user_to_db` now enforces the
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Mapping
 from typing import Any, Iterable
 
@@ -69,23 +70,32 @@ DEFAULT_ROLE_IF_NO_GROUP_MATCH: RoleTypeEnum = RoleTypeEnum.DOCTOR
 # password login while still satisfying legacy SQLite NOT NULL schemas.
 OIDC_PASSWORD_SENTINEL = "__OIDC_AUTH_ONLY__"
 
-# Browser-cookie marker stamping the last auto-login attempt (epoch seconds).
-# It MUST be a cookie, not session state: every bounce through Okta creates a
-# fresh Streamlit session, so session state cannot stop a redirect loop when
-# the IdP returns an error to the callback (e.g. Okta access_denied "User is
-# not assigned to the client application", observed live 2026-07-14 looping
-# ~1/second). The cookie survives the roundtrip; a fresh marker on an
-# unauthenticated landing means the last attempt failed — show the button.
-AUTO_LOGIN_MARKER_COOKIE = "oidc_auto_login_at"
+# Server-side registry of recent auto-login attempts, keyed by a fingerprint
+# of the browser's existing cookies (st.context.cookies). This is the only
+# marker that reliably survives the Okta roundtrip:
+#   - session state dies on every bounce (each return is a fresh session), so
+#     it cannot stop a redirect loop when the IdP errors the callback (Okta
+#     access_denied "User is not assigned to the client application" looped
+#     ~1/second live on 2026-07-14);
+#   - writing our own cookie races the redirect against the cookie-component
+#     iframe flush, and on prod latency the login redirect got dropped
+#     (2026-07-15: every visitor landed on the fallback page instead of Okta).
+# The browser's own cookies (_streamlit_xsrf et al.) ride along on every
+# connect with zero client-side writes. Entries are pruned on access; a
+# process restart forgets attempts, costing at most one extra roundtrip.
+_AUTO_LOGIN_ATTEMPTS: dict[str, float] = {}
+_AUTO_LOGIN_ATTEMPTS_LOCK = threading.Lock()
 
 # How long a failed attempt suppresses auto-login. Long enough to break the
 # loop and let a human read the fallback page; short enough that the next
 # genuine visit is seamless again.
 AUTO_LOGIN_RETRY_WINDOW_S = 60.0
 
-# Session-state flag bridging the two-pass attempt: pass 1 stamps the marker
-# cookie and reruns (flushing the cookie to the browser, same pattern as the
-# local-mode login), pass 2 sees this flag and calls st.login().
+# Session-state flag: this session already started an auto-login attempt.
+# Used to re-issue st.login() on reruns of the originating session (the
+# redirect message can be dropped by an interrupting rerun) — NOT as the
+# loop guard; that's the cookie-fingerprint registry, because session state
+# does not survive the roundtrip to the IdP.
 AUTO_LOGIN_PENDING_KEY = "_oidc_auto_login_pending"
 
 # Query param set by our own logout redirect. Its presence suppresses
@@ -377,45 +387,101 @@ def populate_session_state_from_user(user) -> None:
         logger.warning("set_user_preferences_in_session_state failed: %s", exc)
 
 
-def _auto_login_marker_fresh() -> bool:
-    """True when the attempt-marker cookie shows a recent auto-login attempt."""
-    import time
+def _stable_xsrf_token(raw: str) -> str | None:
+    """Recover the stable token from a Tornado XSRF cookie value.
+
+    Tornado v2 tokens ("2|<mask>|<masked_token>|<timestamp>") are re-masked
+    on EVERY response — the raw cookie value changes across the OIDC
+    roundtrip even though the underlying token is constant (verified live
+    2026-07-15). XOR-ing the mask back out recovers the stable token; no
+    secret is involved, the mask is in the cookie itself. Plain (v1) tokens
+    contain no "|" and are already stable. Returns None for unrecognized
+    formats — treating those as stable would silently unbound the retry loop.
+    """
+    if "|" not in raw:
+        return raw
+    parts = raw.split("|")
+    if len(parts) != 4 or parts[0] != "2":
+        return None
+    try:
+        mask = bytes.fromhex(parts[1])
+        masked = bytes.fromhex(parts[2])
+        if not mask:
+            return None
+        return bytes(b ^ mask[i % len(mask)] for i, b in enumerate(masked)).hex()
+    except ValueError:
+        return None
+
+
+# Cookies whose values change across the OIDC roundtrip (the OAuth state
+# cookie rotates per attempt; auth/user cookies appear on login). They must
+# never feed the fingerprint fallback.
+_VOLATILE_COOKIE_PREFIXES = ("_streamlit_",)
+
+
+def _browser_fingerprint() -> str | None:
+    """Stable per-browser key derived from the cookies the browser already has.
+
+    Prefers the unmasked Streamlit XSRF token (random per browser, constant
+    across the OIDC roundtrip); falls back to a hash of the non-volatile
+    cookies. Returns None when no stable identity exists — such a browser's
+    retry loop could not be bounded, so callers must not auto-login.
+    """
+    import hashlib
 
     import streamlit as st
 
-    cookies = st.session_state.get("cookies") if hasattr(st.session_state, "get") else None
-    if cookies is None:
-        return False
     try:
-        marker = float(cookies.get(AUTO_LOGIN_MARKER_COOKIE))
-    except (TypeError, ValueError):
-        return False
-    return time.time() - marker < AUTO_LOGIN_RETRY_WINDOW_S
+        cookies = dict(st.context.cookies)
+    except Exception:  # pragma: no cover - context unavailable (bare mode)
+        return None
+    raw: str | None = None
+    xsrf = cookies.get("_streamlit_xsrf") or cookies.get("_xsrf")
+    if xsrf:
+        raw = _stable_xsrf_token(xsrf)
+    if raw is None:
+        stable = {k: v for k, v in cookies.items() if not any(k.startswith(p) for p in _VOLATILE_COOKIE_PREFIXES)}
+        if not stable:
+            return None
+        raw = "|".join(f"{k}={v}" for k, v in sorted(stable.items()))
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _stamp_auto_login_marker() -> None:
-    """Write the attempt-marker cookie (best-effort) so it survives the roundtrip."""
+def _mark_auto_login_attempt() -> None:
+    """Record an auto-login attempt for this browser (prunes stale entries)."""
     import time
 
-    import streamlit as st
+    fingerprint = _browser_fingerprint()
+    if fingerprint is None:
+        return
+    now = time.time()
+    with _AUTO_LOGIN_ATTEMPTS_LOCK:
+        for key, ts in list(_AUTO_LOGIN_ATTEMPTS.items()):
+            if now - ts >= AUTO_LOGIN_RETRY_WINDOW_S:
+                del _AUTO_LOGIN_ATTEMPTS[key]
+        _AUTO_LOGIN_ATTEMPTS[fingerprint] = now
 
-    try:
-        cookies = st.session_state.get("cookies")
-        if cookies is not None:
-            cookies[AUTO_LOGIN_MARKER_COOKIE] = str(time.time())
-            if hasattr(cookies, "save"):
-                cookies.save()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Failed to stamp auto-login marker cookie: %s", exc)
+
+def _recent_auto_login_attempt() -> bool:
+    """True when this browser attempted auto-login within the retry window."""
+    import time
+
+    fingerprint = _browser_fingerprint()
+    if fingerprint is None:
+        return False
+    with _AUTO_LOGIN_ATTEMPTS_LOCK:
+        ts = _AUTO_LOGIN_ATTEMPTS.get(fingerprint)
+    return ts is not None and time.time() - ts < AUTO_LOGIN_RETRY_WINDOW_S
 
 
 def _should_auto_login() -> bool:
     """True when an unauthenticated visit should be sent straight to Okta.
 
     Auto-login is on by default (``[auth].auto_login = false`` disables it)
-    and stands down when the user just logged out (``?logged_out=1``) or when
-    the marker cookie shows an attempt within the retry window — meaning the
-    IdP just bounced us back unauthenticated and retrying would loop.
+    and stands down when the user just logged out (``?logged_out=1``), when
+    this browser attempted auto-login within the retry window (the IdP just
+    bounced us back unauthenticated — retrying would loop), or when the
+    browser is fingerprint-less (no cookies — a loop could not be bounded).
     """
     import streamlit as st
 
@@ -427,7 +493,9 @@ def _should_auto_login() -> bool:
             return False
     except Exception:  # pragma: no cover - query params unavailable (bare mode)
         pass
-    return not _auto_login_marker_fresh()
+    if _browser_fingerprint() is None:
+        return False
+    return not _recent_auto_login_attempt()
 
 
 def _post_logout_redirect_target() -> str:
@@ -464,19 +532,19 @@ def handle_oidc_auth() -> None:
     import streamlit as st
 
     if not getattr(st.user, "is_logged_in", False):
-        # Pass 2 of the auto-login attempt: the marker cookie was flushed to
-        # the browser on the previous run; now actually go to the IdP.
-        if st.session_state.pop(AUTO_LOGIN_PENDING_KEY, False):
+        # Re-issue st.login() on every rerun of the session that started the
+        # attempt: Streamlit drops the auth-redirect message when a queued
+        # rerun (e.g. a late cookie-component value) interrupts the run that
+        # sent it. A drop implies another rerun is queued, so re-issuing on
+        # each run guarantees the last one lands. The bounce-back from the
+        # IdP is a NEW session without the pending flag, so the server-side
+        # registry still bounds the retry loop.
+        if st.session_state.get(AUTO_LOGIN_PENDING_KEY) or _should_auto_login():
+            st.session_state[AUTO_LOGIN_PENDING_KEY] = True
+            _mark_auto_login_attempt()
             st.login()
             st.stop()
             return  # for tests where st.stop is mocked
-        # Pass 1: stamp the attempt marker and rerun so the cookie reaches
-        # the browser before we leave (same flush pattern as local login).
-        if _should_auto_login():
-            _stamp_auto_login_marker()
-            st.session_state[AUTO_LOGIN_PENDING_KEY] = True
-            st.rerun()
-            return  # for tests where st.rerun is mocked
         st.markdown(
             """
             <style>
@@ -492,7 +560,7 @@ def handle_oidc_auth() -> None:
             just_logged_out = bool(st.query_params.get(LOGGED_OUT_QUERY_PARAM))
         except Exception:  # pragma: no cover - query params unavailable (bare mode)
             just_logged_out = False
-        if _auto_login_marker_fresh() and not just_logged_out:
+        if _recent_auto_login_attempt() and not just_logged_out:
             # We just tried automatically and came back unauthenticated —
             # the IdP rejected or aborted the login (e.g. user not assigned
             # to the application). Tell the human instead of looping.
