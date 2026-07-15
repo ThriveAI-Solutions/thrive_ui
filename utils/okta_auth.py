@@ -716,12 +716,20 @@ def handle_oidc_logout() -> None:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Failed to clear mirrored cookies on OIDC logout: %s", exc)
 
-    # 4. Emit a meta-refresh redirect to the post-logout URL. Self-targeted
+    # 4. Suppress auto-login for this browser for the retry window.
+    # st.logout() (RP-initiated Okta logout) lands back on the app root with
+    # no query param; without this mark, auto-login would fire immediately
+    # and throw the user at an Okta form instead of the configured
+    # post-logout destination.
+    _mark_auto_login_attempt()
+
+    # 5. Emit a meta-refresh redirect to the post-logout URL. Self-targeted
     # (or unconfigured) URLs carry ?logged_out=1 so auto-login stands down.
     st.markdown(
         f'<meta http-equiv="refresh" content="0; url={_post_logout_redirect_target()}">',
         unsafe_allow_html=True,
     )
 
-    # 5. Drop Streamlit's auth cookie.
+    # 6. Drop Streamlit's auth cookie (also triggers RP-initiated IdP logout
+    # when the auth server advertises end_session_endpoint).
     st.logout()

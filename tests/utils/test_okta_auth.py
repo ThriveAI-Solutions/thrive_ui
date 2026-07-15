@@ -1346,3 +1346,34 @@ def test_handle_oidc_auth_stops_reissuing_after_two_attempts(in_memory_orm_sessi
     mocks.button.assert_not_called()
     assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))
     mocks.stop.assert_called_once()
+
+
+def test_handle_oidc_logout_marks_attempt_registry(in_memory_orm_session):
+    """Logout must suppress auto-login for this browser for the retry window.
+
+    st.logout() performs RP-initiated Okta logout and lands the browser back
+    on the app root with no query param. Without a registry mark, auto-login
+    fires instantly and the user is thrown at an Okta form (or silently
+    re-logged-in if a session survives) — instead of the configured portal.
+    """
+    from unittest.mock import MagicMock, patch
+
+    import utils.okta_auth as okta_auth
+
+    _clear_attempt_registry()
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+
+    from types import SimpleNamespace
+
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown"),
+        patch("streamlit.context", SimpleNamespace(cookies={"_streamlit_xsrf": "tok-logout"})),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        okta_auth.handle_oidc_logout()
+
+    assert len(okta_auth._AUTO_LOGIN_ATTEMPTS) == 1
