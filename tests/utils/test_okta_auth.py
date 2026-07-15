@@ -1223,3 +1223,102 @@ def test_handle_oidc_auth_reissues_login_on_rerun_of_originating_session(in_memo
     mocks.login.assert_called_once()
     mocks.button.assert_not_called()
     mocks.warning.assert_not_called()
+
+
+# ── sso_fallback_url: unauthenticated fallback redirects to the Portal ────
+
+
+def _mocks_markdown_calls(mocks):
+    return [str(c) for c in mocks.markdown.call_args_list]
+
+
+def _not_logged_in_patches_with_markdown(session_state, query_params, secrets, context_cookies):
+    """Same as _not_logged_in_patches but exposes the markdown mock."""
+    from unittest.mock import MagicMock, patch
+
+    patches, mocks = _not_logged_in_patches(session_state, query_params, secrets, context_cookies)
+    mocks.markdown = MagicMock()
+    patches[-1] = patch("streamlit.markdown", mocks.markdown)
+    return patches, mocks
+
+
+def _run_fallback(query_params, secrets, context_cookies, session_state=None):
+    import contextlib
+
+    from utils.okta_auth import handle_oidc_auth
+
+    patches, mocks = _not_logged_in_patches_with_markdown(
+        session_state if session_state is not None else {}, query_params, secrets, context_cookies
+    )
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+    return mocks
+
+
+_PORTAL = "https://wnyhealthecommunity.com/login"
+
+
+def test_fallback_redirects_to_portal_when_sso_fallback_url_set(in_memory_orm_session):
+    """Failed roundtrip + sso_fallback_url → meta-refresh to the Portal, no button."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    _run_fallback({}, secrets, cookies)  # attempt marked
+    mocks = _run_fallback({}, secrets, cookies)  # bounce landing
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    redirects = [c for c in _mocks_markdown_calls(mocks) if "http-equiv" in c and _PORTAL in c]
+    assert redirects, "expected a meta-refresh redirect to the portal login"
+    mocks.stop.assert_called_once()
+
+
+def test_fallback_redirects_to_portal_after_logout_param(in_memory_orm_session):
+    """?logged_out=1 with sso_fallback_url also lands on the Portal, not the button."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    mocks = _run_fallback({"logged_out": "1"}, secrets, {"_streamlit_xsrf": "tok"})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    redirects = [c for c in _mocks_markdown_calls(mocks) if "http-equiv" in c and _PORTAL in c]
+    assert redirects
+
+
+def test_fallback_redirects_cookieless_browser_to_portal(in_memory_orm_session):
+    """No stable fingerprint + sso_fallback_url → Portal instead of dead-end button."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    mocks = _run_fallback({}, secrets, {})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    redirects = [c for c in _mocks_markdown_calls(mocks) if "http-equiv" in c and _PORTAL in c]
+    assert redirects
+
+
+def test_fallback_keeps_button_when_sso_fallback_url_unset(in_memory_orm_session):
+    """Without the setting, the manual button page renders exactly as before."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc"}}
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    _run_fallback({}, secrets, cookies)
+    mocks = _run_fallback({}, secrets, cookies)
+
+    mocks.button.assert_called_once()
+    assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))
+
+
+def test_fallback_keeps_button_when_auto_login_disabled(in_memory_orm_session):
+    """auto_login = false is an explicit button-first choice — no portal redirect."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "auto_login": False, "sso_fallback_url": _PORTAL}}
+    mocks = _run_fallback({}, secrets, {"_streamlit_xsrf": "tok"})
+
+    mocks.button.assert_called_once()
+    assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))

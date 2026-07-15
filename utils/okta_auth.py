@@ -555,6 +555,26 @@ def handle_oidc_auth() -> None:
             """,
             unsafe_allow_html=True,
         )
+        # When the operator points unauthenticated visitors at an external
+        # sign-in (the HeC Portal login), redirect instead of rendering the
+        # manual button page. Combined with `prompt = "none"` in
+        # [auth].client_kwargs, visitors with an active IdP session pass
+        # through silently and everyone else lands on the Portal.
+        # auto_login = false is an explicit button-first choice and wins.
+        auth = auth_secrets_section()
+        sso_fallback_url = (auth.get("sso_fallback_url") or "").strip() if auth is not None else ""
+        auto_login_enabled = auth is None or auth.get("auto_login", True)
+        if sso_fallback_url and auto_login_enabled:
+            logger.warning("OIDC sign-in fallback: redirecting unauthenticated visitor to %s", sso_fallback_url)
+            st.markdown(
+                f'<meta http-equiv="refresh" content="2; url={sso_fallback_url}">',
+                unsafe_allow_html=True,
+            )
+            st.info("Taking you to the HEALTHeCOMMUNITY sign-in…")
+            st.markdown(f"[Continue to sign-in]({sso_fallback_url})")
+            st.stop()
+            return  # for tests where st.stop is mocked
+
         st.title("🔓 Sign in to HEALTHeINTELLIGENCE")
         try:
             just_logged_out = bool(st.query_params.get(LOGGED_OUT_QUERY_PARAM))
