@@ -98,6 +98,16 @@ AUTO_LOGIN_RETRY_WINDOW_S = 60.0
 # does not survive the roundtrip to the IdP.
 AUTO_LOGIN_PENDING_KEY = "_oidc_auto_login_pending"
 
+# How many times one session may issue st.login(). One initial issue plus one
+# retry covers the dropped-redirect case. It MUST be bounded: with
+# prompt=none the whole roundtrip is redirects, so the originating page never
+# unloads and its session keeps rerunning — unlimited re-issue navigated the
+# tab away from its own in-flight /oauth2callback token exchange (nginx 499)
+# in an endless loop (live 2026-07-15). Past the cap, the navigation is in
+# flight; render a passive page and let it land.
+AUTO_LOGIN_MAX_ISSUES = 2
+AUTO_LOGIN_ISSUE_COUNT_KEY = "_oidc_auto_login_issues"
+
 # Query param set by our own logout redirect. Its presence suppresses
 # auto-login — st.logout() clears only our cookie, not Okta's session, so
 # without this a logout would silently sign the user straight back in.
@@ -541,8 +551,16 @@ def handle_oidc_auth() -> None:
         # registry still bounds the retry loop.
         if st.session_state.get(AUTO_LOGIN_PENDING_KEY) or _should_auto_login():
             st.session_state[AUTO_LOGIN_PENDING_KEY] = True
-            _mark_auto_login_attempt()
-            st.login()
+            issued = st.session_state.get(AUTO_LOGIN_ISSUE_COUNT_KEY, 0)
+            if issued < AUTO_LOGIN_MAX_ISSUES:
+                st.session_state[AUTO_LOGIN_ISSUE_COUNT_KEY] = issued + 1
+                _mark_auto_login_attempt()
+                st.login()
+            else:
+                # Redirect already issued; the browser is mid-roundtrip.
+                # Anything that navigates here (another st.login(), a
+                # meta-refresh) would cancel the in-flight token exchange.
+                st.info("Signing you in…")
             st.stop()
             return  # for tests where st.stop is mocked
         st.markdown(

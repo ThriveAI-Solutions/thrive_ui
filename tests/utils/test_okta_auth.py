@@ -1322,3 +1322,27 @@ def test_fallback_keeps_button_when_auto_login_disabled(in_memory_orm_session):
 
     mocks.button.assert_called_once()
     assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))
+
+
+def test_handle_oidc_auth_stops_reissuing_after_two_attempts(in_memory_orm_session):
+    """Reruns beyond the second issue must go passive, not call st.login().
+
+    Regression (2026-07-15 prod): with prompt=none the whole roundtrip is
+    redirects, so the originating page never unloads and its session keeps
+    rerunning; unlimited re-issue canceled its own in-flight token exchange
+    (nginx 499 on every /oauth2callback?code=...) in an endless loop. Two
+    issues cover the dropped-redirect case; after that the navigation is in
+    flight and must be left alone — no login, no button, no meta-refresh.
+    """
+    _clear_attempt_registry()
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    session_state = {}
+    _run_fallback({}, secrets, cookies, session_state=session_state)  # issue 1
+    _run_fallback({}, secrets, cookies, session_state=session_state)  # issue 2 (re-issue)
+    mocks = _run_fallback({}, secrets, cookies, session_state=session_state)  # rerun 3+
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))
+    mocks.stop.assert_called_once()
