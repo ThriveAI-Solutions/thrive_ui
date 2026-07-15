@@ -69,10 +69,24 @@ DEFAULT_ROLE_IF_NO_GROUP_MATCH: RoleTypeEnum = RoleTypeEnum.DOCTOR
 # password login while still satisfying legacy SQLite NOT NULL schemas.
 OIDC_PASSWORD_SENTINEL = "__OIDC_AUTH_ONLY__"
 
-# Session-state marker: auto-login is attempted at most once per Streamlit
-# session so a user who bounces back unauthenticated gets the button, not a
-# redirect loop.
-AUTO_LOGIN_ATTEMPTED_KEY = "_oidc_auto_login_attempted"
+# Browser-cookie marker stamping the last auto-login attempt (epoch seconds).
+# It MUST be a cookie, not session state: every bounce through Okta creates a
+# fresh Streamlit session, so session state cannot stop a redirect loop when
+# the IdP returns an error to the callback (e.g. Okta access_denied "User is
+# not assigned to the client application", observed live 2026-07-14 looping
+# ~1/second). The cookie survives the roundtrip; a fresh marker on an
+# unauthenticated landing means the last attempt failed — show the button.
+AUTO_LOGIN_MARKER_COOKIE = "oidc_auto_login_at"
+
+# How long a failed attempt suppresses auto-login. Long enough to break the
+# loop and let a human read the fallback page; short enough that the next
+# genuine visit is seamless again.
+AUTO_LOGIN_RETRY_WINDOW_S = 60.0
+
+# Session-state flag bridging the two-pass attempt: pass 1 stamps the marker
+# cookie and reruns (flushing the cookie to the browser, same pattern as the
+# local-mode login), pass 2 sees this flag and calls st.login().
+AUTO_LOGIN_PENDING_KEY = "_oidc_auto_login_pending"
 
 # Query param set by our own logout redirect. Its presence suppresses
 # auto-login — st.logout() clears only our cookie, not Okta's session, so
@@ -363,12 +377,45 @@ def populate_session_state_from_user(user) -> None:
         logger.warning("set_user_preferences_in_session_state failed: %s", exc)
 
 
+def _auto_login_marker_fresh() -> bool:
+    """True when the attempt-marker cookie shows a recent auto-login attempt."""
+    import time
+
+    import streamlit as st
+
+    cookies = st.session_state.get("cookies") if hasattr(st.session_state, "get") else None
+    if cookies is None:
+        return False
+    try:
+        marker = float(cookies.get(AUTO_LOGIN_MARKER_COOKIE))
+    except (TypeError, ValueError):
+        return False
+    return time.time() - marker < AUTO_LOGIN_RETRY_WINDOW_S
+
+
+def _stamp_auto_login_marker() -> None:
+    """Write the attempt-marker cookie (best-effort) so it survives the roundtrip."""
+    import time
+
+    import streamlit as st
+
+    try:
+        cookies = st.session_state.get("cookies")
+        if cookies is not None:
+            cookies[AUTO_LOGIN_MARKER_COOKIE] = str(time.time())
+            if hasattr(cookies, "save"):
+                cookies.save()
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to stamp auto-login marker cookie: %s", exc)
+
+
 def _should_auto_login() -> bool:
     """True when an unauthenticated visit should be sent straight to Okta.
 
     Auto-login is on by default (``[auth].auto_login = false`` disables it)
-    and stands down when this session already attempted it or when the user
-    just logged out (``?logged_out=1``).
+    and stands down when the user just logged out (``?logged_out=1``) or when
+    the marker cookie shows an attempt within the retry window — meaning the
+    IdP just bounced us back unauthenticated and retrying would loop.
     """
     import streamlit as st
 
@@ -380,7 +427,7 @@ def _should_auto_login() -> bool:
             return False
     except Exception:  # pragma: no cover - query params unavailable (bare mode)
         pass
-    return not st.session_state.get(AUTO_LOGIN_ATTEMPTED_KEY, False)
+    return not _auto_login_marker_fresh()
 
 
 def _post_logout_redirect_target() -> str:
@@ -417,11 +464,19 @@ def handle_oidc_auth() -> None:
     import streamlit as st
 
     if not getattr(st.user, "is_logged_in", False):
-        if _should_auto_login():
-            st.session_state[AUTO_LOGIN_ATTEMPTED_KEY] = True
+        # Pass 2 of the auto-login attempt: the marker cookie was flushed to
+        # the browser on the previous run; now actually go to the IdP.
+        if st.session_state.pop(AUTO_LOGIN_PENDING_KEY, False):
             st.login()
             st.stop()
             return  # for tests where st.stop is mocked
+        # Pass 1: stamp the attempt marker and rerun so the cookie reaches
+        # the browser before we leave (same flush pattern as local login).
+        if _should_auto_login():
+            _stamp_auto_login_marker()
+            st.session_state[AUTO_LOGIN_PENDING_KEY] = True
+            st.rerun()
+            return  # for tests where st.rerun is mocked
         st.markdown(
             """
             <style>
@@ -433,6 +488,20 @@ def handle_oidc_auth() -> None:
             unsafe_allow_html=True,
         )
         st.title("🔓 Sign in to HEALTHeINTELLIGENCE")
+        try:
+            just_logged_out = bool(st.query_params.get(LOGGED_OUT_QUERY_PARAM))
+        except Exception:  # pragma: no cover - query params unavailable (bare mode)
+            just_logged_out = False
+        if _auto_login_marker_fresh() and not just_logged_out:
+            # We just tried automatically and came back unauthenticated —
+            # the IdP rejected or aborted the login (e.g. user not assigned
+            # to the application). Tell the human instead of looping.
+            st.warning(
+                "Automatic sign-in didn't complete. Click the button to try again. "
+                "If this keeps happening, your account may not have access to this "
+                "application yet — contact your administrator."
+            )
+            logger.warning("OIDC auto-login roundtrip returned unauthenticated; showing manual sign-in button")
         if st.button("Sign in with HEALTHeCOMMUNITY (Okta)", type="primary"):
             st.login()  # uses [auth] config; for multi-provider use st.login("okta")
         st.stop()

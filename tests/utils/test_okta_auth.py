@@ -465,7 +465,8 @@ def test_populate_session_state_from_user_writes_expected_keys(in_memory_orm_ses
 
 
 def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_session):
-    """After an auto-login attempt, an unauthenticated rerun renders the button."""
+    """After a failed auto-login roundtrip (fresh marker), render the button."""
+    import time
     from types import SimpleNamespace
     from unittest.mock import MagicMock, patch
 
@@ -478,12 +479,13 @@ def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_se
 
     with (
         patch("streamlit.user", fake_user),
-        patch("streamlit.session_state", {"_oidc_auto_login_attempted": True}),
+        patch("streamlit.session_state", {"cookies": {"oidc_auto_login_at": str(time.time())}}),
         patch("streamlit.query_params", {}),
         patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
         patch("streamlit.button", button_mock),
         patch("streamlit.login", login_mock),
         patch("streamlit.stop", stop_mock),
+        patch("streamlit.warning", MagicMock()),
         patch("streamlit.title"),
         patch("streamlit.markdown"),
     ):
@@ -504,6 +506,8 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
 
     from utils.okta_auth import handle_oidc_auth
 
+    import time
+
     fake_user = SimpleNamespace(is_logged_in=False)
     # Button returns True meaning the user clicked it.
     button_mock = MagicMock(return_value=True)
@@ -511,12 +515,13 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
 
     with (
         patch("streamlit.user", fake_user),
-        patch("streamlit.session_state", {"_oidc_auto_login_attempted": True}),
+        patch("streamlit.session_state", {"cookies": {"oidc_auto_login_at": str(time.time())}}),
         patch("streamlit.query_params", {}),
         patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
         patch("streamlit.button", button_mock),
         patch("streamlit.login", login_mock),
         patch("streamlit.stop", MagicMock(side_effect=SystemExit)),
+        patch("streamlit.warning", MagicMock()),
         patch("streamlit.title"),
         patch("streamlit.markdown"),
     ):
@@ -904,6 +909,22 @@ def test_organization_from_email_helper_handles_subdomain():
 
 
 # ── Auto-login (seamless SSO): st.login() fires without a button click ────
+#
+# The attempt marker must live in a BROWSER COOKIE, not session state: every
+# bounce through Okta creates a fresh Streamlit session, so a session-state
+# marker cannot stop a redirect loop when the IdP returns an error (seen live
+# 2026-07-14: Okta access_denied "User is not assigned to the client
+# application" looped ~1/second until the auth JWT expired).
+
+
+class _FakeCookies(dict):
+    """Dict-backed stand-in for EncryptedCookieManager with a save() mock."""
+
+    def __init__(self, *args, **kwargs):
+        from unittest.mock import MagicMock
+
+        super().__init__(*args, **kwargs)
+        self.save = MagicMock()
 
 
 def _not_logged_in_patches(session_state, query_params, secrets):
@@ -916,6 +937,8 @@ def _not_logged_in_patches(session_state, query_params, secrets):
         button=MagicMock(return_value=False),
         login=MagicMock(),
         stop=MagicMock(side_effect=SystemExit),
+        rerun=MagicMock(side_effect=SystemExit),
+        warning=MagicMock(),
     )
     patches = [
         patch("streamlit.user", fake_user),
@@ -925,20 +948,20 @@ def _not_logged_in_patches(session_state, query_params, secrets):
         patch("streamlit.button", mocks.button),
         patch("streamlit.login", mocks.login),
         patch("streamlit.stop", mocks.stop),
+        patch("streamlit.rerun", mocks.rerun),
+        patch("streamlit.warning", mocks.warning),
         patch("streamlit.title"),
         patch("streamlit.markdown"),
     ]
     return patches, mocks
 
 
-def test_handle_oidc_auth_auto_login_fires_without_button(in_memory_orm_session):
-    """Fresh unauthenticated session → st.login() is called immediately, no button."""
+def _run_not_logged_in(session_state, query_params, secrets):
     import contextlib
 
     from utils.okta_auth import handle_oidc_auth
 
-    session_state = {}
-    patches, mocks = _not_logged_in_patches(session_state, {}, {"auth": {"mode": "oidc"}})
+    patches, mocks = _not_logged_in_patches(session_state, query_params, secrets)
     with contextlib.ExitStack() as stack:
         for p in patches:
             stack.enter_context(p)
@@ -946,70 +969,100 @@ def test_handle_oidc_auth_auto_login_fires_without_button(in_memory_orm_session)
             handle_oidc_auth()
         except SystemExit:
             pass
+    return mocks
+
+
+def test_handle_oidc_auth_auto_login_first_pass_sets_cookie_marker_and_reruns(in_memory_orm_session):
+    """Fresh landing: stamp the attempt cookie, flush it, and rerun — no login yet."""
+    import time
+
+    cookies = _FakeCookies()
+    session_state = {"cookies": cookies}
+    mocks = _run_not_logged_in(session_state, {}, {"auth": {"mode": "oidc"}})
+
+    marker = float(cookies["oidc_auto_login_at"])
+    assert abs(time.time() - marker) < 5
+    cookies.save.assert_called_once()
+    assert session_state.get("_oidc_auto_login_pending") is True
+    mocks.rerun.assert_called_once()
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+
+
+def test_handle_oidc_auth_auto_login_second_pass_calls_st_login(in_memory_orm_session):
+    """The rerun with the pending flag set is what actually calls st.login()."""
+    import time
+
+    cookies = _FakeCookies({"oidc_auto_login_at": str(time.time())})
+    session_state = {"cookies": cookies, "_oidc_auto_login_pending": True}
+    mocks = _run_not_logged_in(session_state, {}, {"auth": {"mode": "oidc"}})
 
     mocks.login.assert_called_once()
-    mocks.button.assert_not_called()
     mocks.stop.assert_called_once()
-    assert session_state.get("_oidc_auto_login_attempted") is True
+    mocks.button.assert_not_called()
+    # Pending flag is consumed so a failed login can't re-trigger.
+    assert "_oidc_auto_login_pending" not in session_state
 
 
-def test_handle_oidc_auth_auto_login_only_once_per_session(in_memory_orm_session):
-    """If auto-login was already attempted this session, fall back to the button."""
-    import contextlib
+def test_handle_oidc_auth_fresh_marker_cookie_breaks_redirect_loop(in_memory_orm_session):
+    """A NEW session arriving with a fresh marker (failed roundtrip) gets the button.
 
-    from utils.okta_auth import handle_oidc_auth
+    This is the loop-breaker: the IdP bounced us back unauthenticated, the
+    session is brand new (no pending flag), but the cookie proves we just
+    tried. Auto-login must stand down and the user must see an explanation.
+    """
+    import time
 
-    session_state = {"_oidc_auto_login_attempted": True}
-    patches, mocks = _not_logged_in_patches(session_state, {}, {"auth": {"mode": "oidc"}})
-    with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
-        try:
-            handle_oidc_auth()
-        except SystemExit:
-            pass
+    cookies = _FakeCookies({"oidc_auto_login_at": str(time.time())})
+    session_state = {"cookies": cookies}  # fresh session: no pending flag
+    mocks = _run_not_logged_in(session_state, {}, {"auth": {"mode": "oidc"}})
 
     mocks.login.assert_not_called()
+    mocks.rerun.assert_not_called()
     mocks.button.assert_called_once()
+    mocks.warning.assert_called_once()  # user is told sign-in didn't complete
+
+
+def test_handle_oidc_auth_stale_marker_cookie_allows_auto_login(in_memory_orm_session):
+    """A marker older than the retry window doesn't block the next visit."""
+    import time
+
+    cookies = _FakeCookies({"oidc_auto_login_at": str(time.time() - 3600)})
+    session_state = {"cookies": cookies}
+    mocks = _run_not_logged_in(session_state, {}, {"auth": {"mode": "oidc"}})
+
+    mocks.rerun.assert_called_once()  # proceeds to the marker/rerun pass
+    mocks.button.assert_not_called()
+
+
+def test_handle_oidc_auth_garbage_marker_cookie_treated_as_absent(in_memory_orm_session):
+    """A corrupt marker value must not crash — treat as no marker."""
+    cookies = _FakeCookies({"oidc_auto_login_at": "not-a-number"})
+    session_state = {"cookies": cookies}
+    mocks = _run_not_logged_in(session_state, {}, {"auth": {"mode": "oidc"}})
+
+    mocks.rerun.assert_called_once()
+    mocks.button.assert_not_called()
 
 
 def test_handle_oidc_auth_no_auto_login_after_logout(in_memory_orm_session):
     """Arriving with ?logged_out=1 (post-logout) must not silently re-login."""
-    import contextlib
-
-    from utils.okta_auth import handle_oidc_auth
-
-    session_state = {}
-    patches, mocks = _not_logged_in_patches(session_state, {"logged_out": "1"}, {"auth": {"mode": "oidc"}})
-    with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
-        try:
-            handle_oidc_auth()
-        except SystemExit:
-            pass
+    session_state = {"cookies": _FakeCookies()}
+    mocks = _run_not_logged_in(session_state, {"logged_out": "1"}, {"auth": {"mode": "oidc"}})
 
     mocks.login.assert_not_called()
+    mocks.rerun.assert_not_called()
     mocks.button.assert_called_once()
+    mocks.warning.assert_not_called()  # normal logout, nothing went wrong
 
 
 def test_handle_oidc_auth_auto_login_disabled_by_config(in_memory_orm_session):
     """[auth].auto_login = false restores the button-first behavior."""
-    import contextlib
-
-    from utils.okta_auth import handle_oidc_auth
-
-    session_state = {}
-    patches, mocks = _not_logged_in_patches(session_state, {}, {"auth": {"mode": "oidc", "auto_login": False}})
-    with contextlib.ExitStack() as stack:
-        for p in patches:
-            stack.enter_context(p)
-        try:
-            handle_oidc_auth()
-        except SystemExit:
-            pass
+    session_state = {"cookies": _FakeCookies()}
+    mocks = _run_not_logged_in(session_state, {}, {"auth": {"mode": "oidc", "auto_login": False}})
 
     mocks.login.assert_not_called()
+    mocks.rerun.assert_not_called()
     mocks.button.assert_called_once()
 
 
