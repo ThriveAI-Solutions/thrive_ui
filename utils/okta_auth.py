@@ -86,10 +86,12 @@ OIDC_PASSWORD_SENTINEL = "__OIDC_AUTH_ONLY__"
 _AUTO_LOGIN_ATTEMPTS: dict[str, float] = {}
 _AUTO_LOGIN_ATTEMPTS_LOCK = threading.Lock()
 
-# How long a failed attempt suppresses auto-login. Long enough to break the
-# loop and let a human read the fallback page; short enough that the next
-# genuine visit is seamless again.
-AUTO_LOGIN_RETRY_WINDOW_S = 60.0
+# How long a failed attempt (or a logout) suppresses auto-login. This must
+# only stop MACHINE-speed loops: IdP error-bounces arrive ~1/second, so ~10s
+# bounds those storms — while a human who logs into the portal and clicks
+# back to the app (>10s roundtrip) is never suppressed. At 60s this trapped
+# post-logout users in an app↔portal bounce until the window expired.
+AUTO_LOGIN_RETRY_WINDOW_S = 10.0
 
 # Session-state flag: this session already started an auto-login attempt.
 # Used to re-issue st.login() on reruns of the originating session (the

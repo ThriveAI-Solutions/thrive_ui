@@ -1377,3 +1377,18 @@ def test_handle_oidc_logout_marks_attempt_registry(in_memory_orm_session):
         okta_auth.handle_oidc_logout()
 
     assert len(okta_auth._AUTO_LOGIN_ATTEMPTS) == 1
+
+
+def test_retry_window_is_shorter_than_a_portal_login_roundtrip():
+    """The retry window must only suppress machine-speed loops.
+
+    Regression (2026-07-15 night): logout marks the registry; with a 60s
+    window, a user who logged back in via the portal and clicked the app
+    badge within the minute was refused an auto-login attempt and bounced
+    app↔portal until the window expired ("only a hard refresh cures it").
+    IdP error-bounces arrive ~1/second, so ~10s bounds those storms while a
+    human portal-login roundtrip (>10s) is never suppressed.
+    """
+    import utils.okta_auth as okta_auth
+
+    assert okta_auth.AUTO_LOGIN_RETRY_WINDOW_S <= 15
