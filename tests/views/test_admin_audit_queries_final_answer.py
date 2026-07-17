@@ -32,6 +32,11 @@ from orm.models import (
 from utils.enums import MessageType, RoleType
 
 
+# Keep ordinary audit fixtures inside the readers' rolling windows. Tests that
+# exercise cutoff behavior create their own recent and expired timestamps.
+AUDIT_NOW = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures and seed helpers (mirrors tests/orm/test_per_query_audit.py)
 # ---------------------------------------------------------------------------
@@ -159,7 +164,7 @@ def test_agentic_rows_carry_final_answer_text_from_agent_run(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    when = datetime(2026, 6, 1, 12, 0, 0)
+    when = AUDIT_NOW
     mid = _add_user_question(s, user_id=10, content="agentic q", when=when)
     _add_agent_run(
         s, run_id="run-1", user_id=10, user_message_id=mid, final_answer_text="The patient has 3 active conditions."
@@ -190,7 +195,7 @@ def test_agentic_row_result_text_matches_tool_result_summary(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    when = datetime(2026, 6, 1, 12, 0, 0)
+    when = AUDIT_NOW
     mid = _add_user_question(s, user_id=10, content="lab q", when=when)
     _add_agent_run(s, run_id="run-1", user_id=10, user_message_id=mid, final_answer_text="3 labs in range.")
     _add_tool_call(
@@ -216,7 +221,7 @@ def test_agentic_run_error_status_with_no_final_answer_yields_none(session_facto
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    when = datetime(2026, 6, 1, 12, 0, 0)
+    when = AUDIT_NOW
     mid = _add_user_question(s, user_id=10, content="fail q", when=when)
     _add_agent_run(s, run_id="run-1", user_id=10, user_message_id=mid, final_answer_text=None, status="error")
     _add_tool_call(s, run_id="run-1", user_id=10, tool_name="run_sql", call_index=0, result_summary="error: timeout")
@@ -235,7 +240,7 @@ def test_disabled_logging_mode_still_surfaces_final_answer_text(session_factory)
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    when = datetime(2026, 6, 1, 12, 0, 0)
+    when = AUDIT_NOW
     mid = _add_user_question(s, user_id=10, content="opaque q", when=when)
     _add_agent_run(
         s,
@@ -265,7 +270,7 @@ def test_legacy_row_final_answer_text_comes_from_latest_summary_message(session_
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    when = datetime(2026, 6, 1, 12, 0, 0)
+    when = AUDIT_NOW
     _add_user_question(s, user_id=10, content="legacy q", when=when)
     _add_assistant_message(
         s,
@@ -297,7 +302,7 @@ def test_legacy_row_without_summary_message_yields_none(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    when = datetime(2026, 6, 1, 12, 0, 0)
+    when = AUDIT_NOW
     _add_user_question(s, user_id=10, content="no-summary q", when=when)
     _add_assistant_message(
         s,
@@ -320,7 +325,7 @@ def test_legacy_row_without_summary_message_yields_none(session_factory):
 
 def _make_item(**overrides) -> dict:
     base = {
-        "asked_at": datetime(2026, 6, 1, 12, 0, 0),
+        "asked_at": AUDIT_NOW,
         "user_id": 7,
         "username": "alice",
         "organization": "Acme",
@@ -504,7 +509,7 @@ def test_question_detail_dialog_body_renders_final_answer_section():
     try:
         header = {
             "user_message_id": 1,
-            "asked_at": datetime(2026, 6, 1, 12, 0, 0),
+            "asked_at": AUDIT_NOW,
             "username": "alice",
             "organization": "Acme",
             "question": "How many patients?",
@@ -558,7 +563,7 @@ def test_csv_export_includes_final_answer_column(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    when = datetime(2026, 6, 1, 12, 0, 0)
+    when = AUDIT_NOW
     mid = _add_user_question(s, user_id=10, content="big-q", when=when)
     long_answer = "long answer " * 50  # well beyond the truncation cap
     _add_agent_run(s, run_id="run-1", user_id=10, user_message_id=mid, final_answer_text=long_answer)
