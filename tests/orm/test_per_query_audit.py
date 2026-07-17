@@ -34,6 +34,11 @@ from orm.models import (
 from utils.enums import MessageType, RoleType
 
 
+# Keep ordinary audit fixtures inside the readers' rolling windows. Tests that
+# exercise cutoff behavior create their own recent and expired timestamps.
+AUDIT_NOW = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures & seed helpers (mirrors tests/orm/test_question_audit_scope.py)
 # ---------------------------------------------------------------------------
@@ -255,7 +260,7 @@ def test_legacy_question_yields_one_row_with_assistant_sql(session_factory):
         s,
         user_id=10,
         content="legacy q",
-        when=datetime(2026, 6, 1, 12, 0, 0),
+        when=AUDIT_NOW,
         assistant_sql="SELECT 1",
         assistant_sql_elapsed=Decimal("1.250000"),
     )
@@ -282,7 +287,7 @@ def test_legacy_question_with_no_assistant_sql_still_emits_row(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    _add_question(s, user_id=10, content="bare q", when=datetime(2026, 6, 1, 12, 0, 0))
+    _add_question(s, user_id=10, content="bare q", when=AUDIT_NOW)
 
     page = get_per_query_audit_page(_filters(), page=1, page_size=50)
     assert page["total"] == 1
@@ -300,7 +305,7 @@ def test_agentic_question_with_three_tool_calls_emits_three_rows(session_factory
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="agentic q", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="agentic q", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-1", user_id=10, user_message_id=mid)
     _add_tool_call(
         s,
@@ -354,7 +359,7 @@ def test_agentic_sql_executed_json_preserves_order(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="multi-sql", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="multi-sql", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-2", user_id=10, user_message_id=mid)
     _add_tool_call(
         s,
@@ -381,7 +386,7 @@ def test_patients_touched_attached_per_tool_call(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="touch q", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="touch q", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-3", user_id=10, user_message_id=mid)
     _add_tool_call(
         s,
@@ -413,7 +418,7 @@ def test_patients_touched_empty_for_legacy_rows(session_factory):
         s,
         user_id=10,
         content="legacy",
-        when=datetime(2026, 6, 1, 12, 0, 0),
+        when=AUDIT_NOW,
         assistant_sql="SELECT 1",
     )
 
@@ -434,10 +439,10 @@ def _seed_mixed_pipelines(s):
         s,
         user_id=10,
         content="legacy q",
-        when=datetime(2026, 6, 1, 12, 0, 0),
+        when=AUDIT_NOW,
         assistant_sql="SELECT legacy",
     )
-    agentic_mid = _add_question(s, user_id=10, content="agentic q", when=datetime(2026, 6, 1, 12, 5, 0))
+    agentic_mid = _add_question(s, user_id=10, content="agentic q", when=AUDIT_NOW + timedelta(minutes=5))
     _add_agent_run(s, run_id="run-pip", user_id=10, user_message_id=agentic_mid)
     _add_tool_call(
         s,
@@ -479,14 +484,14 @@ def test_source_ids_filter_excludes_legacy_and_other_runs(session_factory):
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
     # Two agentic questions; only run-A touched pat-001.
-    mid_a = _add_question(s, user_id=10, content="qA", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid_a = _add_question(s, user_id=10, content="qA", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-A", user_id=10, user_message_id=mid_a)
     _add_tool_call(
         s, run_id="run-A", user_id=10, tool_name="run_sql", call_index=0, tool_call_uid="tcA", sql_executed=["SELECT 1"]
     )
     _add_patient_access(s, run_id="run-A", user_id=10, source_id="pat-001")
 
-    mid_b = _add_question(s, user_id=10, content="qB", when=datetime(2026, 6, 1, 12, 5, 0))
+    mid_b = _add_question(s, user_id=10, content="qB", when=AUDIT_NOW + timedelta(minutes=5))
     _add_agent_run(s, run_id="run-B", user_id=10, user_message_id=mid_b)
     _add_tool_call(
         s, run_id="run-B", user_id=10, tool_name="run_sql", call_index=0, tool_call_uid="tcB", sql_executed=["SELECT 2"]
@@ -498,7 +503,7 @@ def test_source_ids_filter_excludes_legacy_and_other_runs(session_factory):
         s,
         user_id=10,
         content="legacy q",
-        when=datetime(2026, 6, 1, 12, 10, 0),
+        when=AUDIT_NOW + timedelta(minutes=10),
         assistant_sql="SELECT legacy",
     )
 
@@ -513,7 +518,7 @@ def test_tool_names_filter_restricts_to_named_tools(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="mixed tools", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="mixed tools", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-t", user_id=10, user_message_id=mid)
     _add_tool_call(
         s, run_id="run-t", user_id=10, tool_name="run_sql", call_index=0, tool_call_uid="tc0", sql_executed=["SELECT 1"]
@@ -541,7 +546,7 @@ def test_scope_filter_patient_carries_over_to_per_row_view(session_factory):
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
     # Patient-scope run (selected_patient_source_id set) with 2 tool calls.
-    mid_p = _add_question(s, user_id=10, content="patient q", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid_p = _add_question(s, user_id=10, content="patient q", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-pat", user_id=10, user_message_id=mid_p, selected_patient_source_id="pat-001")
     _add_tool_call(
         s,
@@ -562,7 +567,7 @@ def test_scope_filter_patient_carries_over_to_per_row_view(session_factory):
         sql_executed=["SELECT 2"],
     )
     # Pop-Health run.
-    mid_o = _add_question(s, user_id=10, content="cohort q", when=datetime(2026, 6, 1, 12, 5, 0))
+    mid_o = _add_question(s, user_id=10, content="cohort q", when=AUDIT_NOW + timedelta(minutes=5))
     _add_agent_run(s, run_id="run-pop", user_id=10, user_message_id=mid_o)
     _add_tool_call(
         s,
@@ -592,7 +597,7 @@ def test_pagination_offset_limit_and_total(session_factory):
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
     # 11 user questions; mix of legacy + agentic
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     n = 0
     for i in range(7):
         _add_question(
@@ -633,7 +638,7 @@ def test_disabled_logging_mode_emits_sentinel(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="disabled q", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="disabled q", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-d", user_id=10, user_message_id=mid, logging_mode="disabled")
     # Even in disabled mode there can be carrier ToolCalls (the run_logger
     # writes the row before short-circuiting payload columns). Seed one with
@@ -662,7 +667,7 @@ def test_scrubbed_mode_passes_logging_mode_through(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="scrubbed q", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="scrubbed q", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-sc", user_id=10, user_message_id=mid, logging_mode="scrubbed")
     # In scrubbed mode the SQL literals are hashed by the writer; we pass
     # through whatever the writer stored.
@@ -696,7 +701,7 @@ def test_malformed_sql_executed_json_returns_empty_list(session_factory, caplog)
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="bad json", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="bad json", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-bad", user_id=10, user_message_id=mid)
     _add_tool_call(
         s,
@@ -720,13 +725,13 @@ def test_two_runs_same_user_message_id_both_appear_with_deterministic_order(sess
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="retried q", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="retried q", when=AUDIT_NOW)
     _add_agent_run(
         s,
         run_id="run-first",
         user_id=10,
         user_message_id=mid,
-        created_at=datetime(2026, 6, 1, 12, 0, 5),
+        created_at=AUDIT_NOW + timedelta(seconds=5),
     )
     _add_tool_call(
         s,
@@ -742,7 +747,7 @@ def test_two_runs_same_user_message_id_both_appear_with_deterministic_order(sess
         run_id="run-second",
         user_id=10,
         user_message_id=mid,
-        created_at=datetime(2026, 6, 1, 12, 0, 10),
+        created_at=AUDIT_NOW + timedelta(seconds=10),
     )
     _add_tool_call(
         s,
@@ -775,7 +780,7 @@ def test_export_caps_at_max_audit_export_rows(session_factory, monkeypatch):
     _seed_user(s, id=10, username="alice")
 
     # Seed 60 legacy questions.
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     for i in range(60):
         _add_question(
             s,
@@ -801,8 +806,8 @@ def test_ordering_reverse_chronological_by_question_then_call_index(session_fact
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    older = datetime(2026, 6, 1, 11, 0, 0)
-    newer = datetime(2026, 6, 1, 13, 0, 0)
+    older = AUDIT_NOW - timedelta(hours=1)
+    newer = AUDIT_NOW + timedelta(hours=1)
     _add_question(s, user_id=10, content="older legacy", when=older, assistant_sql="SELECT old")
     mid = _add_question(s, user_id=10, content="newer agentic", when=newer)
     _add_agent_run(s, run_id="run-n", user_id=10, user_message_id=mid)

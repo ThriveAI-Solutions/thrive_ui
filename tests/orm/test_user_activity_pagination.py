@@ -21,6 +21,11 @@ from sqlalchemy.orm import sessionmaker
 from orm.models import Base, RoleTypeEnum, User, UserActivity, UserRole
 
 
+# Keep ordinary audit fixtures inside the readers' rolling windows. Tests that
+# exercise cutoff behavior create their own recent and expired timestamps.
+AUDIT_NOW = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 @pytest.fixture
 def session_factory(monkeypatch):
     """In-memory SQLite with SessionLocal patched on orm.logging_functions."""
@@ -112,7 +117,7 @@ def test_returns_all_ten_fields_per_item(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_activity(
         s,
         user_id=10,
@@ -160,7 +165,7 @@ def test_returns_reverse_chronological_order(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_activity(s, user_id=10, username="alice", activity_type="login", when=now - timedelta(hours=2))
     _add_activity(s, user_id=10, username="alice", activity_type="setting", when=now - timedelta(hours=1))
     _add_activity(s, user_id=10, username="alice", activity_type="logout", when=now)
@@ -177,7 +182,7 @@ def test_pagination_page_one_returns_first_page(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     for i in range(5):
         _add_activity(
             s,
@@ -198,7 +203,7 @@ def test_pagination_page_two_returns_next_page(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     for i in range(5):
         _add_activity(
             s,
@@ -223,7 +228,7 @@ def test_pagination_out_of_range_returns_empty_items_with_correct_total(session_
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     for i in range(3):
         _add_activity(
             s,
@@ -245,7 +250,7 @@ def test_pagination_page_size_variants(session_factory, page_size):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     # Seed 30 rows so 25 is a partial page and 50/100/200 are not.
     for i in range(30):
         _add_activity(
@@ -270,7 +275,7 @@ def test_null_user_id_failed_login_row_is_returned(session_factory):
     s = session_factory()
     _seed_roles(s)
     # No user seeded — failed login with null user_id but a captured username.
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_activity(
         s,
         user_id=None,
