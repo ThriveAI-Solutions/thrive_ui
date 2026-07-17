@@ -6,7 +6,16 @@ Postgres can load this via psql; SQLite loader translates COPY → INSERT.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from typing import IO, Iterable
+
+
+SAMPLE_METADATA_TABLE = "thrive_sample_metadata"
+
+
+def schema_sha256(ddl: str) -> str:
+    """Return the deterministic fingerprint stored with each sample dump."""
+    return hashlib.sha256(ddl.encode("utf-8")).hexdigest()
 
 
 def _serialize(value) -> str:
@@ -47,5 +56,8 @@ def write_dump(
     out.write("SET client_min_messages = warning;\n")
     out.write("SET statement_timeout = 0;\n\n")
     out.write(ddl.rstrip() + "\n\n")
+    out.write(f"DROP TABLE IF EXISTS {SAMPLE_METADATA_TABLE};\n")
+    out.write(f"CREATE TABLE {SAMPLE_METADATA_TABLE} (schema_sha256 VARCHAR(64) NOT NULL);\n")
+    out.write(f"INSERT INTO {SAMPLE_METADATA_TABLE} (schema_sha256) VALUES ('{schema_sha256(ddl)}');\n\n")
     for table, (columns, rows) in table_data.items():
         write_copy_block(out, table, columns, rows)
