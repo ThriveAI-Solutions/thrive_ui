@@ -13,12 +13,21 @@ Without a reachable Postgres these tests SKIP rather than fail.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import sqlalchemy as sa
 
+from scripts.sample_db.dump_writer import SAMPLE_METADATA_TABLE, schema_sha256
+
+
+_REPO = Path(__file__).resolve().parents[2]
+_SAMPLE_SCHEMA = _REPO / "scripts/sample_db/schema.sql"
+_EXPECTED_SCHEMA_SHA256 = schema_sha256(_SAMPLE_SCHEMA.read_text())
+
 
 def _engine_or_skip() -> sa.Engine:
-    """Build a Postgres engine and probe it; skip the test if unreachable."""
+    """Build a Postgres engine and verify it holds the current sample dump."""
     import tomllib
 
     try:
@@ -31,21 +40,30 @@ def _engine_or_skip() -> sa.Engine:
     try:
         with eng.connect() as conn:
             conn.execute(sa.text("SELECT 1"))
-            # Verify the sample DB tables are present — internal_source_reference_v
-            # is created exclusively by load_sample_db.py, so its absence means the
-            # sample dump hasn't been loaded yet.
-            table_exists = conn.execute(
+            marker_exists = conn.execute(
                 sa.text(
                     """
                     SELECT 1
                     FROM information_schema.tables
-                    WHERE table_schema = 'dw'
-                      AND table_name = 'internal_source_reference_v'
+                    WHERE table_schema = 'public'
+                      AND table_name = :table_name
                     """
-                )
+                ),
+                {"table_name": SAMPLE_METADATA_TABLE},
             ).scalar()
-            if not table_exists:
-                pytest.skip("Sample DB tables not found — run 'uv run python scripts/load_sample_db.py' first")
+            if not marker_exists:
+                pytest.skip(
+                    "Configured Postgres is not the current synthetic sample DB — "
+                    "run 'uv run python scripts/load_sample_db.py' first"
+                )
+
+            loaded_schema_sha256 = conn.execute(
+                sa.text(f"SELECT schema_sha256 FROM {SAMPLE_METADATA_TABLE} LIMIT 1")
+            ).scalar()
+            if loaded_schema_sha256 != _EXPECTED_SCHEMA_SHA256:
+                pytest.skip(
+                    "Loaded synthetic sample DB schema is stale — run 'uv run python scripts/load_sample_db.py' again"
+                )
     except pytest.skip.Exception:
         raise
     except Exception as e:  # noqa: BLE001
@@ -132,7 +150,7 @@ def test_admissions_tool_returns_data_for_admitted_patient():
                 SELECT isr.source_id
                 FROM dw.federated_adt_v adt
                 JOIN dw.internal_source_reference_v isr
-                  ON CAST(isr.patient_id AS VARCHAR) = adt.patient_id
+                  ON CAST(isr.patient_id AS VARCHAR) = CAST(adt.patient_id AS VARCHAR)
                 WHERE adt.clean_setting = 'INPATIENT' AND isr.empi_rank = 1
                 LIMIT 1
                 """
@@ -201,7 +219,7 @@ def test_admissions_tool_distinguishes_no_records_from_no_admissions():
                 WHERE isr.empi_rank = 1
                   AND NOT EXISTS (
                       SELECT 1 FROM dw.federated_adt_v adt
-                      WHERE adt.patient_id = CAST(isr.patient_id AS VARCHAR)
+                      WHERE CAST(adt.patient_id AS VARCHAR) = CAST(isr.patient_id AS VARCHAR)
                   )
                 LIMIT 1
                 """
