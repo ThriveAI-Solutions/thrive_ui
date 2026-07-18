@@ -107,13 +107,14 @@ CREATE TABLE federated_results_v (
     clean_result TEXT,
     unit TEXT,
     datetime TIMESTAMP,
-    service_provider TEXT
+    service_provider TEXT,
+    source_name TEXT
 );
 INSERT INTO federated_results_v VALUES
-    ('src-john-1962', '5195-3', 'LOINC', 'Hepatitis B sAg (HBsAg)', 'HBSAG', 'NEG', 'negative', NULL, '2026-02-10 08:00', 'BMG Lab'),
-    ('src-john-1962', '4548-4', 'LOINC', 'Hemoglobin A1c', 'HBA1C', '7.2', '7.2', '%', '2026-03-15 09:00', 'BMG Lab'),
-    ('src-john-1962', 'LOC-CHEM-99', 'local', 'Local Panel', 'LOCAL', 'POS', 'positive', NULL, '2026-01-05 11:00', 'BMG Lab'),
-    ('src-john-1962', '22501-7', 'LOINC', 'Measles IgG Ab', 'MEASIGG', 'POS', 'positive', 'IU/mL', '2025-11-04 14:00', 'BMG Lab');
+    ('src-john-1962', '5195-3', 'LOINC', 'Hepatitis B sAg (HBsAg)', 'HBSAG', 'NEG', 'negative', NULL, '2026-02-10 08:00', 'BMG Lab', 'Buffalo Medical Group'),
+    ('src-john-1962', '4548-4', 'LOINC', 'Hemoglobin A1c', 'HBA1C', '7.2', '7.2', '%', '2026-03-15 09:00', 'BMG Lab', 'Buffalo Medical Group'),
+    ('src-john-1962', 'LOC-CHEM-99', 'local', 'Local Panel', 'LOCAL', 'POS', 'positive', NULL, '2026-01-05 11:00', 'BMG Lab', 'Buffalo Medical Group'),
+    ('src-john-1962', '22501-7', 'LOINC', 'Measles IgG Ab', 'MEASIGG', 'POS', 'positive', 'IU/mL', '2025-11-04 14:00', 'BMG Lab', 'Buffalo Medical Group');
 
 CREATE TABLE federated_problems_v (
     source_id TEXT,

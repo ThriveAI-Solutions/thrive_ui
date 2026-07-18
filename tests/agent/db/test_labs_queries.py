@@ -9,6 +9,16 @@ def test_labs_for_source_id(synthetic_db):
     assert len(rows) == 4
 
 
+def test_labs_selects_reporting_organization_provenance(synthetic_db):
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = labs_sql(source_id="src-john-1962", most_recent_only=True)
+
+    row = adapter.fetch_all(sql, params)[0]
+
+    assert row["source_name"] == "Buffalo Medical Group"
+    assert row["service_provider"] == "BMG Lab"
+
+
 def test_labs_filtered_by_loinc_codes(synthetic_db):
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = labs_sql(
