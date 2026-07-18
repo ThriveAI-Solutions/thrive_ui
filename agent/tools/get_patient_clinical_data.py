@@ -218,6 +218,9 @@ class LabItem(BaseModel):
     unit: Optional[str] = None
     event_datetime: Optional[str] = None
     service_provider: Optional[str] = None
+    # Warehouse source organization that reported the result. The
+    # service_provider column is not a verified clinician identity.
+    source_name: Optional[str] = None
 
 
 class DiagnosisItem(BaseModel):
@@ -229,6 +232,7 @@ class DiagnosisItem(BaseModel):
     diagnosis_datetime: Optional[str] = None
     chronic_ind: Optional[str] = None
     service_provider_npi: Optional[str] = None
+    status: Optional[str] = None
 
 
 class MedicationItem(BaseModel):
@@ -318,6 +322,8 @@ class AdmissionStay(BaseModel):
     admit_from: Optional[str] = None
     discharge_disposition: Optional[str] = None
     discharge_location: Optional[str] = None
+    # Literal ADT-feed field from the admitting event; never relabel as attending.
+    diagnosing_clinician: Optional[str] = None
 
 
 class AllergyItem(BaseModel):
@@ -486,6 +492,7 @@ def _build_labs_result(adapter: Any, source_ids: list[str], schema_prefix: str, 
             unit=r.get("unit"),
             event_datetime=str(r["event_datetime"]) if r.get("event_datetime") else None,
             service_provider=r.get("service_provider"),
+            source_name=r.get("source_name"),
         )
         for r in rows
     ]
@@ -502,6 +509,30 @@ def _build_labs_result(adapter: Any, source_ids: list[str], schema_prefix: str, 
         data_availability="data_present",
         reliability_note=reliability_note,
     )
+
+
+_PROBLEM_STATUS_MAP = {
+    "termed": "inactive",
+    "active": "active",
+    "completed": "resolved",
+    "resolved": "resolved",
+    "55561003": "active",
+    "413322009": "resolved",
+}
+
+
+def _normalized_problem_status(row: dict) -> Optional[str]:
+    """Prefer the legacy chronic flag, otherwise normalize the live status.
+
+    Unknown source vocabulary passes through unchanged rather than being put in
+    a clinically misleading bucket.
+    """
+    if str(row.get("chronic_ind") or "").strip().upper() == "Y":
+        return "chronic"
+    raw = str(row.get("status") or "").strip()
+    if not raw:
+        return None
+    return _PROBLEM_STATUS_MAP.get(raw.lower(), raw)
 
 
 def _build_diagnoses_result(
@@ -537,6 +568,7 @@ def _build_diagnoses_result(
             diagnosis_datetime=str(r["diagnosis_datetime"]) if r.get("diagnosis_datetime") else None,
             chronic_ind=r.get("chronic_ind"),
             service_provider_npi=r.get("service_provider_npi"),
+            status=_normalized_problem_status(r),
         )
         for r in rows
     ]
@@ -553,6 +585,27 @@ def _build_diagnoses_result(
         data_availability="data_present",
         reliability_note=reliability_note,
     )
+
+
+_MED_INACTIVE_STATUSES = {"discontinued", "no longer active", "suspended", "on hold"}
+
+
+def _effective_med_date_stopped(row: dict) -> Any:
+    """Use status_date as a stop date only when status marks the med inactive."""
+    explicit = row.get("date_stopped")
+    if explicit:
+        return explicit
+    status = str(row.get("status") or "").strip().lower()
+    if status in _MED_INACTIVE_STATUSES:
+        return row.get("status_date")
+    return None
+
+
+def _is_active_medication(row: dict) -> bool:
+    status = str(row.get("status") or "").strip().lower()
+    # Advisory precision is intentionally stricter than lifecycle projection:
+    # unknown/novel statuses are not proof that a medication is current.
+    return status == "active" and not row.get("date_stopped")
 
 
 def _build_medications_result(
@@ -591,7 +644,7 @@ def _build_medications_result(
             drug_supply_days=r.get("drug_supply_days"),
             number_of_refills=r.get("number_of_refills"),
             status=r.get("status"),
-            date_stopped=str(r["date_stopped"]) if r.get("date_stopped") else None,
+            date_stopped=(str(value) if (value := _effective_med_date_stopped(r)) else None),
         )
         for r in rows
     ]
@@ -850,6 +903,7 @@ def _build_admissions_result(
             admit_from=r.get("admit_from"),
             discharge_disposition=r.get("discharge_disposition"),
             discharge_location=r.get("discharge_location"),
+            diagnosing_clinician=r.get("diagnosing_clinician"),
         )
         for r in rows
     ]
@@ -995,7 +1049,11 @@ def _maybe_drug_allergy_signal(
         )
     except Exception:
         return None
-    conflicts = find_drug_allergy_conflicts(allergies=allergy_rows, medications=meds)
+    # Historical/inactive prescriptions cannot trigger a current-medication
+    # advisory. An explicit stop date wins; status_date is effective only for
+    # the verified inactive status vocabulary above.
+    active_meds = [med for med in meds if _is_active_medication(med)]
+    conflicts = find_drug_allergy_conflicts(allergies=allergy_rows, medications=active_meds)
     if not conflicts:
         return None
     pairs = "; ".join(

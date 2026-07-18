@@ -30,6 +30,18 @@ def test_prompt_mentions_per_domain_guidance():
         assert domain in SYSTEM_PROMPT.lower()
 
 
+def test_prompt_preserves_projection_semantics():
+    prompt = " ".join(SYSTEM_PROMPT.lower().split())
+    assert "normalized status" in prompt
+    assert "missing status is unknown" in prompt
+    assert "source_name is the reporting organization" in prompt
+    assert "must not be presented as a clinician" in prompt
+    assert "inactive medication" in prompt
+    assert "status_date" in prompt
+    assert "diagnosing clinician (adt feed)" in prompt
+    assert "never relabel it as attending" in prompt
+
+
 def test_prompt_warns_about_impressions_and_note_bodies():
     p = SYSTEM_PROMPT.lower()
     assert "impression" in p

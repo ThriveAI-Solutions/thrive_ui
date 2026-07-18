@@ -42,6 +42,27 @@ def test_freshness_docs_present():
     assert any("monthly" in d["text"].lower() for d in FRESHNESS_DOCS)
 
 
+def test_schema_docs_preserve_projection_semantics():
+    by_view = {d["view"]: d["text"].lower() for d in SCHEMA_DOCS}
+    problems = by_view["federated_problems_v"]
+    assert "termed to inactive" in problems
+    assert "55561003 to active" in problems
+    assert "413322009 to resolved" in problems
+
+    labs = by_view["federated_results_v"]
+    assert "source_name is the reporting organization" in labs
+    assert "not a verified clinician" in labs
+
+    meds = by_view["federated_meds_v"]
+    assert "explicit date_stopped first" in meds
+    assert "status_date" in meds
+    assert "inactive meds cannot trigger" in meds
+
+    adt = by_view["federated_adt_v"]
+    assert "diagnosing clinician (adt feed)" in adt
+    assert "never as attending" in adt
+
+
 def test_examples_docs_cover_each_representative_domain():
     from agent.rag.seed import EXAMPLES_DOCS, all_seed_docs
 

@@ -77,8 +77,10 @@ SCHEMA_DOCS: List[_Doc] = [
         "kind": "schema",
         "text": (
             "federated_problems_v: diagnoses and problems. Columns: source_id, code, "
-            "code_type, diagnosis, diagnosis_datetime, status_datetime, chronic_ind, "
-            "service_provider_npi. ICD-10 ~57%, SNOMED ~25%, ICD-9 legacy ~5%. "
+            "code_type, diagnosis, diagnosis_datetime, status, status_datetime, chronic_ind, "
+            "service_provider_npi. The clinical tool normalizes TERMED to inactive, "
+            "55561003 to active, and completed/resolved/413322009 to resolved; "
+            "unknown source statuses remain unchanged. ICD-10 ~57%, SNOMED ~25%, ICD-9 legacy ~5%. "
             "code_type spelling varies — normalize via agent.code_normalizer."
         ),
     },
@@ -87,7 +89,9 @@ SCHEMA_DOCS: List[_Doc] = [
         "kind": "schema",
         "text": (
             "federated_results_v: lab results. Columns: source_id, code, code_type, "
-            "name, mnemonic, result, clean_result, unit, datetime, service_provider. "
+            "name, mnemonic, result, clean_result, unit, datetime, service_provider, "
+            "source_name. source_name is the Reporting organization; service_provider "
+            "is not a verified clinician and must not be labeled as one. "
             "LOINC coverage ~50%; the rest are source-local codes. Always include "
             "a reliability caveat when answering from this view."
         ),
@@ -99,7 +103,9 @@ SCHEMA_DOCS: List[_Doc] = [
             "federated_meds_v: medications. Columns: source_id, ndc_code, rxnorm_code "
             "(both 100% populated), med_name, date_prescribed, prescribing_provider_npi, "
             "med_strength, med_strength_unit, med_form, med_sig, drug_supply_days, "
-            "number_of_refills."
+            "number_of_refills, status, status_date, date_stopped. For inactive statuses, "
+            "the clinical tool uses explicit date_stopped first and status_date as the "
+            "fallback stop date; inactive meds cannot trigger drug-allergy advisories."
         ),
     },
     {
@@ -145,6 +151,8 @@ SCHEMA_DOCS: List[_Doc] = [
             "INPATIENT or clean_status A06, excluding pre-admit and any "
             "CANCEL ADMIT visit. A01 alone is not inpatient. Supports "
             "facility_type/dates."
+            " diagnosing_clinician comes from the admitting ADT event and must be "
+            "presented as 'Diagnosing clinician (ADT feed)', never as attending."
         ),
     },
     {

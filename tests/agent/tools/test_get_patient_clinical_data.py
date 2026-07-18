@@ -6,11 +6,32 @@ import pytest
 from agent.deps import AgentDeps, SelectedPatient
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from agent.tools.get_patient_clinical_data import (
-    get_patient_clinical_data,
-    DemographicsQuery,
-    EncountersQuery,
-    DateRange,
+    AdmissionStay,
+    AllergyItem,
     ClinicalResult,
+    DateRange,
+    DemographicsItem,
+    DemographicsQuery,
+    DiagnosesQuery,
+    DiagnosisItem,
+    EncounterItem,
+    EncountersQuery,
+    ImagingItem,
+    ImagingQuery,
+    ImmunizationItem,
+    ImmunizationsQuery,
+    LabItem,
+    LabsQuery,
+    MedicationItem,
+    MedicationsQuery,
+    ProcedureItem,
+    ProceduresQuery,
+    SurgeriesQuery,
+    SurgeryItem,
+    _effective_med_date_stopped,
+    _maybe_drug_allergy_signal,
+    _normalized_problem_status,
+    get_patient_clinical_data,
 )
 from pydantic_ai import ModelRetry
 
@@ -83,9 +104,6 @@ def test_no_records_found_data_availability(synthetic_db):
     assert result.items == []
 
 
-from agent.tools.get_patient_clinical_data import LabsQuery, LabItem
-
-
 def test_labs_returns_data_present(synthetic_db):
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
@@ -94,6 +112,9 @@ def test_labs_returns_data_present(synthetic_db):
     assert result.data_availability == "data_present"
     assert len(result.items) == 4
     assert all(isinstance(i, LabItem) for i in result.items)
+    labs = [i for i in result.items if isinstance(i, LabItem)]
+    assert {i.source_name for i in labs} == {"Buffalo Medical Group"}
+    assert {i.service_provider for i in labs} == {"BMG Lab"}
 
 
 def test_labs_reliability_note_set_when_non_loinc_present(synthetic_db):
@@ -114,9 +135,6 @@ def test_labs_negative_result_filter(synthetic_db):
     assert result.data_availability == "data_present"
     assert len(result.items) == 1
     assert result.items[0].clean_result == "negative"
-
-
-from agent.tools.get_patient_clinical_data import DiagnosesQuery, DiagnosisItem
 
 
 def test_diagnoses_returns_four_for_john_1962(synthetic_db):
@@ -146,7 +164,31 @@ def test_diagnoses_most_recent_only(synthetic_db):
     assert len(result.items) == 1
 
 
-from agent.tools.get_patient_clinical_data import MedicationsQuery, MedicationItem
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        ({"status": "TERMED"}, "inactive"),
+        ({"status": "55561003"}, "active"),
+        ({"status": "413322009"}, "resolved"),
+        ({"status": "COMPLETED"}, "resolved"),
+        ({"status": "Resolved"}, "resolved"),
+        ({"status": "Working Dx"}, "Working Dx"),
+        ({"status": "TERMED", "chronic_ind": "Y"}, "chronic"),
+        ({"status": "  ", "chronic_ind": "N"}, None),
+    ],
+)
+def test_problem_status_normalization_is_exact(row, expected):
+    assert _normalized_problem_status(row) == expected
+
+
+def test_diagnoses_surface_normalized_status(synthetic_db):
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, _selected_john())
+    result = get_patient_clinical_data(ctx, DiagnosesQuery())
+    by_code = {i.code: i for i in result.items if isinstance(i, DiagnosisItem)}
+    assert by_code["E11.9"].status == "chronic"
+    assert by_code["B16.9"].status == "resolved"
+    assert by_code["0DTJ4ZZ"].status == "resolved"
 
 
 def test_medications_returns_two(synthetic_db):
@@ -164,10 +206,29 @@ def test_medications_surface_status(synthetic_db):
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, MedicationsQuery())
     assert len(result.items) == 2
-    by_name = {i.med_name: i for i in result.items}
+    by_name = {i.med_name: i for i in result.items if isinstance(i, MedicationItem)}
     assert by_name["Metformin"].status == "active"
     assert by_name["Metformin"].date_stopped is None
     assert by_name["Azithromycin"].status == "completed"
+    assert by_name["Azithromycin"].date_stopped == "2026-04-07 00:00"
+
+
+@pytest.mark.parametrize("status", ["Discontinued", "No Longer Active", "SUSPENDED", "On Hold"])
+def test_inactive_medication_uses_status_date_as_stop_date(status):
+    assert (
+        _effective_med_date_stopped({"status": status, "status_date": "2024-06-01", "date_stopped": None})
+        == "2024-06-01"
+    )
+
+
+def test_medication_explicit_stop_date_wins_and_active_status_date_is_not_stop():
+    assert (
+        _effective_med_date_stopped(
+            {"status": "Discontinued", "status_date": "2024-06-01", "date_stopped": "2023-01-01"}
+        )
+        == "2023-01-01"
+    )
+    assert _effective_med_date_stopped({"status": "Active", "status_date": "2024-06-01"}) is None
 
 
 def test_medications_blank_numeric_strings_coerce_to_none(synthetic_db):
@@ -187,19 +248,6 @@ def test_medication_item_blank_and_numeric_string_coercion():
     assert MedicationItem(source_id="x", number_of_refills="  ").number_of_refills is None
     assert MedicationItem(source_id="x", drug_supply_days="30").drug_supply_days == 30
 
-
-from agent.tools.get_patient_clinical_data import (  # noqa: E402
-    AdmissionStay,
-    AllergyItem,
-    DemographicsItem,
-    DiagnosisItem,
-    EncounterItem,
-    ImagingItem,
-    ImmunizationItem,
-    LabItem,
-    ProcedureItem,
-    SurgeryItem,
-)
 
 _ITEM_MODELS = [
     DemographicsItem,
@@ -236,9 +284,6 @@ def test_item_models_tolerate_blank_strings(model):
     model(**kwargs)
 
 
-from agent.tools.get_patient_clinical_data import ImmunizationsQuery, ImmunizationItem
-
-
 def test_immunizations_returns_two(synthetic_db):
     ctx = MagicMock()
     ctx.deps = _deps(synthetic_db, _selected_john())
@@ -256,9 +301,6 @@ def test_immunizations_filtered_by_cvx(synthetic_db):
     result = get_patient_clinical_data(ctx, q)
     assert len(result.items) == 1
     assert "Measles" in result.items[0].vaccine
-
-
-from agent.tools.get_patient_clinical_data import ProceduresQuery, ProcedureItem
 
 
 def test_procedures_returns_orders_and_problems(synthetic_db):
@@ -294,10 +336,6 @@ def test_procedures_filtered_by_cpt(synthetic_db):
     q = ProceduresQuery(cpt_codes=["45378"])
     result = get_patient_clinical_data(ctx, q)
     assert len(result.items) == 1
-
-
-from agent.tools.get_patient_clinical_data import ImagingQuery, ImagingItem
-from agent.tools.get_patient_clinical_data import SurgeriesQuery, SurgeryItem
 
 
 def test_imaging_returns_data_present(synthetic_db):
@@ -461,6 +499,71 @@ def test_allergies_no_conflict_signal_when_meds_dont_overlap(synthetic_db):
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, AllergiesQuery())
     assert result.notes_to_agent is None
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["Discontinued", "No Longer Active", "SUSPENDED", "On Hold", "Completed", "Unknown", None],
+)
+def test_allergy_advisory_excludes_inactive_medications(monkeypatch, status):
+    med = {
+        "rxnorm_code": "10180",
+        "med_name": "Sulfamethoxazole",
+        "status": status,
+        "status_date": "2024-06-01",
+        "date_stopped": None,
+    }
+    monkeypatch.setattr(
+        "agent.tools.get_patient_clinical_data.fetch_rows_across_source_ids",
+        lambda *args, **kwargs: [med],
+    )
+    note = _maybe_drug_allergy_signal(
+        MagicMock(),
+        ["src-mary"],
+        "",
+        [{"allergy": "Sulfa", "type": "Drug allergy"}],
+    )
+    assert note is None
+
+
+def test_allergy_advisory_excludes_explicitly_stopped_medication(monkeypatch):
+    med = {
+        "rxnorm_code": "10180",
+        "med_name": "Sulfamethoxazole",
+        "status": "Active",
+        "date_stopped": "2024-06-01",
+    }
+    monkeypatch.setattr(
+        "agent.tools.get_patient_clinical_data.fetch_rows_across_source_ids",
+        lambda *args, **kwargs: [med],
+    )
+    assert (
+        _maybe_drug_allergy_signal(
+            MagicMock(),
+            ["src-mary"],
+            "",
+            [{"allergy": "Sulfa", "type": "Drug allergy"}],
+        )
+        is None
+    )
+
+
+def test_admission_surfaces_admitting_event_diagnosing_clinician(synthetic_db):
+    from agent.tools.get_patient_clinical_data import AdmissionsQuery
+
+    selected = SelectedPatient(
+        source_id="src-john-1971",
+        display_name="John Smith",
+        dob=date(1971, 8, 12),
+        selected_at=datetime.now(),
+        selection_origin="user_click",
+    )
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, selected)
+    result = get_patient_clinical_data(ctx, AdmissionsQuery(facility_type="inpatient"))
+    stays = [i for i in result.items if isinstance(i, AdmissionStay)]
+    assert len(stays) == 1
+    assert stays[0].diagnosing_clinician == "Admitting diagnosing clinician"
 
 
 def test_allergies_reliability_note_names_source(synthetic_db):
