@@ -2,7 +2,6 @@ import pytest
 from datetime import date
 from unittest.mock import MagicMock
 from pydantic import ValidationError
-from sqlalchemy import text
 from agent.deps import AgentDeps
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from agent.tools.find_patient import (
@@ -10,13 +9,6 @@ from agent.tools.find_patient import (
     PatientSearchQuery,
     PatientSearchResults,
 )
-
-
-@pytest.fixture(autouse=True)
-def _add_date_of_death_to_patient_fixture(synthetic_db):
-    with synthetic_db.begin() as conn:
-        conn.execute(text("ALTER TABLE internal_patient_profile_v ADD COLUMN date_of_death DATE"))
-        conn.execute(text("UPDATE internal_patient_profile_v SET date_of_death = '2024-05-01' WHERE patient_id = 1"))
 
 
 @pytest.fixture
