@@ -14,6 +14,49 @@ def test_prompt_imports_and_renders_today():
     assert datetime.datetime.now(datetime.timezone.utc).date().isoformat() in SYSTEM_PROMPT
 
 
+def test_selection_instructions_frame_deceased_patient_historically():
+    from types import SimpleNamespace
+
+    from agent.deps import SelectedPatient
+    from agent.instructions import selection_instructions
+
+    selected_patient = SelectedPatient(
+        source_id="src-deceased",
+        display_name="Historical Patient",
+        dob=datetime.date(1950, 2, 3),
+        selected_at=datetime.datetime(2026, 7, 18),
+        selection_origin="user_click",
+        date_of_death=datetime.date(2024, 5, 1),
+    )
+
+    result = selection_instructions(SimpleNamespace(deps=SimpleNamespace(selected_patient=selected_patient)))
+
+    assert "DECEASED" in result
+    assert "2024-05-01" in result
+    assert "past tense" in result
+    assert "never imply ongoing care" in result
+
+
+def test_selection_instructions_leave_living_patient_behavior_unchanged():
+    from types import SimpleNamespace
+
+    from agent.deps import SelectedPatient
+    from agent.instructions import selection_instructions
+
+    selected_patient = SelectedPatient(
+        source_id="src-living",
+        display_name="Living Patient",
+        dob=datetime.date(1980, 1, 1),
+        selected_at=datetime.datetime(2026, 7, 18),
+        selection_origin="user_click",
+    )
+
+    result = selection_instructions(SimpleNamespace(deps=SimpleNamespace(selected_patient=selected_patient)))
+
+    assert "DECEASED" not in result
+    assert "past tense" not in result
+
+
 def test_prompt_mentions_phase2_tools():
     for tool in (
         "find_patient",

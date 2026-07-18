@@ -2,6 +2,7 @@ import pytest
 from datetime import date
 from unittest.mock import MagicMock
 from pydantic import ValidationError
+from sqlalchemy import text
 from agent.deps import AgentDeps
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from agent.tools.find_patient import (
@@ -9,6 +10,13 @@ from agent.tools.find_patient import (
     PatientSearchQuery,
     PatientSearchResults,
 )
+
+
+@pytest.fixture(autouse=True)
+def _add_date_of_death_to_patient_fixture(synthetic_db):
+    with synthetic_db.begin() as conn:
+        conn.execute(text("ALTER TABLE internal_patient_profile_v ADD COLUMN date_of_death DATE"))
+        conn.execute(text("UPDATE internal_patient_profile_v SET date_of_death = '2024-05-01' WHERE patient_id = 1"))
 
 
 @pytest.fixture
@@ -57,6 +65,16 @@ def test_find_patient_includes_related_source_ids(deps_factory):
     result = find_patient(ctx, PatientSearchQuery(first_name="John", last_name="Smith"))
     john_1962 = next(m for m in result.matches if m.source_id == "src-john-1962")
     assert "src-john-1962-alt" in john_1962.related_source_ids
+
+
+def test_find_patient_includes_date_of_death_metadata(deps_factory):
+    ctx = MagicMock()
+    ctx.deps = deps_factory()
+
+    result = find_patient(ctx, PatientSearchQuery(first_name="John", dob=date(1962, 5, 1)))
+
+    assert result.matches[0].date_of_death == date(2024, 5, 1)
+    assert result.model_dump(mode="json")["matches"][0]["date_of_death"] == "2024-05-01"
 
 
 def test_find_patient_query_validation():

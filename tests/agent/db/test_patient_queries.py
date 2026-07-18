@@ -1,6 +1,14 @@
 import pytest
+from sqlalchemy import text
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from agent.db.queries.patient import find_patient_sql
+
+
+@pytest.fixture(autouse=True)
+def _add_date_of_death_to_patient_fixture(synthetic_db):
+    with synthetic_db.begin() as conn:
+        conn.execute(text("ALTER TABLE internal_patient_profile_v ADD COLUMN date_of_death DATE"))
+        conn.execute(text("UPDATE internal_patient_profile_v SET date_of_death = '2024-05-01' WHERE patient_id = 1"))
 
 
 def test_find_patient_returns_three_unique_smiths(synthetic_db):
@@ -33,6 +41,15 @@ def test_find_patient_filters_by_dob(synthetic_db):
     rows = adapter.fetch_all(sql, params)
     assert len(rows) == 1
     assert rows[0]["source_id"] == "src-john-1962"
+
+
+def test_find_patient_selects_date_of_death(synthetic_db):
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = find_patient_sql(last_name="Smith", dob="1962-05-01", limit=25)
+
+    rows = adapter.fetch_all(sql, params)
+
+    assert rows[0]["date_of_death"] == "2024-05-01"
 
 
 def test_find_patient_sql_rejects_empty_criteria():
