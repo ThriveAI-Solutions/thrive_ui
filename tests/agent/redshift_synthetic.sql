@@ -121,15 +121,16 @@ CREATE TABLE federated_problems_v (
     code_type TEXT,
     diagnosis TEXT,
     diagnosis_datetime TIMESTAMP,
+    status TEXT,
     status_datetime TIMESTAMP,
     chronic_ind TEXT,
     service_provider_npi TEXT
 );
 INSERT INTO federated_problems_v VALUES
-    ('src-john-1962', 'E11.9', 'ICD-10', 'Type 2 diabetes mellitus without complications', '2024-06-12', '2026-04-01', 'Y', '1234567890'),
-    ('src-john-1962', 'B16.9', 'ICD-10', 'Acute hepatitis B without delta-agent', '2025-09-01', '2025-09-15', 'N', '1234567890'),
-    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', '2024-08-22', 'N', '1234567890'),
-    ('src-john-1962', '0WJG4ZZ', 'ICD-10-PCS', 'Inspection of peritoneal cavity, percutaneous endoscopic', '2025-01-10', '2025-01-10', 'N', '1234567890');
+    ('src-john-1962', 'E11.9', 'ICD-10', 'Type 2 diabetes mellitus without complications', '2024-06-12', '55561003', '2026-04-01', 'Y', '1234567890'),
+    ('src-john-1962', 'B16.9', 'ICD-10', 'Acute hepatitis B without delta-agent', '2025-09-01', '413322009', '2025-09-15', 'N', '1234567890'),
+    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', 'COMPLETED', '2024-08-22', 'N', '1234567890'),
+    ('src-john-1962', '0WJG4ZZ', 'ICD-10-PCS', 'Inspection of peritoneal cavity, percutaneous endoscopic', '2025-01-10', 'RESOLVED', '2025-01-10', 'N', '1234567890');
 
 CREATE TABLE federated_meds_v (
     source_id TEXT,

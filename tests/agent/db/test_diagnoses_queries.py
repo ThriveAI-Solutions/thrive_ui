@@ -1,28 +1,17 @@
-import pytest
-from sqlalchemy import text
-
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 from agent.db.queries.diagnoses import diagnoses_sql
 
 
-@pytest.fixture
-def diagnoses_db(synthetic_db):
-    """Add the catalog-backed status column to this focused legacy fixture."""
-    with synthetic_db.begin() as conn:
-        conn.execute(text("ALTER TABLE federated_problems_v ADD COLUMN status TEXT"))
-    return synthetic_db
-
-
-def test_diagnoses_for_source_id(diagnoses_db):
-    adapter = AnalyticsDbAdapter(engine=diagnoses_db, dialect="sqlite")
+def test_diagnoses_for_source_id(synthetic_db):
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = diagnoses_sql(source_id="src-john-1962")
     rows = adapter.fetch_all(sql, params)
     assert len(rows) == 4
     assert "status" in rows[0]
 
 
-def test_diagnoses_filtered_by_icd10_codes(diagnoses_db):
-    adapter = AnalyticsDbAdapter(engine=diagnoses_db, dialect="sqlite")
+def test_diagnoses_filtered_by_icd10_codes(synthetic_db):
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = diagnoses_sql(
         source_id="src-john-1962",
         icd10_codes=["E11.9"],
@@ -32,8 +21,8 @@ def test_diagnoses_filtered_by_icd10_codes(diagnoses_db):
     assert rows[0]["diagnosis"].startswith("Type 2 diabetes")
 
 
-def test_diagnoses_filtered_by_text(diagnoses_db):
-    adapter = AnalyticsDbAdapter(engine=diagnoses_db, dialect="sqlite")
+def test_diagnoses_filtered_by_text(synthetic_db):
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = diagnoses_sql(
         source_id="src-john-1962",
         condition_text="diabetes",
@@ -42,8 +31,8 @@ def test_diagnoses_filtered_by_text(diagnoses_db):
     assert len(rows) == 1
 
 
-def test_diagnoses_most_recent_only(diagnoses_db):
-    adapter = AnalyticsDbAdapter(engine=diagnoses_db, dialect="sqlite")
+def test_diagnoses_most_recent_only(synthetic_db):
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = diagnoses_sql(
         source_id="src-john-1962",
         most_recent_only=True,
