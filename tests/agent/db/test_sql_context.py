@@ -16,8 +16,12 @@ from agent.rag.seed import SCHEMA_DOCS
 # is guarded separately by test_assembled_description_under_budget in
 # tests/agent/tools/test_run_sql_description.py.
 # Bumped 7000 → 8000 on 2026-07-06 for the EMPI sibling-expansion CTE in the
-# per-patient example + identity doc (~7.7k current, ~300 headroom).
-_BUDGET_CHARS = 8000
+# per-patient example + identity doc, then 8000 → 8400 on 2026-07-18 for the
+# #297/#298/#301/#303 clinical-parity provenance docs (problem-status
+# normalization, labs source_name, meds inactive stop-date, ADT
+# diagnosing_clinician) — kept concise, pinned by test_seed_corpus.py
+# (~8.18k current, ~220 headroom).
+_BUDGET_CHARS = 8400
 
 
 def test_dw_prefix_qualifies_every_view_in_catalog():
