@@ -84,6 +84,7 @@ def _clear_selected_patient() -> None:
         "selected_patient_source_id",
         "selected_patient_display_name",
         "selected_patient_dob",
+        "selected_patient_date_of_death",
         "selection_origin",
         "selected_at",
     ):
@@ -99,6 +100,12 @@ def _render_selected_patient_sidebar() -> None:
 
     with st.sidebar.container(border=True):
         st.markdown(f"📋 **{name}**" + (f"  \n_b. {dob}_" if dob else ""))
+        date_of_death = st.session_state.get("selected_patient_date_of_death")
+        if date_of_death:
+            st.warning(
+                f"Deceased patient — date of death: {date_of_death}. "
+                "Historical chart only; do not present ongoing care."
+            )
         if st.button("Clear patient", key="clear_patient_sidebar_btn", width="stretch"):
             _clear_selected_patient()
             st.rerun()
