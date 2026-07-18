@@ -58,6 +58,7 @@ def transform_adt(
                 "status": "Admitted",
                 "clean_status": "ADMIT",
                 "admit_from": "Home",
+                "diagnosing_clinician": str(e.get("PROVIDER", "")) or None,
                 "discharge_disposition": None,
                 "discharge_location": None,
             }
@@ -70,6 +71,7 @@ def transform_adt(
                     "status": "Discharged",
                     "clean_status": "DISCHARGE",
                     "admit_from": None,
+                    "diagnosing_clinician": None,
                     "discharge_disposition": "Discharged to home",
                     "discharge_location": "Home",
                 }

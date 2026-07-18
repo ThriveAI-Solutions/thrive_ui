@@ -255,6 +255,7 @@ CREATE TABLE federated_adt_v (
     clean_status TEXT,
     cancelled_flag TEXT,
     admit_from TEXT,
+    diagnosing_clinician TEXT,
     discharge_disposition TEXT,
     discharge_location TEXT
 );
@@ -273,7 +274,11 @@ CREATE TABLE federated_adt_v (
 --  p8/V801 ambulatory registration+discharge preceded by an admin A08 update                        -> outpatient visit, anchored on the registration
 --  p8/V802 practice that emits ONLY A31 with Unknown ('U') setting (Buffalo Medical Group)          -> real contact: surfaces under 'any', NOT under 'outpatient'
 --  p8/V803 pre-admit only (A08 with 'P' preadmit class + A05)                                        -> NOT a visit
-INSERT INTO federated_adt_v VALUES
+INSERT INTO federated_adt_v (
+    patient_id, visit_number, event_date, event_location, location_type,
+    clean_setting, clean_status, cancelled_flag, admit_from,
+    discharge_disposition, discharge_location
+) VALUES
     (1, 'V100', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'ADMIT',     NULL, 'Emergency Dept', NULL,                 NULL),
     (1, 'V100', '2025-06-16 09:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'A02',       NULL, NULL,            NULL,                 NULL),
     (1, 'V100', '2025-06-18 11:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'DISCHARGE', NULL, NULL,            'Discharged to home', 'Home'),
@@ -300,6 +305,12 @@ INSERT INTO federated_adt_v VALUES
     (8, 'V802', '2026-05-03 08:00', 'Buffalo Medical Group',    'Practice', 'U',         'A31',       'N',  NULL,            NULL,                 NULL),
     (8, 'V803', '2026-05-04 08:00', 'Kaleida Methodist',        'Hospital', 'P',         'A08',       'N',  NULL,            NULL,                 NULL),
     (8, 'V803', '2026-05-04 09:00', 'Kaleida Methodist',        'Hospital', 'P',         'A05',       'N',  NULL,            NULL,                 NULL);
+UPDATE federated_adt_v
+SET diagnosing_clinician = 'ED diagnosing clinician'
+WHERE visit_number = 'V200' AND clean_status = 'REGISTRATION';
+UPDATE federated_adt_v
+SET diagnosing_clinician = 'Admitting diagnosing clinician'
+WHERE visit_number = 'V200' AND clean_status = 'A06';
 
 -- federated_allergies_v: dedicated allergies view per epic #201. Columns
 -- match the production view confirmed 2026-06-26: the clinical event date is
