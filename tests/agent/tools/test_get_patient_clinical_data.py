@@ -173,11 +173,12 @@ def test_diagnoses_most_recent_only(synthetic_db):
         ({"status": "COMPLETED"}, "resolved"),
         ({"status": "Resolved"}, "resolved"),
         ({"status": "Working Dx"}, "Working Dx"),
-        ({"status": "TERMED", "chronic_ind": "Y"}, "chronic"),
+        ({"status": "TERMED", "chronic_ind": "Y"}, "inactive"),
         ({"status": "  ", "chronic_ind": "N"}, None),
     ],
 )
 def test_problem_status_normalization_is_exact(row, expected):
+    """chronic_ind is never consulted — a legacy flag, not a status."""
     assert _normalized_problem_status(row) == expected
 
 
@@ -186,7 +187,9 @@ def test_diagnoses_surface_normalized_status(synthetic_db):
     ctx.deps = _deps(synthetic_db, _selected_john())
     result = get_patient_clinical_data(ctx, DiagnosesQuery())
     by_code = {i.code: i for i in result.items if isinstance(i, DiagnosisItem)}
-    assert by_code["E11.9"].status == "chronic"
+    # E11.9 has chronic_ind='Y' in the fixture but status '55561003' → "active";
+    # the legacy chronic flag must not override the normalized SNOMED status.
+    assert by_code["E11.9"].status == "active"
     assert by_code["B16.9"].status == "resolved"
     assert by_code["0DTJ4ZZ"].status == "resolved"
 

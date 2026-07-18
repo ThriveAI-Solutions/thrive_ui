@@ -42,6 +42,17 @@ def test_prompt_preserves_projection_semantics():
     assert "never relabel it as attending" in prompt
 
 
+def test_prompt_diagnosis_status_excludes_chronic():
+    """Diagnosis guidance teaches only active/inactive/resolved.  chronic_ind
+    is a legacy flag, not a status, and must never surface as a fourth status
+    value in the prompt."""
+    from agent.system_prompt import SYSTEM_PROMPT
+
+    lower = SYSTEM_PROMPT.lower()
+    assert "active, inactive, or resolved" in lower
+    assert "chronic" not in lower
+
+
 def test_prompt_warns_about_impressions_and_note_bodies():
     p = SYSTEM_PROMPT.lower()
     assert "impression" in p

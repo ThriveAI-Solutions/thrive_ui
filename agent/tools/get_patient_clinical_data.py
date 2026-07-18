@@ -230,6 +230,8 @@ class DiagnosisItem(BaseModel):
     code_type: Optional[str] = None
     diagnosis: Optional[str] = None
     diagnosis_datetime: Optional[str] = None
+    # Legacy raw flag, passed through as-is. Never consulted for `status` —
+    # see _normalized_problem_status.
     chronic_ind: Optional[str] = None
     service_provider_npi: Optional[str] = None
     status: Optional[str] = None
@@ -522,13 +524,13 @@ _PROBLEM_STATUS_MAP = {
 
 
 def _normalized_problem_status(row: dict) -> Optional[str]:
-    """Prefer the legacy chronic flag, otherwise normalize the live status.
+    """Normalize the live status.
 
     Unknown source vocabulary passes through unchanged rather than being put in
-    a clinically misleading bucket.
+    a clinically misleading bucket. `chronic_ind` is a legacy flag, not a
+    status, and is never consulted here — see DiagnosisItem.chronic_ind for
+    the raw passthrough.
     """
-    if str(row.get("chronic_ind") or "").strip().upper() == "Y":
-        return "chronic"
     raw = str(row.get("status") or "").strip()
     if not raw:
         return None

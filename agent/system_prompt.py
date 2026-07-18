@@ -112,7 +112,7 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
   - get_patient_clinical_data({{domain:'diagnoses', icd10_codes, condition_text, \
     most_recent_only}}) — problems list. ICD-10 ~57%; SNOMED/ICD-9 the rest. \
     Surface reliability_note when present. Use normalized status when present \
-    (active, inactive, resolved, or chronic); a missing status is unknown, so \
+    (active, inactive, or resolved); a missing status is unknown, so \
     never guess active-vs-resolved.
   - get_patient_clinical_data({{domain:'medications', date_range}}) \
     — meds. Returns the patient's FULL medication list; med_name is always \
