@@ -14,6 +14,9 @@ from __future__ import annotations
 from typing import Any, Callable, Optional, Tuple
 
 from agent.db.queries.patient import all_source_ids_sql, resolve_source_patient_sql
+from utils.quick_logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def federated_source_ids(adapter: Any, source_id: str, schema_prefix: str = "") -> list[str]:
@@ -23,13 +26,27 @@ def federated_source_ids(adapter: Any, source_id: str, schema_prefix: str = "") 
     so the same source_id recurs across rows — dedupe is load-bearing.
     Ids unknown to EMPI (e.g. minimal test fixtures) fall back to the
     entered id alone.
+
+    Ambiguity is fail-closed (#243): if the entered source_id resolves to more
+    than one distinct internal patient, return an EMPTY set rather than
+    silently picking one — federating one of two different real patients'
+    charts would leak or misattribute data. Downstream retrieval then finds
+    nothing, the same posture as a nonexistent id. Only a count is logged,
+    never any identifier.
     """
     resolve_sql, _ = resolve_source_patient_sql(schema_prefix=schema_prefix)
     resolved = adapter.fetch_all(resolve_sql, {"source_id": source_id})
     if not resolved:
         return [source_id]
+    patient_ids = {r["internal_patient_id"] for r in resolved}
+    if len(patient_ids) > 1:
+        logger.warning(
+            "Ambiguous source_id resolves to %d distinct patients; refusing to federate.",
+            len(patient_ids),
+        )
+        return []
     sid_sql, _ = all_source_ids_sql(schema_prefix=schema_prefix)
-    sid_rows = adapter.fetch_all(sid_sql, {"internal_patient_id": resolved[0]["internal_patient_id"]})
+    sid_rows = adapter.fetch_all(sid_sql, {"internal_patient_id": next(iter(patient_ids))})
     sids = list(dict.fromkeys(r["source_id"] for r in sid_rows))
     return sids or [source_id]
 
