@@ -46,6 +46,7 @@ def diagnoses_sql(
             code_type,
             diagnosis,
             diagnosis_datetime,
+            status,
             status_datetime,
             chronic_ind,
             service_provider_npi
