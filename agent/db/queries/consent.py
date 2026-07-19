@@ -114,6 +114,22 @@ def patient_consent_sql(*, patient_id: int, schema_prefix: str = "", dialect: st
     return sql, {"patient_id": patient_id}
 
 
+def consented_roster_sql(*, schema_prefix: str = "", dialect: str = "sqlite") -> Tuple[str, dict]:
+    """Every currently-consented EMPI patient_id (person_latest = 'TRUE').
+
+    Source of truth for the consent snapshot (#317): materialize/point-look-up
+    against this set instead of running the per-patient union-contract CTE on
+    every gate check. Returns one column, patient_id.
+    """
+    sql = (
+        _person_latest_cte(schema_prefix, dialect, patient_scope=False)
+        + f"""
+    SELECT patient_id FROM person_latest WHERE consent = '{CONSENT_GRANTED_VALUE}'
+    """
+    )
+    return sql, {}
+
+
 def consent_population_counts_sql(*, schema_prefix: str = "", dialect: str = "sqlite") -> Tuple[str, dict]:
     """Person-grain consent breakdown for the #242 investigation.
 
