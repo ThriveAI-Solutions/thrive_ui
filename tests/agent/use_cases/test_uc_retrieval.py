@@ -39,6 +39,29 @@ def test_uc248_diabetes_history_and_latest_a1c(synthetic_db):
     assert a1c and a1c[0].clean_result == "7.2"  # most recent A1C value retrievable
 
 
+def test_condition_code_prefix_narrow_reading_diabetes(synthetic_db):
+    """#311: narrow "has diabetes" via ICD-10 block prefixes (E08-E13) matches
+    E11.9 without needing the exact code."""
+    adapter, sids = _ctx(synthetic_db)
+    dx = _build_diagnoses_result(
+        adapter, sids, "", DiagnosesQuery(condition_code_prefixes=["E08", "E09", "E10", "E11", "E13"])
+    )
+    assert any(getattr(i, "code", None) == "E11.9" for i in dx.items)
+
+
+def test_condition_code_prefix_is_selective(synthetic_db):
+    """#311: a prefix block only matches its own codes — the diabetes block does
+    not pull in the Hep B diagnosis (B16.9), and the Hep B block does."""
+    adapter, sids = _ctx(synthetic_db)
+    diabetes = _build_diagnoses_result(adapter, sids, "", DiagnosesQuery(condition_code_prefixes=["E11"]))
+    assert all(getattr(i, "code", "") != "B16.9" for i in diabetes.items)
+
+    hepb = _build_diagnoses_result(
+        adapter, sids, "", DiagnosesQuery(condition_code_prefixes=["B16", "B17", "B18", "B19"])
+    )
+    assert any(getattr(i, "code", None) == "B16.9" for i in hepb.items)
+
+
 def test_uc250_hepatitis_negative_with_performing_lab(synthetic_db):
     """#250 UC3-2 (HIGH): negative hepatitis result + date drawn + performing lab."""
     adapter, sids = _ctx(synthetic_db)
