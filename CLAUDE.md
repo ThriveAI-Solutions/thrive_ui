@@ -137,6 +137,13 @@ password = "<random-strong-secret>"
 [security]
 allow_llm_to_see_data = false
 restrict_rag_by_role = true
+# enforce_consent = false            # #244: gate patient disclosure on consent. Default OFF —
+#                                    # enabling with no warehouse consent data denies every patient.
+# consent_bypass_roles = ["admin"]  # roles exempt from consent (Erie-County-clinical principle).
+#                                    # Names (admin/doctor/nurse/patient) or int codes; unknown entries
+#                                    # dropped fail-safe. Default empty = every role gated.
+# small_cell_threshold = 11          # #244/#312: suppress aggregate counts of 1..N-1. Default 11
+#                                    # is INFORMAL (not yet HeL-ratified); the suppressed label tracks it.
 
 [agent_logging]
 mode = "full"                    # full | scrubbed | disabled
@@ -181,6 +188,7 @@ Useful: `uv run alembic current`, `uv run alembic history`, `uv run alembic down
 - Multiple deployments on the same hostname (e.g. prod at `/` and a dev at `/dev`) MUST set distinct `cookie.prefix` values, or they'll read each other's session cookies and point at user_ids from the wrong DB
 - Ollama defaults to `http://localhost:11434` - ensure model is pulled and running
 - Role-restricted RAG retrieval on by default; disable with `security.restrict_rag_by_role = false`
+- Consent enforcement (#244) is OFF by default (`[security].enforce_consent`) and fail-closed when on: non-consented patients collapse to the same "not found" as nonexistent ones (never inferable). Under enforcement `search_patients_by_criteria` goes aggregate-only (identified sample withheld, small counts suppressed) and freeform `run_sql` allows only de-identified aggregates (sqlglot 3-mode gate in `agent/consent/sql_gate.py`), refusing row-level queries. The `small_cell_threshold` default of 11 is INFORMAL — pending Sarah/HeL ratification (#312); do not re-document it as "decided". Erie-County-clinical role bypass is config-driven (`consent_bypass_roles`) and empty until HeL ratifies the mapping.
 - Agentic run logging defaults to `full` fidelity (verbatim PHI in the app SQLite DB); set `[agent_logging].mode = "scrubbed"` to hash SQL literals and drop full result rows, or `disabled` to turn it off. Protect DB backups accordingly.
 - Medications retrieval does NOT use RxNorm codes. `get_patient_clinical_data(domain='medications')` returns the patient's full list; the LLM filters by `med_name` (with `status`/`date_stopped` for active vs discontinued). Don't reintroduce a `rxnorm_codes`/`drug_class` filter on meds — drug classes aren't RxNorm concepts (they live in ATC/RxClass), and curated ingredient-level codes don't match the clinical-drug-level codes stored on prescription rows (TTY granularity mismatch), so code-based meds filters silently return nothing. `search_codes` stays valid for icd10/icd9/loinc/cvx/cpt/rxnorm/snomed; cohort med filtering should use `med_name ILIKE`, not codes. Rationale + history: `docs/superpowers/specs/2026-06-26-simplify-medications-retrieval-design.md`
 - Vocabulary data (`vocab_*` tables backing `search_codes`) lives in the app SQLite DB, not in git. Reload it with `uv run python scripts/import_vocab_dump.py data/vocab/`; regenerate the dump with `uv run python scripts/vocab_export_chiron.py` against chiron's app Postgres (localhost:5470, chiron's own docker compose). Importing grows the app DB by ~100-200MB. Fresh checkouts that skip the import will hit `VocabNotLoadedError` from every code-search path (`search_codes`, `condition_sets`, `{{codes:<set_id>}}`) until it's run.
