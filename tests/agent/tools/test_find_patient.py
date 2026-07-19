@@ -59,6 +59,16 @@ def test_find_patient_includes_related_source_ids(deps_factory):
     assert "src-john-1962-alt" in john_1962.related_source_ids
 
 
+def test_find_patient_includes_date_of_death_metadata(deps_factory):
+    ctx = MagicMock()
+    ctx.deps = deps_factory()
+
+    result = find_patient(ctx, PatientSearchQuery(first_name="John", dob=date(1962, 5, 1)))
+
+    assert result.matches[0].date_of_death == date(2024, 5, 1)
+    assert result.model_dump(mode="json")["matches"][0]["date_of_death"] == "2024-05-01"
+
+
 def test_find_patient_query_validation():
     with pytest.raises(ValidationError):
         PatientSearchQuery(last_name="Smith", limit=200)  # over le=100

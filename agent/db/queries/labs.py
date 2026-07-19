@@ -75,7 +75,8 @@ def labs_sql(
             clean_result,
             unit,
             datetime AS event_datetime,
-            service_provider
+            service_provider,
+            source_name
         FROM {schema_prefix}federated_results_v
         WHERE {" AND ".join(where)}
         ORDER BY datetime DESC NULLS LAST{limit_clause}

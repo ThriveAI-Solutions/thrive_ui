@@ -61,6 +61,7 @@ def engine():
                 "patient_id TEXT, visit_number TEXT, event_date TEXT, "
                 "clean_status TEXT, clean_setting TEXT, cancelled_flag TEXT, "
                 "event_location TEXT, location_type TEXT, admit_from TEXT, "
+                "diagnosing_clinician TEXT, "
                 "discharge_disposition TEXT, discharge_location TEXT)"
             )
         )

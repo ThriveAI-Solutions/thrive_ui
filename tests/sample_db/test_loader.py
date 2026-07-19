@@ -10,6 +10,12 @@ from scripts.load_sample_db import (
     copy_blocks_to_inserts,
     load_into_sqlite,
 )
+from scripts.sample_db.dump_writer import schema_sha256
+
+
+REPO = Path(__file__).resolve().parents[2]
+COMMITTED_DUMP = REPO / "data/sample/thrive_sample.sql.zst"
+SAMPLE_SCHEMA = REPO / "scripts/sample_db/schema.sql"
 
 
 @pytest.fixture
@@ -53,3 +59,15 @@ def test_load_into_sqlite(tmp_path: Path, tiny_dump: Path):
     conn = sqlite3.connect(db_path)
     rows = conn.execute("SELECT id, name FROM t ORDER BY id").fetchall()
     assert rows == [(1, "Alice"), (2, "Bob")]
+
+
+def test_committed_dump_matches_current_sample_schema():
+    """Schema changes must ship with a regenerated synthetic dump."""
+    expected = schema_sha256(SAMPLE_SCHEMA.read_text())
+    with COMMITTED_DUMP.open("rb") as compressed:
+        with zstd.ZstdDecompressor().stream_reader(compressed) as reader:
+            dump_prefix = reader.read(256 * 1024).decode("utf-8")
+
+    assert f"VALUES ('{expected}')" in dump_prefix, (
+        "Committed sample dump is stale — run 'uv run python -m scripts.sample_db.etl'"
+    )

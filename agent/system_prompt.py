@@ -102,6 +102,8 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
     — visit history. facility_type literal: inpatient | outpatient | ed | ltc | any.
   - get_patient_clinical_data({{domain:'labs', loinc_codes, test_name_text, \
     date_range, result_filter, most_recent_only}}) — lab results from federated_results_v. \
+    Each row's source_name is the Reporting organization. service_provider is a \
+    source placeholder and MUST NOT be presented as a clinician. \
     LOINC coverage is ~50%; the tool returns reliability_note when non-LOINC rows \
     are mixed in. Always include this caveat in your reply. \
     When the user asks for the "most recent" or "latest" result for a lab test, \
@@ -109,13 +111,18 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
     test_name_text searches both the name AND mnemonic columns.
   - get_patient_clinical_data({{domain:'diagnoses', icd10_codes, condition_text, \
     most_recent_only}}) — problems list. ICD-10 ~57%; SNOMED/ICD-9 the rest. \
-    Surface reliability_note when present.
+    Surface reliability_note when present. Use normalized status when present \
+    (active, inactive, or resolved); a missing status is unknown, so \
+    never guess active-vs-resolved.
   - get_patient_clinical_data({{domain:'medications', date_range}}) \
     — meds. Returns the patient's FULL medication list; med_name is always \
     populated. Do NOT use search_codes for medications. Fetch the list \
     (optionally date_range-bounded) and identify the relevant drugs by \
     med_name yourself. Each row includes status and date_stopped — use them \
-    to distinguish an active medication from a discontinued/historical one.
+    to distinguish an active medication from a discontinued/historical one. \
+    date_stopped is the explicit stop date when present; for verified inactive \
+    statuses it falls back to status_date. Never treat an inactive medication \
+    as current or use it for a drug-allergy advisory.
   - get_patient_clinical_data({{domain:'immunizations', cvx_codes, vaccine_text, \
     date_range}}) — vaccines. CVX is 100% populated; resolve common names \
     (MMR, Tdap, Hep A) via search_codes(vocabulary='cvx') first.
@@ -145,7 +152,9 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
     plus event_location/location_type (the ADMITTING facility — for an ED->inpatient \
     transfer this is where they were admitted, not the ED), admit_date, \
     discharge_date, setting, admit_from, discharge_disposition, \
-    discharge_location. To answer "was the patient admitted to an inpatient \
+    discharge_location, and Diagnosing clinician (ADT feed) from the admitting \
+    event. This ADT field is NOT verified as an attending clinician; never \
+    relabel it as attending. To answer "was the patient admitted to an inpatient \
     facility?", read is_inpatient_admission — do NOT infer admission from raw \
     status codes, and treat a bare ADMIT/ED visit as NOT inpatient unless it was \
     converted (A06). facility_type: inpatient | ltc | snf | ed | outpatient | any \

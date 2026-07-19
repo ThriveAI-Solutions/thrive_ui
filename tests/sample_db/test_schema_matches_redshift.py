@@ -49,6 +49,10 @@ def _parse_ddl_columns(ddl: str) -> dict[str, list[str]]:
 
 
 def _catalog_columns() -> dict[str, list[str]]:
+    if not CATALOG.is_file():
+        pytest.skip(
+            f"Redshift catalog is local-only and unavailable; schema drift checks require {CATALOG.relative_to(REPO)}"
+        )
     rows = json.loads(CATALOG.read_text())
     out: dict[str, list[tuple[int, str]]] = {}
     for r in rows:

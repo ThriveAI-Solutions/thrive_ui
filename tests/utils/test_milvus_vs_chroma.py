@@ -1,5 +1,3 @@
-from unittest.mock import MagicMock
-
 import chromadb
 import pytest
 
@@ -39,44 +37,48 @@ def chroma_in_memory():
     return chromadb.Client()
 
 
-@pytest.mark.milvus
-@pytest.mark.skipif(pytest.importorskip("pymilvus", reason="pymilvus not installed") is None, reason="pymilvus missing")
-def test_milvus_hybrid_retrieval_prefers_keyword_match(tmp_path):
-    # Milvus Lite-backed store
-    milvus = ThriveAI_Milvus(
+@pytest.fixture
+def milvus_lite(tmp_path, monkeypatch):
+    """Give each test an isolated store that never calls configured embedding APIs."""
+    store = ThriveAI_Milvus(
         user_role=1,
         config={
             "mode": "lite",
+            "uri": str(tmp_path / "milvus.db"),
             "text_dim": 128,
             "collection_prefix": "test_milvus",
         },
     )
 
+    def deterministic_embedding(text):
+        return store._vectorizer.transform([text]).toarray().astype("float32")[0].tolist()
+
+    monkeypatch.setattr(store, "generate_embedding", deterministic_embedding)
+    yield store
+
+    close = getattr(store._client, "close", None)
+    if callable(close):
+        close()
+
+
+@pytest.mark.milvus
+@pytest.mark.skipif(pytest.importorskip("pymilvus", reason="pymilvus not installed") is None, reason="pymilvus missing")
+def test_milvus_hybrid_retrieval_prefers_keyword_match(milvus_lite):
     # Seed documentation
     relevant_doc = "Patient instructions contain UNIQUEKEY for discharge."
     other_doc = "General info without the special token."
-    milvus.add_documentation(relevant_doc)
-    milvus.add_documentation(other_doc)
+    milvus_lite.add_documentation(relevant_doc)
+    milvus_lite.add_documentation(other_doc)
 
     # Query using the keyword that BM25 should capture
-    results = milvus.get_related_documentation("Please find UNIQUEKEY in instructions")
+    results = milvus_lite.get_related_documentation("Please find UNIQUEKEY in instructions")
 
     assert any("UNIQUEKEY" in doc for doc in results), "Milvus hybrid search should retrieve the keyword-matching doc"
 
 
 @pytest.mark.milvus
 @pytest.mark.skipif(pytest.importorskip("pymilvus", reason="pymilvus not installed") is None, reason="pymilvus missing")
-def test_milvus_vs_chroma_top1_comparison(tmp_path, chroma_in_memory):
-    # Milvus Lite-backed store
-    milvus = ThriveAI_Milvus(
-        user_role=1,
-        config={
-            "mode": "lite",
-            "text_dim": 128,
-            "collection_prefix": "cmp",
-        },
-    )
-
+def test_milvus_vs_chroma_top1_comparison(milvus_lite, chroma_in_memory):
     # Chroma in-memory store with weak dense embedding
     chroma = ConcreteThriveAIChroma(user_role=1, client=chroma_in_memory)
 
@@ -90,7 +92,7 @@ def test_milvus_vs_chroma_top1_comparison(tmp_path, chroma_in_memory):
     ]
 
     for d in docs:
-        milvus.add_documentation(d)
+        milvus_lite.add_documentation(d)
         chroma.add_documentation(d)
 
     queries = [
@@ -103,7 +105,7 @@ def test_milvus_vs_chroma_top1_comparison(tmp_path, chroma_in_memory):
     chroma_top1_hits = 0
 
     for q, token in queries:
-        m_res = milvus.get_related_documentation(q)
+        m_res = milvus_lite.get_related_documentation(q)
         c_res = chroma.get_related_documentation(q)
 
         # Count top-1 accuracy: does the first result contain the token?
@@ -119,16 +121,7 @@ def test_milvus_vs_chroma_top1_comparison(tmp_path, chroma_in_memory):
 
 @pytest.mark.milvus
 @pytest.mark.skipif(pytest.importorskip("pymilvus", reason="pymilvus not installed") is None, reason="pymilvus missing")
-def test_milvus_vs_chroma_mrr_at_k(tmp_path, chroma_in_memory):
-    milvus = ThriveAI_Milvus(
-        user_role=1,
-        config={
-            "mode": "lite",
-            "text_dim": 128,
-            "collection_prefix": "cmp_mrr",
-        },
-    )
-
+def test_milvus_vs_chroma_mrr_at_k(milvus_lite, chroma_in_memory):
     chroma = ConcreteThriveAIChroma(user_role=1, client=chroma_in_memory)
 
     docs = [
@@ -140,7 +133,7 @@ def test_milvus_vs_chroma_mrr_at_k(tmp_path, chroma_in_memory):
     ]
 
     for d in docs:
-        milvus.add_documentation(d)
+        milvus_lite.add_documentation(d)
         chroma.add_documentation(d)
 
     queries = [
@@ -159,7 +152,7 @@ def test_milvus_vs_chroma_mrr_at_k(tmp_path, chroma_in_memory):
     chroma_mrr = 0.0
 
     for q, token in queries:
-        m_res = milvus.get_related_documentation(q)
+        m_res = milvus_lite.get_related_documentation(q)
         c_res = chroma.get_related_documentation(q)
         milvus_mrr += mrr_at_k(m_res, token, k=3)
         chroma_mrr += mrr_at_k(c_res, token, k=3)

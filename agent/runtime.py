@@ -651,6 +651,7 @@ def _render_event(event: StreamEvent, state: dict[str, Any] | None = None) -> No
                 "selected_patient_source_id",
                 "selected_patient_display_name",
                 "selected_patient_dob",
+                "selected_patient_date_of_death",
                 "selection_origin",
                 "selected_at",
                 "agent_message_history",

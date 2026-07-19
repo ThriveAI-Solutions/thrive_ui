@@ -24,6 +24,7 @@ CREATE TABLE internal_patient_profile_v (
     last_name TEXT,
     full_name TEXT,
     date_of_birth DATE,
+    date_of_death DATE,
     age INTEGER,
     gender TEXT,
     last_date_of_visit DATE,
@@ -35,14 +36,14 @@ CREATE TABLE internal_patient_profile_v (
     state TEXT
 );
 INSERT INTO internal_patient_profile_v VALUES
-    (1, 'John', 'Smith', 'John Smith', '1962-05-01', 64, 'M', '2026-04-01', 'Buffalo Medical Group', 'Dr. Foo', 'diabetes', '14223', 'Buffalo', 'NY'),
-    (2, 'John', 'Smith', 'John Smith', '1971-08-12', 54, 'M', '2026-03-15', 'Kaleida Methodist', 'Dr. Bar', NULL, '14201', 'Buffalo', 'NY'),
-    (3, 'Jane', 'Smith', 'Jane Smith', '1985-02-20', 41, 'F', '2026-04-20', 'ECMC', 'Dr. Baz', NULL, '15213', 'Pittsburgh', 'PA'),
-    (4, 'Mary', 'Jones', 'Mary Jones', '1956-03-10', 70, 'F', '2026-04-15', 'Kaleida Methodist', 'Dr. Foo', 'diabetes, hypertension', '14214', 'Buffalo', 'NY'),
-    (5, 'Robert', 'Lee',  'Robert Lee',  '1970-11-22', 55, 'M', '2026-04-10', 'Buffalo Medical Group', 'Dr. Bar', 'hyperlipidemia', '14202', 'Buffalo', 'NY'),
-    (6, 'Anne',   'Garcia','Anne Garcia', '1948-01-05', 78, 'F', '2024-08-01', 'Kaleida Methodist', 'Dr. Baz', 'hypertension', '14209', 'Buffalo', 'NY'),
-    (7, 'Daniel', 'Wright','Daniel Wright','1977-09-30', 48, 'M', '2026-04-25', 'Buffalo Medical Group', 'Dr. Foo', 'type 2 diabetes mellitus', '14216', 'Buffalo', 'NY'),
-    (8, 'Susan',  'Park',  'Susan Park',   '1955-07-14', 71, 'F', '2026-03-20', 'Kaleida Methodist', 'Dr. Bar', 'diabetes', '14204', 'Buffalo', 'NY');
+    (1, 'John', 'Smith', 'John Smith', '1962-05-01', '2024-05-01', 64, 'M', '2026-04-01', 'Buffalo Medical Group', 'Dr. Foo', 'diabetes', '14223', 'Buffalo', 'NY'),
+    (2, 'John', 'Smith', 'John Smith', '1971-08-12', NULL, 54, 'M', '2026-03-15', 'Kaleida Methodist', 'Dr. Bar', NULL, '14201', 'Buffalo', 'NY'),
+    (3, 'Jane', 'Smith', 'Jane Smith', '1985-02-20', NULL, 41, 'F', '2026-04-20', 'ECMC', 'Dr. Baz', NULL, '15213', 'Pittsburgh', 'PA'),
+    (4, 'Mary', 'Jones', 'Mary Jones', '1956-03-10', NULL, 70, 'F', '2026-04-15', 'Kaleida Methodist', 'Dr. Foo', 'diabetes, hypertension', '14214', 'Buffalo', 'NY'),
+    (5, 'Robert', 'Lee',  'Robert Lee',  '1970-11-22', NULL, 55, 'M', '2026-04-10', 'Buffalo Medical Group', 'Dr. Bar', 'hyperlipidemia', '14202', 'Buffalo', 'NY'),
+    (6, 'Anne',   'Garcia','Anne Garcia', '1948-01-05', NULL, 78, 'F', '2024-08-01', 'Kaleida Methodist', 'Dr. Baz', 'hypertension', '14209', 'Buffalo', 'NY'),
+    (7, 'Daniel', 'Wright','Daniel Wright','1977-09-30', NULL, 48, 'M', '2026-04-25', 'Buffalo Medical Group', 'Dr. Foo', 'type 2 diabetes mellitus', '14216', 'Buffalo', 'NY'),
+    (8, 'Susan',  'Park',  'Susan Park',   '1955-07-14', NULL, 71, 'F', '2026-03-20', 'Kaleida Methodist', 'Dr. Bar', 'diabetes', '14204', 'Buffalo', 'NY');
 
 CREATE TABLE internal_source_reference_v (
     patient_id INTEGER,
@@ -107,13 +108,14 @@ CREATE TABLE federated_results_v (
     clean_result TEXT,
     unit TEXT,
     datetime TIMESTAMP,
-    service_provider TEXT
+    service_provider TEXT,
+    source_name TEXT
 );
 INSERT INTO federated_results_v VALUES
-    ('src-john-1962', '5195-3', 'LOINC', 'Hepatitis B sAg (HBsAg)', 'HBSAG', 'NEG', 'negative', NULL, '2026-02-10 08:00', 'BMG Lab'),
-    ('src-john-1962', '4548-4', 'LOINC', 'Hemoglobin A1c', 'HBA1C', '7.2', '7.2', '%', '2026-03-15 09:00', 'BMG Lab'),
-    ('src-john-1962', 'LOC-CHEM-99', 'local', 'Local Panel', 'LOCAL', 'POS', 'positive', NULL, '2026-01-05 11:00', 'BMG Lab'),
-    ('src-john-1962', '22501-7', 'LOINC', 'Measles IgG Ab', 'MEASIGG', 'POS', 'positive', 'IU/mL', '2025-11-04 14:00', 'BMG Lab');
+    ('src-john-1962', '5195-3', 'LOINC', 'Hepatitis B sAg (HBsAg)', 'HBSAG', 'NEG', 'negative', NULL, '2026-02-10 08:00', 'BMG Lab', 'Buffalo Medical Group'),
+    ('src-john-1962', '4548-4', 'LOINC', 'Hemoglobin A1c', 'HBA1C', '7.2', '7.2', '%', '2026-03-15 09:00', 'BMG Lab', 'Buffalo Medical Group'),
+    ('src-john-1962', 'LOC-CHEM-99', 'local', 'Local Panel', 'LOCAL', 'POS', 'positive', NULL, '2026-01-05 11:00', 'BMG Lab', 'Buffalo Medical Group'),
+    ('src-john-1962', '22501-7', 'LOINC', 'Measles IgG Ab', 'MEASIGG', 'POS', 'positive', 'IU/mL', '2025-11-04 14:00', 'BMG Lab', 'Buffalo Medical Group');
 
 CREATE TABLE federated_problems_v (
     source_id TEXT,
@@ -121,15 +123,16 @@ CREATE TABLE federated_problems_v (
     code_type TEXT,
     diagnosis TEXT,
     diagnosis_datetime TIMESTAMP,
+    status TEXT,
     status_datetime TIMESTAMP,
     chronic_ind TEXT,
     service_provider_npi TEXT
 );
 INSERT INTO federated_problems_v VALUES
-    ('src-john-1962', 'E11.9', 'ICD-10', 'Type 2 diabetes mellitus without complications', '2024-06-12', '2026-04-01', 'Y', '1234567890'),
-    ('src-john-1962', 'B16.9', 'ICD-10', 'Acute hepatitis B without delta-agent', '2025-09-01', '2025-09-15', 'N', '1234567890'),
-    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', '2024-08-22', 'N', '1234567890'),
-    ('src-john-1962', '0WJG4ZZ', 'ICD-10-PCS', 'Inspection of peritoneal cavity, percutaneous endoscopic', '2025-01-10', '2025-01-10', 'N', '1234567890');
+    ('src-john-1962', 'E11.9', 'ICD-10', 'Type 2 diabetes mellitus without complications', '2024-06-12', '55561003', '2026-04-01', 'Y', '1234567890'),
+    ('src-john-1962', 'B16.9', 'ICD-10', 'Acute hepatitis B without delta-agent', '2025-09-01', '413322009', '2025-09-15', 'N', '1234567890'),
+    ('src-john-1962', '0DTJ4ZZ', 'ICD-10-PCS', 'Resection of appendix, percutaneous endoscopic', '2024-08-22', 'COMPLETED', '2024-08-22', 'N', '1234567890'),
+    ('src-john-1962', '0WJG4ZZ', 'ICD-10-PCS', 'Inspection of peritoneal cavity, percutaneous endoscopic', '2025-01-10', 'RESOLVED', '2025-01-10', 'N', '1234567890');
 
 CREATE TABLE federated_meds_v (
     source_id TEXT,
@@ -147,14 +150,15 @@ CREATE TABLE federated_meds_v (
     drug_supply_days TEXT,
     number_of_refills INTEGER,
     status TEXT,
+    status_date TIMESTAMP,
     date_stopped TIMESTAMP
 );
 INSERT INTO federated_meds_v VALUES
-    ('src-john-1962', '00093-1054-01', '6809', 'Metformin', '2026-03-15 10:00', '1234567890', '500', 'mg', 'Tab', 'Take 1 tab BID', '90', 3, 'active', NULL),
-    ('src-john-1962', '00093-7146-56', '18631', 'Azithromycin', '2026-04-02 14:00', '1234567890', '250', 'mg', 'Tab', 'Take 2 tabs day 1, 1 tab daily x4', '', 0, 'completed', '2026-04-07 00:00'),
+    ('src-john-1962', '00093-1054-01', '6809', 'Metformin', '2026-03-15 10:00', '1234567890', '500', 'mg', 'Tab', 'Take 1 tab BID', '90', 3, 'active', '2026-03-15 10:00', NULL),
+    ('src-john-1962', '00093-7146-56', '18631', 'Azithromycin', '2026-04-02 14:00', '1234567890', '250', 'mg', 'Tab', 'Take 2 tabs day 1, 1 tab daily x4', '', 0, 'completed', '2026-04-07 00:00', '2026-04-07 00:00'),
     -- src-mary-1956 has a Sulfa allergy (federated_allergies_v below) plus an
     -- active sulfamethoxazole prescription → drug-allergy conflict signal test.
-    ('src-mary-1956', '49281-0790-15', '10180', 'Sulfamethoxazole', '2026-05-01 09:00', '0987654321', '800', 'mg', 'Tab', 'Take 1 tab BID x10', 10, 0, 'active', NULL);
+    ('src-mary-1956', '49281-0790-15', '10180', 'Sulfamethoxazole', '2026-05-01 09:00', '0987654321', '800', 'mg', 'Tab', 'Take 1 tab BID x10', 10, 0, 'active', '2026-05-01 09:00', NULL);
 
 CREATE TABLE federated_orders_v (
     source_id TEXT,
@@ -252,6 +256,7 @@ CREATE TABLE federated_adt_v (
     clean_status TEXT,
     cancelled_flag TEXT,
     admit_from TEXT,
+    diagnosing_clinician TEXT,
     discharge_disposition TEXT,
     discharge_location TEXT
 );
@@ -270,7 +275,11 @@ CREATE TABLE federated_adt_v (
 --  p8/V801 ambulatory registration+discharge preceded by an admin A08 update                        -> outpatient visit, anchored on the registration
 --  p8/V802 practice that emits ONLY A31 with Unknown ('U') setting (Buffalo Medical Group)          -> real contact: surfaces under 'any', NOT under 'outpatient'
 --  p8/V803 pre-admit only (A08 with 'P' preadmit class + A05)                                        -> NOT a visit
-INSERT INTO federated_adt_v VALUES
+INSERT INTO federated_adt_v (
+    patient_id, visit_number, event_date, event_location, location_type,
+    clean_setting, clean_status, cancelled_flag, admit_from,
+    discharge_disposition, discharge_location
+) VALUES
     (1, 'V100', '2025-06-15 07:30', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'ADMIT',     NULL, 'Emergency Dept', NULL,                 NULL),
     (1, 'V100', '2025-06-16 09:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'A02',       NULL, NULL,            NULL,                 NULL),
     (1, 'V100', '2025-06-18 11:00', 'Buffalo General Hospital', 'Hospital', 'INPATIENT', 'DISCHARGE', NULL, NULL,            'Discharged to home', 'Home'),
@@ -297,6 +306,12 @@ INSERT INTO federated_adt_v VALUES
     (8, 'V802', '2026-05-03 08:00', 'Buffalo Medical Group',    'Practice', 'U',         'A31',       'N',  NULL,            NULL,                 NULL),
     (8, 'V803', '2026-05-04 08:00', 'Kaleida Methodist',        'Hospital', 'P',         'A08',       'N',  NULL,            NULL,                 NULL),
     (8, 'V803', '2026-05-04 09:00', 'Kaleida Methodist',        'Hospital', 'P',         'A05',       'N',  NULL,            NULL,                 NULL);
+UPDATE federated_adt_v
+SET diagnosing_clinician = 'ED diagnosing clinician'
+WHERE visit_number = 'V200' AND clean_status = 'REGISTRATION';
+UPDATE federated_adt_v
+SET diagnosing_clinician = 'Admitting diagnosing clinician'
+WHERE visit_number = 'V200' AND clean_status = 'A06';
 
 -- federated_allergies_v: dedicated allergies view per epic #201. Columns
 -- match the production view confirmed 2026-06-26: the clinical event date is

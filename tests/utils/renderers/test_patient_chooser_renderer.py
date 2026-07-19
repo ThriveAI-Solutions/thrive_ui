@@ -68,6 +68,7 @@ def test_chooser_button_click_writes_session_state():
                     "source_id": "src-clicked",
                     "display_name": "John Smith",
                     "dob": "1962-05-01",
+                    "date_of_death": "2024-05-01",
                     "facilities_seen": [],
                     "most_recent_activity": None,
                 }
@@ -83,6 +84,32 @@ def test_chooser_button_click_writes_session_state():
         st.session_state = fake_session
         render_patient_chooser(msg, index=0)
         assert fake_session["selected_patient_source_id"] == "src-clicked"
+        assert fake_session["selected_patient_date_of_death"] == "2024-05-01"
+
+
+def test_chooser_button_click_clears_prior_date_of_death_for_living_patient():
+    msg = MagicMock()
+    msg.content = json.dumps(
+        {
+            "matches": [
+                {
+                    "source_id": "src-living",
+                    "display_name": "Living Patient",
+                    "dob": "1962-05-01",
+                    "facilities_seen": [],
+                }
+            ],
+            "total_unique": 1,
+            "truncated": False,
+        }
+    )
+    fake_session = {"selected_patient_date_of_death": "2024-05-01"}
+    with patch("utils.renderers.patient_chooser.st") as st:
+        st.button = MagicMock(return_value=True)
+        st.session_state = fake_session
+        render_patient_chooser(msg, index=0)
+
+    assert fake_session["selected_patient_date_of_death"] is None
 
 
 def test_chooser_button_click_retriggers_pending_question():

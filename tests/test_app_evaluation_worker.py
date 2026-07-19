@@ -62,6 +62,7 @@ class _FakeCookieManager:
 
 @pytest.fixture
 def app_env(monkeypatch):
+    modules_before = set(sys.modules)
     fake_st = _FakeSt()
     fake_cookie_mod = type(sys)("streamlit_cookies_manager_ext")
     fake_cookie_mod.EncryptedCookieManager = _FakeCookieManager
@@ -69,8 +70,18 @@ def app_env(monkeypatch):
     monkeypatch.setitem(sys.modules, "streamlit_cookies_manager_ext", fake_cookie_mod)
 
     started = {"count": 0}
-    monkeypatch.setattr(worker_mod, "start_evaluation_worker", lambda *a, **k: started.__setitem__("count", started["count"] + 1))
-    return fake_st, started, monkeypatch
+    monkeypatch.setattr(
+        worker_mod, "start_evaluation_worker", lambda *a, **k: started.__setitem__("count", started["count"] + 1)
+    )
+    yield fake_st, started, monkeypatch
+
+    # monkeypatch restores sys.modules["streamlit"], but modules imported by
+    # app.py retain the fake object in their module globals. Remove only those
+    # newly imported modules so later tests re-import them with real Streamlit.
+    for name in set(sys.modules) - modules_before:
+        module = sys.modules.get(name)
+        if isinstance(module, type(sys)) and getattr(module, "st", None) is fake_st:
+            sys.modules.pop(name, None)
 
 
 def test_worker_starts_once_after_successful_bootstrap(app_env):
