@@ -589,7 +589,7 @@ def _build_diagnoses_result(
     )
 
 
-_MED_INACTIVE_STATUSES = {"discontinued", "no longer active", "suspended", "on hold"}
+_MED_INACTIVE_STATUSES = {"discontinued", "no longer active", "suspended", "on hold", "completed"}
 
 
 def _effective_med_date_stopped(row: dict) -> Any:
@@ -604,10 +604,21 @@ def _effective_med_date_stopped(row: dict) -> Any:
 
 
 def _is_active_medication(row: dict) -> bool:
+    """Whether a med participates in the drug-allergy advisory (#319).
+
+    Exclude-known-inactive: a med participates UNLESS it is known to be inactive
+    — an explicit date_stopped, or a status in the known-inactive vocabulary.
+    Unknown/blank/novel statuses (~5% of rows: blank, 'administered',
+    'undefined', ...) participate, because a soft advisory should err toward
+    alerting rather than silently dropping them (a regression flagged in #319).
+    This keeps #298's goal — verified inactive meds do NOT alert — while
+    restoring pre-#298 behavior for unknown status. Flagged for HeL/Sarah
+    ratification; to revert to the strict reading, require status == 'active'.
+    """
+    if row.get("date_stopped"):
+        return False
     status = str(row.get("status") or "").strip().lower()
-    # Advisory precision is intentionally stricter than lifecycle projection:
-    # unknown/novel statuses are not proof that a medication is current.
-    return status == "active" and not row.get("date_stopped")
+    return status not in _MED_INACTIVE_STATUSES
 
 
 def _build_medications_result(

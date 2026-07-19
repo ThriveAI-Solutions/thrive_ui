@@ -90,7 +90,15 @@ my_account_page = st.Page(
     icon="👤",
 )
 
-pages = [chat_bot_page, patient_360_page, my_account_page]
+pages = [chat_bot_page]
+# Patient 360 is a full chart-review generator — gate to clinical staff
+# (ADMIN/DOCTOR/NURSE), never PATIENT (#320). Okta currently lands every user as
+# PATIENT until the groups claim is fixed, so this also keeps the page hidden in
+# prod until roles resolve correctly, rather than exposing it to everyone.
+_CLINICAL_ROLES = {0, 1, 2}  # RoleTypeEnum ADMIN=0, DOCTOR=1, NURSE=2 (PATIENT=3 excluded)
+if st.session_state.get("user_role") in _CLINICAL_ROLES:
+    pages.append(patient_360_page)
+pages.append(my_account_page)
 if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
     admin_page = st.Page(
         page="views/admin.py",

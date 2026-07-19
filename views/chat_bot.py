@@ -82,6 +82,7 @@ def _clear_selected_patient() -> None:
         pass
     for k in (
         "selected_patient_source_id",
+        "selected_patient_internal_id",
         "selected_patient_display_name",
         "selected_patient_dob",
         "selected_patient_date_of_death",

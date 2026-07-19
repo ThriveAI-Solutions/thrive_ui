@@ -14,6 +14,12 @@ _STATUS_BADGE = {"done": "✅", "empty": "—", "failed": "⚠️"}
 
 st.title("📋 Patient 360")
 
+# Defense in depth (#320): the nav only lists this page for clinical roles, but
+# also refuse to render for a PATIENT-role session reached by direct navigation.
+if st.session_state.get("user_role") == 3:  # RoleTypeEnum.PATIENT
+    st.error("Patient 360 is available to clinical staff only.")
+    st.stop()
+
 source_id = st.session_state.get("selected_patient_source_id")
 display_name = st.session_state.get("selected_patient_display_name")
 date_of_death = st.session_state.get("selected_patient_date_of_death")

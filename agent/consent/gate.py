@@ -47,16 +47,21 @@ class ConsentGate:
     gate at all must itself deny (the caller's responsibility).
     """
 
-    def __init__(self, adapter: Any, *, schema_prefix: str = "", enforcing: bool = True):
+    def __init__(self, adapter: Any, *, schema_prefix: str = "", enforcing: bool = True, snapshot: Any = None):
         self._adapter = adapter
         self._schema_prefix = schema_prefix
         self._enforcing = enforcing
+        # Optional ConsentSnapshot (#317): when present, is_consented is a
+        # point lookup against the materialized roster instead of the live
+        # per-patient union-contract query.
+        self._snapshot = snapshot
 
     def is_consented(self, patient_id: Optional[int]) -> bool:
         """True only if the EMPI patient's latest explicit consent is TRUE.
 
         Consent is person-grain (per internal patient_id), computed by the
-        authoritative union contract in agent.db.queries.consent. Fail-closed on
+        authoritative union contract in agent.db.queries.consent — or, when a
+        snapshot is supplied, a point lookup against it (#317). Fail-closed on
         every other outcome: no patient_id (unknown/ambiguous), no explicit
         event, a FALSE latest value, or a query error.
         """
@@ -64,6 +69,8 @@ class ConsentGate:
             return True
         if patient_id is None:
             return False
+        if self._snapshot is not None:
+            return bool(self._snapshot.is_consented(patient_id))
         dialect = getattr(self._adapter, "dialect", "sqlite")
         try:
             sql, params = patient_consent_sql(patient_id=patient_id, schema_prefix=self._schema_prefix, dialect=dialect)

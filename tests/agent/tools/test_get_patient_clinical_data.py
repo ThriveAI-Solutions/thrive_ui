@@ -506,9 +506,10 @@ def test_allergies_no_conflict_signal_when_meds_dont_overlap(synthetic_db):
 
 @pytest.mark.parametrize(
     "status",
-    ["Discontinued", "No Longer Active", "SUSPENDED", "On Hold", "Completed", "Unknown", None],
+    ["Discontinued", "No Longer Active", "SUSPENDED", "On Hold", "Completed"],
 )
-def test_allergy_advisory_excludes_inactive_medications(monkeypatch, status):
+def test_allergy_advisory_excludes_known_inactive_medications(monkeypatch, status):
+    """Verified-inactive meds do not alert (#298 goal)."""
     med = {
         "rxnorm_code": "10180",
         "med_name": "Sulfamethoxazole",
@@ -527,6 +528,30 @@ def test_allergy_advisory_excludes_inactive_medications(monkeypatch, status):
         [{"allergy": "Sulfa", "type": "Drug allergy"}],
     )
     assert note is None
+
+
+@pytest.mark.parametrize("status", ["Active", "Unknown", "administered", "undefined", "", None])
+def test_allergy_advisory_includes_unknown_status_medications(monkeypatch, status):
+    """#319 exclude-known-inactive: a med with unknown/blank/active status still
+    participates in the advisory (soft advisory errs toward alerting), unlike the
+    prior strict status=='active' rule that silently dropped ~5% of rows."""
+    med = {
+        "rxnorm_code": "10180",
+        "med_name": "Sulfamethoxazole",
+        "status": status,
+        "date_stopped": None,
+    }
+    monkeypatch.setattr(
+        "agent.tools.get_patient_clinical_data.fetch_rows_across_source_ids",
+        lambda *args, **kwargs: [med],
+    )
+    note = _maybe_drug_allergy_signal(
+        MagicMock(),
+        ["src-mary"],
+        "",
+        [{"allergy": "Sulfa", "type": "Drug allergy"}],
+    )
+    assert note is not None
 
 
 def test_allergy_advisory_excludes_explicitly_stopped_medication(monkeypatch):
