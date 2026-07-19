@@ -27,7 +27,8 @@ def _engine():
             text(
                 "CREATE TABLE internal_patient_profile_v ("
                 "patient_id INTEGER, first_name TEXT, last_name TEXT, full_name TEXT, "
-                "date_of_birth TEXT, age INTEGER, last_date_of_visit TEXT, practice_name TEXT)"
+                "date_of_birth TEXT, date_of_death TEXT, age INTEGER, "
+                "last_date_of_visit TEXT, practice_name TEXT)"
             )
         )
         c.execute(
@@ -43,7 +44,7 @@ def _engine():
             c.execute(
                 text(
                     "INSERT INTO internal_patient_profile_v VALUES "
-                    "(:pid, :fn, :ln, :full, '1970-01-01', 55, '2026-01-01', 'Clinic')"
+                    "(:pid, :fn, :ln, :full, '1970-01-01', NULL, 55, '2026-01-01', 'Clinic')"
                 ),
                 {"pid": pid, "fn": fn, "ln": ln, "full": f"{fn} {ln}"},
             )
