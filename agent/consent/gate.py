@@ -11,31 +11,72 @@ or any error querying consent. A denied patient is surfaced with the exact same
 Consent source of truth is ``federated_demographic_v.hie_consent`` (latest
 explicit value) — see ``agent.db.queries.consent``.
 
-Role-based bypass (flagged, NOT wired): the thrive meeting notes describe an
-Erie-County-clinical role that bypasses consent while other roles see only
-consented patients. ``consent_required(role)`` is the single hook for that
-policy; it currently returns True for every role (consent enforced for all)
-until the role->policy mapping is ratified and wired. Do NOT scatter role
-checks elsewhere — extend this function.
+Role-based bypass: the thrive meeting notes ratify the *principle* — an
+Erie-County-clinical role bypasses consent while every other role sees only
+consented patients — but NOT an enumerated per-role table, and the generic
+Okta roles are admin/doctor/nurse/patient (no distinct Erie-County-clinical
+enum member yet). So the bypass set is data-driven, sourced from
+``[security].consent_bypass_roles`` (parsed by ``parse_bypass_roles``) and
+threaded onto ``AgentDeps``. It defaults EMPTY — consent enforced for every
+role — so nothing bypasses until HeL ratifies the mapping and an operator
+sets it. ``consent_required(role, bypass_roles)`` is the single hook; do NOT
+scatter role checks elsewhere — extend this function.
 """
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, FrozenSet, Iterable, Optional
 
 from agent.db.queries.consent import CONSENT_GRANTED_VALUE, patient_consent_sql
+from orm.models import RoleTypeEnum
 from utils.quick_logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def consent_required(role: Optional[str]) -> bool:
+def consent_required(role: Optional[RoleTypeEnum], bypass_roles: FrozenSet[RoleTypeEnum] = frozenset()) -> bool:
     """Whether consent enforcement applies to this role.
 
-    Default: True for every role. This is the sole place to later exempt the
-    Erie-County-clinical role (thrive notes) once HeL ratifies the mapping.
+    Returns False (exempt) only when ``role`` is in the ratified ``bypass_roles``
+    set; True otherwise. ``bypass_roles`` defaults empty, so with no ratified
+    mapping wired every role — including an unknown/None one — requires consent.
+    This is the sole place to exempt the Erie-County-clinical role once HeL
+    ratifies the mapping.
     """
-    return True
+    return role not in bypass_roles
+
+
+def parse_bypass_roles(raw: Optional[Iterable[Any]]) -> FrozenSet[RoleTypeEnum]:
+    """Parse a config list into a set of consent-bypass roles, fail-safe.
+
+    Accepts role names ("admin", case-insensitive) or int values (0..3), or
+    ``RoleTypeEnum`` members. Anything unrecognized is DROPPED (never added):
+    a typo or an unknown role must not silently open the gate — the safe
+    failure is "consent still enforced for that role." ``None``/empty -> empty.
+    """
+    if not raw:
+        return frozenset()
+    out: set[RoleTypeEnum] = set()
+    for item in raw:
+        if isinstance(item, RoleTypeEnum):
+            out.add(item)
+            continue
+        if isinstance(item, bool):  # bool is an int subclass; never a role code
+            continue
+        if isinstance(item, int):
+            try:
+                out.add(RoleTypeEnum(item))
+            except ValueError:
+                logger.warning("Ignoring unknown consent_bypass_roles code: %r", item)
+            continue
+        if isinstance(item, str):
+            try:
+                out.add(RoleTypeEnum[item.strip().upper()])
+            except KeyError:
+                logger.warning("Ignoring unknown consent_bypass_roles name: %r", item)
+            continue
+        logger.warning("Ignoring unparseable consent_bypass_roles entry: %r", item)
+    return frozenset(out)
 
 
 class ConsentGate:

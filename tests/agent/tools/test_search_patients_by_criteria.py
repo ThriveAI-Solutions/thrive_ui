@@ -23,7 +23,13 @@ from agent.deps import AgentDeps, SelectedPatient
 from agent.db.analytics_adapter import AnalyticsDbAdapter
 
 
-def _deps(synthetic_db, selected: SelectedPatient | None = None) -> AgentDeps:
+def _deps(
+    synthetic_db,
+    selected: SelectedPatient | None = None,
+    *,
+    enforce_consent: bool = False,
+    small_cell_threshold: int = 11,
+) -> AgentDeps:
     return AgentDeps(
         user_id=1,
         user_role=MagicMock(value=1),
@@ -36,6 +42,8 @@ def _deps(synthetic_db, selected: SelectedPatient | None = None) -> AgentDeps:
         rag=None,
         sqlite_session=None,
         run_logger=MagicMock(),
+        enforce_consent=enforce_consent,
+        small_cell_threshold=small_cell_threshold,
     )
 
 
@@ -564,3 +572,65 @@ def test_condition_sets_unknown_set_raises_actionable_model_retry(synthetic_db, 
     msg = str(excinfo.value)
     assert "not-a-real-set" in msg
     assert "search_codes first" in msg
+
+
+# --- Consent aggregate-only mode (#244): under enforce_consent the cohort tool
+# suppresses small count cells AND withholds the identified patient sample
+# (identified rows aren't covered by the de-identified-cohort exemption). ---
+
+
+def test_enforcement_off_returns_raw_count_and_sample(synthetic_db):
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, enforce_consent=False)
+    # Small cohort (total_count == 2). With enforcement OFF, behavior is unchanged:
+    # the real count and identified sample are returned.
+    result = search_patients_by_criteria(
+        ctx, CohortCriteria(diagnosis_codes=["E11.9"], age_min=65, facility="Kaleida")
+    )
+    assert result.total_count == 2
+    assert len(result.sample) == 2
+
+
+def test_enforcement_on_suppresses_small_total_and_withholds_sample(synthetic_db):
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, enforce_consent=True, small_cell_threshold=11)
+    result = search_patients_by_criteria(
+        ctx, CohortCriteria(diagnosis_codes=["E11.9"], age_min=65, facility="Kaleida")
+    )
+    # Count of 2 is below the floor -> suppressed label; identified sample withheld.
+    assert result.total_count == "fewer than 11"
+    assert result.sample == []
+
+
+def test_enforcement_on_withholds_sample_even_when_count_not_suppressed(synthetic_db):
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+
+    ctx = MagicMock()
+    # threshold=2 means a count of 2 is NOT suppressed (2 >= 2), proving the
+    # sample is withheld independently of small-cell suppression.
+    ctx.deps = _deps(synthetic_db, enforce_consent=True, small_cell_threshold=2)
+    result = search_patients_by_criteria(
+        ctx, CohortCriteria(diagnosis_codes=["E11.9"], age_min=65, facility="Kaleida")
+    )
+    assert result.total_count == 2
+    assert result.sample == []
+
+
+def test_enforcement_on_suppresses_small_breakdown_buckets(synthetic_db):
+    from agent.tools.search_patients_by_criteria import CohortCriteria, search_patients_by_criteria
+    from agent.db.queries.cohort_breakdown import BreakdownDimension
+    from agent.consent.suppression import suppressed_label
+
+    ctx = MagicMock()
+    ctx.deps = _deps(synthetic_db, enforce_consent=True, small_cell_threshold=1000)
+    crit = CohortCriteria(age_min=0, breakdown=[BreakdownDimension.GENDER])
+    result = search_patients_by_criteria(ctx, crit)
+    # With an absurdly high floor every non-zero bucket is a "small cell".
+    label = suppressed_label(1000)
+    assert result.buckets, "expected gender buckets"
+    for b in result.buckets:
+        assert b.patient_count == label, f"bucket {b.bucket_label} not suppressed"

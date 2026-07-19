@@ -8,6 +8,7 @@ detail. This is a predefined workflow (a button), not a chat turn.
 import streamlit as st
 
 from agent.patient360.prompts import GENERATOR_VERSION
+from agent.consent.gate import parse_bypass_roles
 from agent.patient360.service import run_patient360
 
 _STATUS_BADGE = {"done": "✅", "empty": "—", "failed": "⚠️"}
@@ -41,10 +42,12 @@ if st.button("Generate Patient 360", type="primary", width="stretch"):
             from orm.models import SessionLocal
 
             with SessionLocal() as session:
+                _security = st.secrets.get("security", {})
                 result = run_patient360(
                     source_id,
-                    enforce_consent=bool(st.secrets.get("security", {}).get("enforce_consent", False)),
+                    enforce_consent=bool(_security.get("enforce_consent", False)),
                     user_role=st.session_state.get("user_role"),
+                    consent_bypass_roles=parse_bypass_roles(_security.get("consent_bypass_roles")),
                     cache=SqlitePatient360Cache(session),
                 )
             st.session_state["_patient360_result"] = result.model_dump()

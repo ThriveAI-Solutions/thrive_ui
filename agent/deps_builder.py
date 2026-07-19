@@ -25,6 +25,8 @@ from typing import Optional
 import uuid
 import streamlit as st
 
+from agent.consent.gate import parse_bypass_roles
+from agent.consent.suppression import SMALL_CELL_THRESHOLD
 from agent.deps import AgentDeps, SelectedPatient
 from agent.run_logger import AgentRunLogger
 from agent.logging_config import AgentLoggingConfig
@@ -159,6 +161,7 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
             group_id=group_id,
         )
 
+    _security = st.secrets.get("security", {})
     return AgentDeps(
         user_id=user_id,
         user_role=user_role,
@@ -175,5 +178,7 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
         user_message_id=_latest_user_message_id(),
         parent_run_id=st.session_state.get("agent_parent_run_id"),
         resume_reason=st.session_state.get("agent_resume_reason"),
-        enforce_consent=bool(st.secrets.get("security", {}).get("enforce_consent", False)),
+        enforce_consent=bool(_security.get("enforce_consent", False)),
+        consent_bypass_roles=parse_bypass_roles(_security.get("consent_bypass_roles")),
+        small_cell_threshold=int(_security.get("small_cell_threshold", SMALL_CELL_THRESHOLD)),
     )

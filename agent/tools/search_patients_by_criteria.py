@@ -14,6 +14,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.consent.suppression import Cell, suppress_cohort, suppress_count
 from agent.db.queries.cohort_breakdown import BreakdownDimension
 from agent.result_compaction import CompactingListResult
 
@@ -104,13 +105,17 @@ class PatientMatch(BaseModel):
 
 class BreakdownBucket(BaseModel):
     bucket_label: str
-    patient_count: int
+    # int normally; the small-cell suppression string label under consent
+    # aggregate-only mode (#244).
+    patient_count: Cell
 
 
 class CohortResult(CompactingListResult):
     _list_field = "sample"
 
-    total_count: int
+    # int normally; the small-cell suppression string label under consent
+    # aggregate-only mode (#244).
+    total_count: Cell
     sample: List[PatientMatch]
     data_availability: Literal["data_present", "no_records_found", "error"]
     truncated: bool = False
@@ -179,6 +184,53 @@ def _reliability_parts(criteria) -> list[str]:
     if criteria.zip_code or criteria.city or criteria.state:
         parts.append(_RELIABILITY_GEO)
     return parts
+
+
+_AGGREGATE_ONLY_NOTE = (
+    "Consent aggregate-only mode: identified patient rows are withheld and "
+    "small counts are suppressed. Report counts/breakdowns only; to see a "
+    "specific patient, use find_patient (consent-gated)."
+)
+
+
+def _apply_consent_aggregate_mode(ctx: RunContext[AgentDeps], result: CohortResult) -> CohortResult:
+    """Under consent enforcement, make cohort output de-identified/aggregate-only.
+
+    The de-identified-cohort exemption (#244) covers COUNTS, not identified
+    rows. So when ``enforce_consent`` is on: suppress every small count cell
+    (total + breakdown buckets) at ``small_cell_threshold``, and withhold the
+    identified patient ``sample`` entirely. No-op when enforcement is off — the
+    tool's existing behavior is unchanged. Mutates and returns ``result``.
+    """
+    if not bool(getattr(ctx.deps, "enforce_consent", False)):
+        return result
+    threshold = int(getattr(ctx.deps, "small_cell_threshold", 11))
+
+    if isinstance(result.total_count, int):
+        result.total_count = suppress_count(result.total_count, threshold=threshold)
+
+    if result.buckets:
+        raw = {b.bucket_label: b.patient_count for b in result.buckets if isinstance(b.patient_count, int)}
+        suppressed = suppress_cohort(raw, additive=not result.non_additive, threshold=threshold)
+        for b in result.buckets:
+            if b.bucket_label in suppressed:
+                b.patient_count = suppressed[b.bucket_label]
+
+    if result.sample:
+        result.sample = []
+        result.truncated = False
+        result.notes_to_agent = (
+            f"{result.notes_to_agent} {_AGGREGATE_ONLY_NOTE}" if result.notes_to_agent else _AGGREGATE_ONLY_NOTE
+        )
+    return result
+
+
+def _finalize(ctx: RunContext[AgentDeps], result: CohortResult) -> CohortResult:
+    """Apply consent aggregate-only mode (if enforcing), then populate the
+    dataframe from the FINAL (post-suppression) result and return it."""
+    result = _apply_consent_aggregate_mode(ctx, result)
+    ctx.deps.last_dataframe = cohort_result_to_df(result)
+    return result
 
 
 def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCriteria) -> CohortResult:
@@ -288,8 +340,7 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
             data_availability=availability,
             reliability_note=reliability,
         )
-        ctx.deps.last_dataframe = cohort_result_to_df(result)
-        return result
+        return _finalize(ctx, result)
 
     if not rows:
         result = CohortResult(
@@ -298,8 +349,7 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
             data_availability="no_records_found",
             reliability_note=reliability,
         )
-        ctx.deps.last_dataframe = cohort_result_to_df(result)
-        return result
+        return _finalize(ctx, result)
 
     total_count = int(rows[0]["total_count"])
     # cohort_sql applies LIMIT sample_size+1 as a truncation sentinel
@@ -330,8 +380,7 @@ def search_patients_by_criteria(ctx: RunContext[AgentDeps], criteria: CohortCrit
         truncated=truncated,
         reliability_note=reliability,
     )
-    ctx.deps.last_dataframe = cohort_result_to_df(result)
-    return result
+    return _finalize(ctx, result)
 
 
 def _run_breakdown(ctx: RunContext[AgentDeps], criteria: CohortCriteria, adapter, schema_prefix: str) -> CohortResult:
@@ -359,8 +408,7 @@ def _run_breakdown(ctx: RunContext[AgentDeps], criteria: CohortCriteria, adapter
             notes_to_agent=str(exc),
             reliability_note=" ".join(reliability_parts) or None,
         )
-        ctx.deps.last_dataframe = cohort_result_to_df(result)
-        return result
+        return _finalize(ctx, result)
 
     handoff_sql = inline_sql_literals(bucket_sql, params)
 
@@ -382,8 +430,7 @@ def _run_breakdown(ctx: RunContext[AgentDeps], criteria: CohortCriteria, adapter
             ),
             reliability_note=" ".join(reliability_parts) or None,
         )
-        ctx.deps.last_dataframe = cohort_result_to_df(result)
-        return result
+        return _finalize(ctx, result)
 
     spec = breakdown_bucket(primary, dialect)
     try:
@@ -413,5 +460,4 @@ def _run_breakdown(ctx: RunContext[AgentDeps], criteria: CohortCriteria, adapter
         breakdown_status="single_dimension",
         reliability_note=" ".join(reliability_parts) or None,
     )
-    ctx.deps.last_dataframe = cohort_result_to_df(result)
-    return result
+    return _finalize(ctx, result)
