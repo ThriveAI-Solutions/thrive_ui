@@ -79,13 +79,18 @@ chat_bot_page = st.Page(
     title="Chat",
     icon="🤖",
 )
+patient_360_page = st.Page(
+    page="views/patient_360.py",
+    title="Patient 360",
+    icon="📋",
+)
 my_account_page = st.Page(
     page="views/my_account.py",
     title="My Account",
     icon="👤",
 )
 
-pages = [chat_bot_page, my_account_page]
+pages = [chat_bot_page, patient_360_page, my_account_page]
 if st.session_state.get("user_role") == 0:  # RoleTypeEnum.ADMIN.value = 0
     admin_page = st.Page(
         page="views/admin.py",
