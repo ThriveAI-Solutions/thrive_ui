@@ -58,3 +58,8 @@ class AgentDeps:
     user_message_id: Optional[int] = None
     parent_run_id: Optional[str] = None
     resume_reason: Optional[str] = None
+    # Consent enforcement (#244). Default off: enabling it denies every
+    # patient the warehouse has no explicit TRUE consent for, so it must not
+    # flip on until consent data readiness + HeL policy (threshold, role
+    # bypass) are confirmed. Set from [security].enforce_consent.
+    enforce_consent: bool = False

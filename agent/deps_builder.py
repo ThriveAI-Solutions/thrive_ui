@@ -173,4 +173,5 @@ def build_agent_deps(sqlite_session) -> AgentDeps:
         user_message_id=_latest_user_message_id(),
         parent_run_id=st.session_state.get("agent_parent_run_id"),
         resume_reason=st.session_state.get("agent_resume_reason"),
+        enforce_consent=bool(st.secrets.get("security", {}).get("enforce_consent", False)),
     )
