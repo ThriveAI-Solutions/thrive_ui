@@ -79,6 +79,49 @@ def test_build_agent_deps_reads_selected_patient_date_of_death(rag_mock, db_mock
     assert deps.selected_patient.date_of_death == date(2024, 5, 1)
 
 
+@patch("agent.deps_builder._analytics_db")
+@patch("agent.deps_builder._rag")
+def test_build_agent_deps_carries_internal_patient_id(rag_mock, db_mock):
+    """#318: the selected-patient slot carries the person-grain patient_id."""
+    db_mock.return_value = MagicMock()
+    rag_mock.return_value = MagicMock()
+    fake_session_state = {
+        "user_id": 1,
+        "user_role": RoleTypeEnum.DOCTOR.value,
+        "selected_patient_source_id": "src-john-1962",
+        "selected_patient_internal_id": 42,
+        "selection_origin": "user_click",
+    }
+    with patch("agent.deps_builder.st") as st:
+        st.session_state = fake_session_state
+        from agent.deps_builder import build_agent_deps
+
+        deps = build_agent_deps(MagicMock())
+
+    assert deps.selected_patient.internal_patient_id == 42
+
+
+@patch("agent.deps_builder._analytics_db")
+@patch("agent.deps_builder._rag")
+def test_build_agent_deps_internal_patient_id_optional(rag_mock, db_mock):
+    """Legacy sessions without the key resolve to None, not an error."""
+    db_mock.return_value = MagicMock()
+    rag_mock.return_value = MagicMock()
+    fake_session_state = {
+        "user_id": 1,
+        "user_role": RoleTypeEnum.DOCTOR.value,
+        "selected_patient_source_id": "src-john-1962",
+        "selection_origin": "user_click",
+    }
+    with patch("agent.deps_builder.st") as st:
+        st.session_state = fake_session_state
+        from agent.deps_builder import build_agent_deps
+
+        deps = build_agent_deps(MagicMock())
+
+    assert deps.selected_patient.internal_patient_id is None
+
+
 def test_build_deps_attaches_run_logger(monkeypatch):
     import streamlit as st
     from agent.deps_builder import build_agent_deps

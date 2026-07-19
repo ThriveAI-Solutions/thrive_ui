@@ -27,6 +27,10 @@ class SelectedPatient:
     selected_at: datetime
     selection_origin: SelectionOrigin
     date_of_death: Optional[date] = None
+    # Person-grain EMPI identity (#318). Resolved once during find_patient and
+    # carried here so tools/consent gate key on patient_id instead of
+    # re-resolving the source_id each call. May be None for legacy sessions.
+    internal_patient_id: Optional[int] = None
 
     def __post_init__(self) -> None:
         if self.selection_origin not in ("user_click", "agent_disambiguation"):

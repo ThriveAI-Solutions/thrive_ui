@@ -75,6 +75,7 @@ def _selected_patient_from_session() -> Optional[SelectedPatient]:
         if isinstance(selected_at_raw, str)
         else (selected_at_raw or datetime.now())
     )
+    raw_pid = st.session_state.get("selected_patient_internal_id")
     return SelectedPatient(
         source_id=src,
         display_name=st.session_state.get("selected_patient_display_name", ""),
@@ -82,6 +83,7 @@ def _selected_patient_from_session() -> Optional[SelectedPatient]:
         selected_at=selected_at,
         selection_origin=st.session_state.get("selection_origin", "user_click"),
         date_of_death=parsed_date_of_death,
+        internal_patient_id=int(raw_pid) if raw_pid is not None else None,
     )
 
 
