@@ -31,12 +31,13 @@ def _engine():
                 "source_name TEXT, source_type TEXT)"
             )
         )
-        c.execute(
-            text(
-                "CREATE TABLE federated_demographic_v ("
-                "source_id TEXT, patient_id TEXT, hie_consent TEXT, created_date TEXT)"
+        for t in ("federated_demographic_v", "federated_demographic_history_v"):
+            c.execute(
+                text(
+                    f"CREATE TABLE {t} (source_id TEXT, source_name TEXT, "
+                    "hie_consent TEXT, last_modified_datetime TEXT)"
+                )
             )
-        )
         # Two patients named Consenttest: 20 consented, 21 not.
         for pid, fn in ((20, "Yes"), (21, "No")):
             c.execute(
@@ -51,17 +52,14 @@ def _engine():
                 text("INSERT INTO internal_source_reference_v VALUES (:pid, :sid, 1, 'SRC', 'EHR')"),
                 {"pid": pid, "sid": sid},
             )
-        for sid, pid, consent in (
-            ("src-consented", "20", "TRUE"),
-            ("src-declined", "21", "FALSE"),
-        ):
+        for sid, consent in (("src-consented", "TRUE"), ("src-declined", "FALSE")):
             c.execute(
                 text(
                     "INSERT INTO federated_demographic_v "
-                    "(source_id, patient_id, hie_consent, created_date) "
-                    "VALUES (:sid, :pid, :consent, '2026-01-01')"
+                    "(source_id, source_name, hie_consent, last_modified_datetime) "
+                    "VALUES (:sid, 'SRC', :consent, '2026-01-01')"
                 ),
-                {"sid": sid, "pid": pid, "consent": consent},
+                {"sid": sid, "consent": consent},
             )
     return eng
 

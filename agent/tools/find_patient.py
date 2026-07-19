@@ -95,7 +95,7 @@ def find_patient(
         # source_name), so the same source_id recurs — dedupe, keeping
         # empi_rank order, and drop the canonical id if it reappears.
         related_ids = [s for s in dict.fromkeys(x["source_id"] for x in related) if s != r["source_id"]]
-        if not gate.is_consented([r["source_id"], *related_ids]):
+        if not gate.is_consented(r["internal_patient_id"]):
             continue
         matches.append(
             PatientMatch(

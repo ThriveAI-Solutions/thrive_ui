@@ -1,86 +1,135 @@
 """Consent SQL against the HealtheLink warehouse (#242 / #243 / #244).
 
-Source of truth (thrive decision, 2026-06-23): consent lives on
-``federated_demographic_v.hie_consent`` — NOT membership in
-``internal_patient_profile_v`` (the ~33% no-consent finding, #242, disproves
-that shortcut). ``hie_consent`` only ever holds ``'TRUE'``, ``'FALSE'``, or the
-empty string; blank is *unknown*, not a third consent state (ADT feeds are
-blank-only), so it is filtered out with ``NULLIF(TRIM(hie_consent), '')`` and
-never treated as consent.
+Implements the authoritative post-Fusion consent contract (Sarah/HeL, via Joe):
 
-A patient federates across sibling source_ids, and consent can be re-stated
-over time, so authority is the **latest explicit** value by recency, taken
-across the patient's whole federation set. Fail-closed: only ``'TRUE'`` grants;
-``'FALSE'``, blank-only, or no row at all denies.
+- Consent events are explicit ``hie_consent`` values ('TRUE'/'FALSE'; blank is
+  unknown, filtered out) drawn from BOTH ``federated_demographic_v`` and
+  ``federated_demographic_history_v``.
+- Claims-sourced rows (``source_name = 'claims_process'``) carry a 2-part
+  ``payer-member-`` prefix on their source_id, so a raw join reaches only a
+  fraction of claims consent. Those rows are re-joined on a normalized key that
+  strips the prefix (the "union contract").
+- Events link to an EMPI person via ``internal_source_reference_v`` (excluding
+  stale rank 99 and the ``patient_id = -1`` orphan).
+- Per person, the LATEST explicit event by ``last_modified_datetime`` wins;
+  FALSE wins ties (revocation-safe). Consent is therefore person-grain
+  (per internal ``patient_id``), not per source_id.
 
-NOTE (flagged for HeL/Sarah sign-off): the recency column is assumed to be
-``created_date`` (present on the view); the meeting notes reference a
-``last_modified_date_time``. If the authoritative view exposes a distinct
-last-modified timestamp, swap ``_RECENCY_COL``. The "latest wins" reading is
-revocation-aware (a later FALSE overrides an earlier TRUE); the notes also say
-"once given, consent is lifelong" — these conflict, and latest-wins is the
-safer fail-closed choice until HeL confirms.
+``patient_consent_sql`` scopes this to one patient for the live gate;
+``consent_population_counts_sql`` runs it whole for the #242 investigation and
+adds a ``NEVER_EXPLICIT`` bucket (profiled patients with no explicit event) —
+that bucket is where the ~33%-no-consent finding lives.
+
+NOTE (perf): the live per-patient query still scans the demographic views
+before scoping in the join. A materialized person-grain snapshot (indexed by
+patient_id, atomically refreshed) is the scalable form — tracked as follow-up.
 """
 
 from __future__ import annotations
 
 from typing import Tuple
 
-# Recency column used to order a patient's consent rows. See module note.
-_RECENCY_COL = "created_date"
-
-# The literal a suppressed / non-consented lookup must be indistinguishable
-# from — consent status is never inferable by comparing responses.
 CONSENT_GRANTED_VALUE = "TRUE"
 
 
-def _sid_placeholders(source_ids: list[str]) -> Tuple[str, dict]:
-    """Build a portable ``IN (...)`` clause + params for a source_id list."""
-    keys = [f"sid_{i}" for i in range(len(source_ids))]
-    params = {k: s for k, s in zip(keys, source_ids)}
-    placeholders = ", ".join(f":{k}" for k in keys)
-    return placeholders, params
+def _claims_join_key(dialect: str) -> str:
+    """Expression that strips the 2-part ``payer-member-`` claims prefix."""
+    if dialect in ("postgres", "redshift"):
+        return "NULLIF(REGEXP_REPLACE(source_id, '^[^-]*-[^-]*-', ''), '')"
+    # SQLite has no REGEXP_REPLACE: strip through the 2nd '-' with SUBSTRING/INSTR.
+    # SUBSTRING (not SUBSTR — Redshift rejects that spelling; guarded by
+    # test_redshift_compatibility) is a SQLite alias; this branch is sqlite-only.
+    return (
+        "NULLIF(SUBSTRING(source_id, INSTR(source_id, '-') + "
+        "INSTR(SUBSTRING(source_id, INSTR(source_id, '-') + 1), '-') + 1), '')"
+    )
 
 
-def latest_consent_sql(*, source_ids: list[str], schema_prefix: str = "") -> Tuple[str, dict]:
-    """Return (sql, params) for the latest EXPLICIT consent across source_ids.
+def _person_latest_cte(schema_prefix: str, dialect: str, *, patient_scope: bool) -> str:
+    """WITH consent_ev, linked, person_latest — the shared contract body.
 
-    Yields at most one row: the most recent non-blank ``hie_consent`` value for
-    any of the patient's federated source_ids. No row => never explicitly
-    consented => deny. Caller compares the value to ``CONSENT_GRANTED_VALUE``.
-
-    An empty ``source_ids`` is refused rather than issuing an unbounded scan —
-    the caller (an ambiguous/unknown patient) must already be failing closed.
+    When ``patient_scope`` the linked join is filtered to ``:patient_id``.
     """
-    if not source_ids:
-        raise ValueError("latest_consent_sql requires at least one source_id.")
-    placeholders, params = _sid_placeholders(source_ids)
-    sql = f"""
-    SELECT UPPER(TRIM(hie_consent)) AS hie_consent
-    FROM {schema_prefix}federated_demographic_v
-    WHERE source_id IN ({placeholders})
-      AND NULLIF(TRIM(hie_consent), '') IS NOT NULL
-    ORDER BY {_RECENCY_COL} DESC
-    LIMIT 1
-    """
-    return sql, params
+    claims_key = _claims_join_key(dialect)
+    scope = "AND isr.patient_id = :patient_id" if patient_scope else ""
+    return f"""
+    WITH consent_ev AS (
+        SELECT source_id, source_id AS join_key,
+               UPPER(TRIM(hie_consent)) AS consent, last_modified_datetime
+        FROM {schema_prefix}federated_demographic_v
+        WHERE NULLIF(TRIM(hie_consent), '') IS NOT NULL
+        UNION ALL
+        SELECT source_id, source_id,
+               UPPER(TRIM(hie_consent)), last_modified_datetime
+        FROM {schema_prefix}federated_demographic_history_v
+        WHERE NULLIF(TRIM(hie_consent), '') IS NOT NULL
+        UNION ALL
+        SELECT source_id, {claims_key},
+               UPPER(TRIM(hie_consent)), last_modified_datetime
+        FROM {schema_prefix}federated_demographic_v
+        WHERE source_name = 'claims_process'
+          AND NULLIF(TRIM(hie_consent), '') IS NOT NULL
+        UNION ALL
+        SELECT source_id, {claims_key},
+               UPPER(TRIM(hie_consent)), last_modified_datetime
+        FROM {schema_prefix}federated_demographic_history_v
+        WHERE source_name = 'claims_process'
+          AND NULLIF(TRIM(hie_consent), '') IS NOT NULL
+    ),
+    linked AS (
+        SELECT DISTINCT isr.patient_id, ev.source_id, ev.consent, ev.last_modified_datetime
+        FROM consent_ev ev
+        JOIN {schema_prefix}internal_source_reference_v isr
+          ON isr.source_id = ev.join_key
+         AND isr.empi_rank <> 99
+         AND CAST(isr.patient_id AS VARCHAR) <> '-1'
+         {scope}
+        WHERE ev.consent IN ('TRUE', 'FALSE')
+    ),
+    person_latest AS (
+        SELECT patient_id, consent, last_modified_datetime AS consent_event_at
+        FROM (
+            SELECT patient_id, consent, last_modified_datetime,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY patient_id
+                       ORDER BY last_modified_datetime DESC NULLS LAST,
+                                CASE WHEN consent = 'FALSE' THEN 0 ELSE 1 END ASC,
+                                source_id ASC
+                   ) AS rn
+            FROM linked
+        ) ranked WHERE rn = 1
+    )"""
 
 
-def consent_population_counts_sql(*, schema_prefix: str = "") -> Tuple[str, dict]:
-    """Count-only population consent breakdown for the #242 investigation.
+def patient_consent_sql(*, patient_id: int, schema_prefix: str = "", dialect: str = "sqlite") -> Tuple[str, dict]:
+    """Latest explicit consent for ONE EMPI patient. At most one row; caller
+    compares ``consent`` to ``CONSENT_GRANTED_VALUE``. No row => never
+    explicitly consented => deny."""
+    sql = (
+        _person_latest_cte(schema_prefix, dialect, patient_scope=True)
+        + """
+    SELECT consent, consent_event_at FROM person_latest
+    """
+    )
+    return sql, {"patient_id": patient_id}
 
-    Buckets every row of ``federated_demographic_v`` by explicit consent state
-    (TRUE / FALSE / blank-or-null). Returns aggregates only — no identifiers,
-    no patient rows — so it is safe to run against prod under the PHI rules.
-    Run per-patient-grain by wrapping the caller's own distinct-patient logic;
-    at row grain this measures the raw distribution the ~33% finding came from.
+
+def consent_population_counts_sql(*, schema_prefix: str = "", dialect: str = "sqlite") -> Tuple[str, dict]:
+    """Person-grain consent breakdown for the #242 investigation.
+
+    Buckets every profiled patient as TRUE / FALSE (latest explicit) or
+    NEVER_EXPLICIT (no explicit event at all). Aggregates only — safe to run
+    against prod under the PHI rules. NEVER_EXPLICIT is the ~33% finding.
     """
-    sql = f"""
-    SELECT
-        SUM(CASE WHEN UPPER(TRIM(hie_consent)) = 'TRUE'  THEN 1 ELSE 0 END) AS consent_true,
-        SUM(CASE WHEN UPPER(TRIM(hie_consent)) = 'FALSE' THEN 1 ELSE 0 END) AS consent_false,
-        SUM(CASE WHEN NULLIF(TRIM(hie_consent), '') IS NULL THEN 1 ELSE 0 END) AS consent_blank,
-        COUNT(*) AS total_rows
-    FROM {schema_prefix}federated_demographic_v
+    sql = (
+        _person_latest_cte(schema_prefix, dialect, patient_scope=False)
+        + f"""
+    SELECT consent AS status, COUNT(*) AS n FROM person_latest GROUP BY consent
+    UNION ALL
+    SELECT 'NEVER_EXPLICIT' AS status, COUNT(*) AS n
+    FROM {schema_prefix}internal_patient_profile_v prof
+    WHERE CAST(prof.patient_id AS VARCHAR) <> '-1'
+      AND NOT EXISTS (SELECT 1 FROM person_latest pl WHERE pl.patient_id = prof.patient_id)
     """
+    )
     return sql, {}

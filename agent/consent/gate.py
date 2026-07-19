@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from agent.db.queries.consent import CONSENT_GRANTED_VALUE, latest_consent_sql
+from agent.db.queries.consent import CONSENT_GRANTED_VALUE, patient_consent_sql
 from utils.quick_logger import get_logger
 
 logger = get_logger(__name__)
@@ -52,18 +52,21 @@ class ConsentGate:
         self._schema_prefix = schema_prefix
         self._enforcing = enforcing
 
-    def is_consented(self, source_ids: list[str]) -> bool:
-        """True only if the patient's latest explicit consent is TRUE.
+    def is_consented(self, patient_id: Optional[int]) -> bool:
+        """True only if the EMPI patient's latest explicit consent is TRUE.
 
-        Fail-closed on every other outcome: empty source_ids, no explicit
-        consent row, a FALSE/blank latest value, or a query error.
+        Consent is person-grain (per internal patient_id), computed by the
+        authoritative union contract in agent.db.queries.consent. Fail-closed on
+        every other outcome: no patient_id (unknown/ambiguous), no explicit
+        event, a FALSE latest value, or a query error.
         """
         if not self._enforcing:
             return True
-        if not source_ids:
+        if patient_id is None:
             return False
+        dialect = getattr(self._adapter, "dialect", "sqlite")
         try:
-            sql, params = latest_consent_sql(source_ids=source_ids, schema_prefix=self._schema_prefix)
+            sql, params = patient_consent_sql(patient_id=patient_id, schema_prefix=self._schema_prefix, dialect=dialect)
             rows = self._adapter.fetch_all(sql, params)
         except Exception:
             # Any failure denies — never let a query error open the gate.
@@ -71,4 +74,4 @@ class ConsentGate:
             return False
         if not rows:
             return False
-        return str(rows[0].get("hie_consent") or "").strip().upper() == CONSENT_GRANTED_VALUE
+        return str(rows[0].get("consent") or "").strip().upper() == CONSENT_GRANTED_VALUE

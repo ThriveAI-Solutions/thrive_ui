@@ -29,24 +29,25 @@ def main() -> int:
     from agent.db.analytics_adapter import AnalyticsDbAdapter
 
     adapter = AnalyticsDbAdapter.from_streamlit_secrets()
-    sql, params = consent_population_counts_sql(schema_prefix=adapter.schema_prefix)
-    row = adapter.fetch_all(sql, params)[0]
+    dialect = getattr(adapter, "dialect", "postgres")
+    sql, params = consent_population_counts_sql(schema_prefix=adapter.schema_prefix, dialect=dialect)
+    counts = {r["status"]: int(r["n"] or 0) for r in adapter.fetch_all(sql, params)}
 
-    true_n = int(row["consent_true"] or 0)
-    false_n = int(row["consent_false"] or 0)
-    blank_n = int(row["consent_blank"] or 0)
-    total = int(row["total_rows"] or 0)
+    true_n = counts.get("TRUE", 0)
+    false_n = counts.get("FALSE", 0)
+    never_n = counts.get("NEVER_EXPLICIT", 0)
+    total = true_n + false_n + never_n
     explicit = true_n + false_n
 
-    print("federated_demographic_v consent distribution (row grain, count-only)")
-    print(f"  TRUE  : {true_n:>10,}")
-    print(f"  FALSE : {false_n:>10,}")
-    print(f"  blank : {blank_n:>10,}")
-    print(f"  total : {total:>10,}")
+    print("Person-grain consent distribution (count-only, union contract)")
+    print(f"  TRUE           : {true_n:>10,}")
+    print(f"  FALSE          : {false_n:>10,}")
+    print(f"  NEVER_EXPLICIT : {never_n:>10,}")
+    print(f"  profiled total : {total:>10,}")
     if explicit:
-        print(f"  explicit FALSE share: {false_n / explicit:.1%} of non-blank rows")
+        print(f"  explicit FALSE share : {false_n / explicit:.1%} of patients with any explicit event")
     if total:
-        print(f"  blank share        : {blank_n / total:.1%} of all rows")
+        print(f"  NEVER_EXPLICIT share : {never_n / total:.1%} of profiled patients  (<- the ~33% finding)")
     return 0
 
 
