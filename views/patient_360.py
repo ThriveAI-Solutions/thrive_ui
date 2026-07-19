@@ -31,7 +31,16 @@ if date_of_death:
 if st.button("Generate Patient 360", type="primary", width="stretch"):
     with st.spinner("Summarizing each clinical domain and composing the chart review…"):
         try:
-            result = run_patient360(source_id)
+            from agent.patient360.cache import SqlitePatient360Cache
+            from orm.models import SessionLocal
+
+            with SessionLocal() as session:
+                result = run_patient360(
+                    source_id,
+                    enforce_consent=bool(st.secrets.get("security", {}).get("enforce_consent", False)),
+                    user_role=st.session_state.get("user_role"),
+                    cache=SqlitePatient360Cache(session),
+                )
             st.session_state["_patient360_result"] = result.model_dump()
         except Exception as exc:  # surface, don't crash the page
             st.session_state["_patient360_result"] = None
@@ -47,7 +56,8 @@ if result and result.get("source_id") == source_id:
     with st.expander("Per-domain detail"):
         for section in result.get("sections", []):
             badge = _STATUS_BADGE.get(section["status"], "")
-            st.markdown(f"**{badge} {section['name'].title()}** — {section['row_count']} rows")
+            cached = " · cached" if section.get("cached") else ""
+            st.markdown(f"**{badge} {section['name'].title()}** — {section['row_count']} rows{cached}")
             if section.get("narrative"):
                 st.markdown(section["narrative"])
             elif section["status"] == "failed":

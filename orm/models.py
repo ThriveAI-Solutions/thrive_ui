@@ -938,6 +938,26 @@ def init_db() -> None:
         session.close()
 
 
+class Patient360Section(Base):
+    """Persisted Patient 360 domain summary (#246), fingerprint-invalidated.
+
+    One row per (source_id, section). ``fingerprint`` is a versioned content
+    hash of the summarized input; a section is regenerated only when its
+    fingerprint changes (data changed) or GENERATOR_VERSION bumps.
+    """
+
+    __tablename__ = "thrive_patient360_section"
+    __table_args__ = (Index("ix_p360_source_section", "source_id", "section", unique=True),)
+
+    id = Column(Integer, primary_key=True)
+    source_id = Column(String(256), nullable=False)
+    section = Column(String(64), nullable=False)
+    fingerprint = Column(String(128), nullable=False)
+    generator_version = Column(Integer, nullable=False)
+    narrative = Column(Text, nullable=False)
+    generated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
+
+
 # Import extension models once so shared Base.metadata includes them for
 # create_all() callers and Alembic autogeneration without changing runtime paths.
 if "orm.evaluation_models" not in sys.modules:

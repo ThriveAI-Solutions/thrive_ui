@@ -10,7 +10,8 @@ the assembly is testable without a live model.
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional
+import hashlib
+from typing import Any, Callable, List, Optional, Protocol
 
 from pydantic import BaseModel
 
@@ -50,11 +51,32 @@ Summarizer = Callable[[str, str], str]
 _ROW_CAP = 200
 
 
+class SectionCache(Protocol):
+    """Persistence seam for section summaries (fingerprint-invalidated).
+
+    ``get`` returns the stored narrative for (source_id, section) ONLY if the
+    stored fingerprint equals ``fingerprint`` (same input, same generator);
+    otherwise None. ``put`` stores/overwrites.
+    """
+
+    def get(self, source_id: str, section: str, fingerprint: str) -> Optional[str]: ...
+
+    def put(self, source_id: str, section: str, fingerprint: str, narrative: str) -> None: ...
+
+
+def _fingerprint(section_markdown: str) -> str:
+    """Content fingerprint of a section's summarized input, versioned so a
+    GENERATOR_VERSION bump invalidates every stored summary."""
+    digest = hashlib.sha256(section_markdown.encode("utf-8")).hexdigest()
+    return f"v{GENERATOR_VERSION}:{digest}"
+
+
 class Patient360Section(BaseModel):
     name: str
     status: str  # "done" | "empty" | "failed"
     row_count: int = 0
     narrative: Optional[str] = None
+    cached: bool = False
     error: Optional[str] = None
 
 
@@ -134,6 +156,7 @@ def generate_patient360(
     schema_prefix: str = "",
     summarizer: Summarizer,
     sections: Optional[List[str]] = None,
+    cache: Optional[SectionCache] = None,
 ) -> Patient360Result:
     """Run the domain-by-domain pipeline for the selected patient.
 
@@ -142,32 +165,56 @@ def generate_patient360(
     final synthesis pass composes the master summary from the section
     narratives. ``summarizer(system_prompt, table_markdown)`` performs the LLM
     call (injected).
+
+    When ``cache`` is provided, a section whose input fingerprint matches the
+    stored one reuses the persisted narrative and skips the LLM call
+    (fingerprint-based invalidation, Chiron's optimization).
     """
     sections = sections or SECTION_ORDER
     source_ids = federated_source_ids(adapter, source_id, schema_prefix)
-    cache: dict = {}
+    fetch_cache: dict = {}
 
     out_sections: List[Patient360Section] = []
     narratives: List[tuple[str, str]] = []
     for name in sections:
         try:
-            items = _section_items(name, adapter, source_id, source_ids, schema_prefix, cache)
+            items = _section_items(name, adapter, source_id, source_ids, schema_prefix, fetch_cache)
         except Exception as exc:  # a broken domain must not sink the whole 360
             out_sections.append(Patient360Section(name=name, status="failed", error=f"{type(exc).__name__}: {exc}"))
             continue
         if not items:
             out_sections.append(Patient360Section(name=name, status="empty", row_count=0))
             continue
-        try:
-            narrative = summarizer(SECTION_PROMPTS[name], _items_to_markdown(items))
-        except Exception as exc:
-            out_sections.append(
-                Patient360Section(
-                    name=name, status="failed", row_count=len(items), error=f"{type(exc).__name__}: {exc}"
+
+        markdown = _items_to_markdown(items)
+        fingerprint = _fingerprint(markdown)
+        narrative: Optional[str] = None
+        from_cache = False
+        if cache is not None:
+            try:
+                narrative = cache.get(source_id, name, fingerprint)
+                from_cache = narrative is not None
+            except Exception:
+                narrative = None  # a cache read must never break the run
+        if narrative is None:
+            try:
+                narrative = summarizer(SECTION_PROMPTS[name], markdown)
+            except Exception as exc:
+                out_sections.append(
+                    Patient360Section(
+                        name=name, status="failed", row_count=len(items), error=f"{type(exc).__name__}: {exc}"
+                    )
                 )
-            )
-            continue
-        out_sections.append(Patient360Section(name=name, status="done", row_count=len(items), narrative=narrative))
+                continue
+            if cache is not None:
+                try:
+                    cache.put(source_id, name, fingerprint, narrative)
+                except Exception:
+                    pass  # persistence failure must not fail the run
+
+        out_sections.append(
+            Patient360Section(name=name, status="done", row_count=len(items), narrative=narrative, cached=from_cache)
+        )
         narratives.append((name, narrative))
 
     master_summary = None
