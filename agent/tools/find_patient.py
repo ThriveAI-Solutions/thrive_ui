@@ -11,6 +11,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_ai import RunContext
 
+from agent.consent.gate import ConsentGate, consent_required
 from agent.deps import AgentDeps
 from agent.db.queries.patient import find_patient_sql, related_source_ids_sql
 from agent.result_compaction import CompactingListResult
@@ -79,6 +80,14 @@ def find_patient(
 
     related_sql, _ = related_source_ids_sql(schema_prefix=schema_prefix)
 
+    # Consent enforcement (#244): a non-consented patient is omitted from
+    # results entirely, so it collapses to the same "no match" a nonexistent
+    # patient produces — consent status is never inferable. Fail-closed and
+    # gated by config/role; default off until consent data + policy are ready.
+    role = getattr(ctx.deps, "user_role", None)
+    enforcing = bool(getattr(ctx.deps, "enforce_consent", False)) and consent_required(role)
+    gate = ConsentGate(adapter, schema_prefix=schema_prefix, enforcing=enforcing)
+
     matches: List[PatientMatch] = []
     for r in rows:
         related = adapter.fetch_all(related_sql, {"internal_patient_id": r["internal_patient_id"]})
@@ -86,6 +95,8 @@ def find_patient(
         # source_name), so the same source_id recurs — dedupe, keeping
         # empi_rank order, and drop the canonical id if it reappears.
         related_ids = [s for s in dict.fromkeys(x["source_id"] for x in related) if s != r["source_id"]]
+        if not gate.is_consented(r["internal_patient_id"]):
+            continue
         matches.append(
             PatientMatch(
                 source_id=r["source_id"],

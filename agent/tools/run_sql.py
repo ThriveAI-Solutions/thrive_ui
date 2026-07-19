@@ -19,6 +19,8 @@ from pydantic_ai.tools import ToolDefinition
 from sqlalchemy.exc import SQLAlchemyError
 
 from agent.codes.service import UnknownCodeSetError, VocabNotLoadedError
+from agent.consent.gate import consent_required
+from agent.consent.sql_gate import references_patient_view
 from agent.dataframe_adapters import run_sql_result_to_df
 from agent.db.sql_context import schema_context_for_sql
 from agent.deps import AgentDeps, QueryMeta
@@ -135,6 +137,18 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
         ) from exc
 
     _ast_guard(expansion.sql)
+
+    # Consent gate (#244): under enforcement, freeform SQL against patient-
+    # bearing views is refused so it can't bypass the consent-gated curated
+    # tools. Fail-closed and role-aware; default off until consent data/policy.
+    role = getattr(ctx.deps, "user_role", None)
+    if bool(getattr(ctx.deps, "enforce_consent", False)) and consent_required(role):
+        if references_patient_view(expansion.sql):
+            raise ModelRetry(
+                "Consent enforcement blocks freeform SQL against patient data. "
+                "Use get_patient_clinical_data for per-patient questions or "
+                "search_patients_by_criteria for population breakdowns — both apply consent."
+            )
 
     adapter = ctx.deps.analytics_db
     if adapter is None:
