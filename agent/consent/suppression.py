@@ -7,10 +7,10 @@ fixed label *in the data plane* — before the model, any result cache, or the U
 ever sees the raw number. A suppressed cell is a literal string, never a
 rounded or fuzzed number (rounding still leaks the band).
 
-Threshold: DEFAULT 11 (a cell of 1..10 is suppressed; 0 and >=11 pass). This is
-the value both Chiron and the thrive meeting notes converged on informally, but
-it is NOT yet ratified by HeL — flagged for sign-off. Change ``SMALL_CELL_THRESHOLD``
-in one place if HeL sets a different floor.
+Threshold: 11 (a cell of 1..10 is suppressed; 0 and >=11 pass) — DECIDED. This
+is the HHS/HIPAA-adjacent "cell size < 11" small-cell standard, matches Chiron
+and the thrive meeting notes, and is the ratified floor. Change
+``SMALL_CELL_THRESHOLD`` in one place if the policy floor ever moves.
 
 Complementary suppression: in an *additive* breakdown (buckets sum to a visible
 total), suppressing exactly one bucket is pointless — it's recoverable as
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from typing import Union
 
-# Flagged for HeL ratification — informal "~11 / single-digit-%" heuristic.
+# Ratified floor: HHS/HIPAA-adjacent "cell size < 11" small-cell standard.
 SMALL_CELL_THRESHOLD = 11
 SUPPRESSED_LABEL = "fewer than 11"
 
