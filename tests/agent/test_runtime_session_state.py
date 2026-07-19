@@ -146,6 +146,7 @@ def test_clear_selection_wipes_message_history_and_selection_keys(monkeypatch):
         "selected_patient_source_id": "src-x",
         "selected_patient_display_name": "X",
         "selected_patient_dob": "1990-01-01",
+        "selected_patient_date_of_death": "2024-05-01",
         "selection_origin": "user_click",
         "selected_at": "2026-05-06",
     }
@@ -157,4 +158,5 @@ def test_clear_selection_wipes_message_history_and_selection_keys(monkeypatch):
     assert "agent_message_history" not in fake_state
     assert "selected_patient_source_id" not in fake_state
     assert "selected_patient_display_name" not in fake_state
+    assert "selected_patient_date_of_death" not in fake_state
     assert "selection_origin" not in fake_state

@@ -29,6 +29,7 @@ provisioning path in :func:`sync_okta_user_to_db` now enforces the
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Mapping
 from typing import Any, Iterable
 
@@ -68,6 +69,51 @@ DEFAULT_ROLE_IF_NO_GROUP_MATCH: RoleTypeEnum = RoleTypeEnum.DOCTOR
 # SHA-256 before comparing, so this non-hex sentinel can never match a local
 # password login while still satisfying legacy SQLite NOT NULL schemas.
 OIDC_PASSWORD_SENTINEL = "__OIDC_AUTH_ONLY__"
+
+# Server-side registry of recent auto-login attempts, keyed by a fingerprint
+# of the browser's existing cookies (st.context.cookies). This is the only
+# marker that reliably survives the Okta roundtrip:
+#   - session state dies on every bounce (each return is a fresh session), so
+#     it cannot stop a redirect loop when the IdP errors the callback (Okta
+#     access_denied "User is not assigned to the client application" looped
+#     ~1/second live on 2026-07-14);
+#   - writing our own cookie races the redirect against the cookie-component
+#     iframe flush, and on prod latency the login redirect got dropped
+#     (2026-07-15: every visitor landed on the fallback page instead of Okta).
+# The browser's own cookies (_streamlit_xsrf et al.) ride along on every
+# connect with zero client-side writes. Entries are pruned on access; a
+# process restart forgets attempts, costing at most one extra roundtrip.
+_AUTO_LOGIN_ATTEMPTS: dict[str, float] = {}
+_AUTO_LOGIN_ATTEMPTS_LOCK = threading.Lock()
+
+# How long a failed attempt (or a logout) suppresses auto-login. This must
+# only stop MACHINE-speed loops: IdP error-bounces arrive ~1/second, so ~10s
+# bounds those storms — while a human who logs into the portal and clicks
+# back to the app (>10s roundtrip) is never suppressed. At 60s this trapped
+# post-logout users in an app↔portal bounce until the window expired.
+AUTO_LOGIN_RETRY_WINDOW_S = 10.0
+
+# Session-state flag: this session already started an auto-login attempt.
+# Used to re-issue st.login() on reruns of the originating session (the
+# redirect message can be dropped by an interrupting rerun) — NOT as the
+# loop guard; that's the cookie-fingerprint registry, because session state
+# does not survive the roundtrip to the IdP.
+AUTO_LOGIN_PENDING_KEY = "_oidc_auto_login_pending"
+
+# How many times one session may issue st.login(). One initial issue plus one
+# retry covers the dropped-redirect case. It MUST be bounded: with
+# prompt=none the whole roundtrip is redirects, so the originating page never
+# unloads and its session keeps rerunning — unlimited re-issue navigated the
+# tab away from its own in-flight /oauth2callback token exchange (nginx 499)
+# in an endless loop (live 2026-07-15). Past the cap, the navigation is in
+# flight; render a passive page and let it land.
+AUTO_LOGIN_MAX_ISSUES = 2
+AUTO_LOGIN_ISSUE_COUNT_KEY = "_oidc_auto_login_issues"
+
+# Query param set by our own logout redirect. Its presence suppresses
+# auto-login — st.logout() clears only our cookie, not Okta's session, so
+# without this a logout would silently sign the user straight back in.
+LOGGED_OUT_QUERY_PARAM = "logged_out"
 
 
 def auth_secrets_section() -> Mapping[str, Any] | None:
@@ -353,10 +399,144 @@ def populate_session_state_from_user(user) -> None:
         logger.warning("set_user_preferences_in_session_state failed: %s", exc)
 
 
+def _stable_xsrf_token(raw: str) -> str | None:
+    """Recover the stable token from a Tornado XSRF cookie value.
+
+    Tornado v2 tokens ("2|<mask>|<masked_token>|<timestamp>") are re-masked
+    on EVERY response — the raw cookie value changes across the OIDC
+    roundtrip even though the underlying token is constant (verified live
+    2026-07-15). XOR-ing the mask back out recovers the stable token; no
+    secret is involved, the mask is in the cookie itself. Plain (v1) tokens
+    contain no "|" and are already stable. Returns None for unrecognized
+    formats — treating those as stable would silently unbound the retry loop.
+    """
+    if "|" not in raw:
+        return raw
+    parts = raw.split("|")
+    if len(parts) != 4 or parts[0] != "2":
+        return None
+    try:
+        mask = bytes.fromhex(parts[1])
+        masked = bytes.fromhex(parts[2])
+        if not mask:
+            return None
+        return bytes(b ^ mask[i % len(mask)] for i, b in enumerate(masked)).hex()
+    except ValueError:
+        return None
+
+
+# Cookies whose values change across the OIDC roundtrip (the OAuth state
+# cookie rotates per attempt; auth/user cookies appear on login). They must
+# never feed the fingerprint fallback.
+_VOLATILE_COOKIE_PREFIXES = ("_streamlit_",)
+
+
+def _browser_fingerprint() -> str | None:
+    """Stable per-browser key derived from the cookies the browser already has.
+
+    Prefers the unmasked Streamlit XSRF token (random per browser, constant
+    across the OIDC roundtrip); falls back to a hash of the non-volatile
+    cookies. Returns None when no stable identity exists — such a browser's
+    retry loop could not be bounded, so callers must not auto-login.
+    """
+    import hashlib
+
+    import streamlit as st
+
+    try:
+        cookies = dict(st.context.cookies)
+    except Exception:  # pragma: no cover - context unavailable (bare mode)
+        return None
+    raw: str | None = None
+    xsrf = cookies.get("_streamlit_xsrf") or cookies.get("_xsrf")
+    if xsrf:
+        raw = _stable_xsrf_token(xsrf)
+    if raw is None:
+        stable = {k: v for k, v in cookies.items() if not any(k.startswith(p) for p in _VOLATILE_COOKIE_PREFIXES)}
+        if not stable:
+            return None
+        raw = "|".join(f"{k}={v}" for k, v in sorted(stable.items()))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _mark_auto_login_attempt() -> None:
+    """Record an auto-login attempt for this browser (prunes stale entries)."""
+    import time
+
+    fingerprint = _browser_fingerprint()
+    if fingerprint is None:
+        return
+    now = time.time()
+    with _AUTO_LOGIN_ATTEMPTS_LOCK:
+        for key, ts in list(_AUTO_LOGIN_ATTEMPTS.items()):
+            if now - ts >= AUTO_LOGIN_RETRY_WINDOW_S:
+                del _AUTO_LOGIN_ATTEMPTS[key]
+        _AUTO_LOGIN_ATTEMPTS[fingerprint] = now
+
+
+def _recent_auto_login_attempt() -> bool:
+    """True when this browser attempted auto-login within the retry window."""
+    import time
+
+    fingerprint = _browser_fingerprint()
+    if fingerprint is None:
+        return False
+    with _AUTO_LOGIN_ATTEMPTS_LOCK:
+        ts = _AUTO_LOGIN_ATTEMPTS.get(fingerprint)
+    return ts is not None and time.time() - ts < AUTO_LOGIN_RETRY_WINDOW_S
+
+
+def _should_auto_login() -> bool:
+    """True when an unauthenticated visit should be sent straight to Okta.
+
+    Auto-login is on by default (``[auth].auto_login = false`` disables it)
+    and stands down when the user just logged out (``?logged_out=1``), when
+    this browser attempted auto-login within the retry window (the IdP just
+    bounced us back unauthenticated — retrying would loop), or when the
+    browser is fingerprint-less (no cookies — a loop could not be bounded).
+    """
+    import streamlit as st
+
+    auth = auth_secrets_section()
+    if auth is not None and not auth.get("auto_login", True):
+        return False
+    try:
+        if st.query_params.get(LOGGED_OUT_QUERY_PARAM):
+            return False
+    except Exception:  # pragma: no cover - query params unavailable (bare mode)
+        pass
+    if _browser_fingerprint() is None:
+        return False
+    return not _recent_auto_login_attempt()
+
+
+def _post_logout_redirect_target() -> str:
+    """Where the logout meta-refresh should send the browser.
+
+    Redirects that land back on this app (or an unconfigured URL, which
+    defaults to the app itself) carry ``?logged_out=1`` so auto-login does
+    not immediately sign the user back in. Foreign URLs (e.g. the HeC
+    Portal) are passed through untouched.
+    """
+    from urllib.parse import urlsplit
+
+    auth = auth_secrets_section()
+    configured = (auth.get("post_logout_redirect_url") or "").strip() if auth is not None else ""
+    if not configured:
+        return f"?{LOGGED_OUT_QUERY_PARAM}=1"
+    redirect_uri = (auth.get("redirect_uri") or "").strip() if auth is not None else ""
+    if redirect_uri and urlsplit(configured).netloc == urlsplit(redirect_uri).netloc:
+        sep = "&" if "?" in configured else "?"
+        return f"{configured}{sep}{LOGGED_OUT_QUERY_PARAM}=1"
+    return configured
+
+
 def handle_oidc_auth() -> None:
     """OIDC entry point. Called from utils/auth.check_authenticate when in OIDC mode.
 
-    If the user is not logged in, render a single SSO button and stop the page.
+    If the user is not logged in, redirect to Okta immediately (auto-login);
+    the SSO button renders only as a fallback — after a logout, after a failed
+    auto attempt, or when ``[auth].auto_login = false``.
     If the user is logged in, sync the User row, populate session state, and
     render the sidebar welcome banner + Log Out button (replacing what
     _handle_local_auth does in the local path).
@@ -364,6 +544,27 @@ def handle_oidc_auth() -> None:
     import streamlit as st
 
     if not getattr(st.user, "is_logged_in", False):
+        # Re-issue st.login() on every rerun of the session that started the
+        # attempt: Streamlit drops the auth-redirect message when a queued
+        # rerun (e.g. a late cookie-component value) interrupts the run that
+        # sent it. A drop implies another rerun is queued, so re-issuing on
+        # each run guarantees the last one lands. The bounce-back from the
+        # IdP is a NEW session without the pending flag, so the server-side
+        # registry still bounds the retry loop.
+        if st.session_state.get(AUTO_LOGIN_PENDING_KEY) or _should_auto_login():
+            st.session_state[AUTO_LOGIN_PENDING_KEY] = True
+            issued = st.session_state.get(AUTO_LOGIN_ISSUE_COUNT_KEY, 0)
+            if issued < AUTO_LOGIN_MAX_ISSUES:
+                st.session_state[AUTO_LOGIN_ISSUE_COUNT_KEY] = issued + 1
+                _mark_auto_login_attempt()
+                st.login()
+            else:
+                # Redirect already issued; the browser is mid-roundtrip.
+                # Anything that navigates here (another st.login(), a
+                # meta-refresh) would cancel the in-flight token exchange.
+                st.info("Signing you in…")
+            st.stop()
+            return  # for tests where st.stop is mocked
         st.markdown(
             """
             <style>
@@ -374,7 +575,41 @@ def handle_oidc_auth() -> None:
             """,
             unsafe_allow_html=True,
         )
+        # When the operator points unauthenticated visitors at an external
+        # sign-in (the HeC Portal login), redirect instead of rendering the
+        # manual button page. Combined with `prompt = "none"` in
+        # [auth].client_kwargs, visitors with an active IdP session pass
+        # through silently and everyone else lands on the Portal.
+        # auto_login = false is an explicit button-first choice and wins.
+        auth = auth_secrets_section()
+        sso_fallback_url = (auth.get("sso_fallback_url") or "").strip() if auth is not None else ""
+        auto_login_enabled = auth is None or auth.get("auto_login", True)
+        if sso_fallback_url and auto_login_enabled:
+            logger.warning("OIDC sign-in fallback: redirecting unauthenticated visitor to %s", sso_fallback_url)
+            st.markdown(
+                f'<meta http-equiv="refresh" content="2; url={sso_fallback_url}">',
+                unsafe_allow_html=True,
+            )
+            st.info("Taking you to the HEALTHeCOMMUNITY sign-in…")
+            st.markdown(f"[Continue to sign-in]({sso_fallback_url})")
+            st.stop()
+            return  # for tests where st.stop is mocked
+
         st.title("🔓 Sign in to HEALTHeINTELLIGENCE")
+        try:
+            just_logged_out = bool(st.query_params.get(LOGGED_OUT_QUERY_PARAM))
+        except Exception:  # pragma: no cover - query params unavailable (bare mode)
+            just_logged_out = False
+        if _recent_auto_login_attempt() and not just_logged_out:
+            # We just tried automatically and came back unauthenticated —
+            # the IdP rejected or aborted the login (e.g. user not assigned
+            # to the application). Tell the human instead of looping.
+            st.warning(
+                "Automatic sign-in didn't complete. Click the button to try again. "
+                "If this keeps happening, your account may not have access to this "
+                "application yet — contact your administrator."
+            )
+            logger.warning("OIDC auto-login roundtrip returned unauthenticated; showing manual sign-in button")
         if st.button("Sign in with HEALTHeCOMMUNITY (Okta)", type="primary"):
             st.login()  # uses [auth] config; for multi-provider use st.login("okta")
         st.stop()
@@ -483,14 +718,20 @@ def handle_oidc_logout() -> None:
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Failed to clear mirrored cookies on OIDC logout: %s", exc)
 
-    # 4. Emit a meta-refresh redirect to the post-logout URL.
-    auth = auth_secrets_section()
-    redirect_url = auth.get("post_logout_redirect_url") if auth is not None else None
-    if redirect_url:
-        st.markdown(
-            f'<meta http-equiv="refresh" content="0; url={redirect_url}">',
-            unsafe_allow_html=True,
-        )
+    # 4. Suppress auto-login for this browser for the retry window.
+    # st.logout() (RP-initiated Okta logout) lands back on the app root with
+    # no query param; without this mark, auto-login would fire immediately
+    # and throw the user at an Okta form instead of the configured
+    # post-logout destination.
+    _mark_auto_login_attempt()
 
-    # 5. Drop Streamlit's auth cookie.
+    # 5. Emit a meta-refresh redirect to the post-logout URL. Self-targeted
+    # (or unconfigured) URLs carry ?logged_out=1 so auto-login stands down.
+    st.markdown(
+        f'<meta http-equiv="refresh" content="0; url={_post_logout_redirect_target()}">',
+        unsafe_allow_html=True,
+    )
+
+    # 6. Drop Streamlit's auth cookie (also triggers RP-initiated IdP logout
+    # when the auth server advertises end_session_endpoint).
     st.logout()

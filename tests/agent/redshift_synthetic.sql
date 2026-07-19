@@ -24,6 +24,7 @@ CREATE TABLE internal_patient_profile_v (
     last_name TEXT,
     full_name TEXT,
     date_of_birth DATE,
+    date_of_death DATE,
     age INTEGER,
     gender TEXT,
     last_date_of_visit DATE,
@@ -35,14 +36,14 @@ CREATE TABLE internal_patient_profile_v (
     state TEXT
 );
 INSERT INTO internal_patient_profile_v VALUES
-    (1, 'John', 'Smith', 'John Smith', '1962-05-01', 64, 'M', '2026-04-01', 'Buffalo Medical Group', 'Dr. Foo', 'diabetes', '14223', 'Buffalo', 'NY'),
-    (2, 'John', 'Smith', 'John Smith', '1971-08-12', 54, 'M', '2026-03-15', 'Kaleida Methodist', 'Dr. Bar', NULL, '14201', 'Buffalo', 'NY'),
-    (3, 'Jane', 'Smith', 'Jane Smith', '1985-02-20', 41, 'F', '2026-04-20', 'ECMC', 'Dr. Baz', NULL, '15213', 'Pittsburgh', 'PA'),
-    (4, 'Mary', 'Jones', 'Mary Jones', '1956-03-10', 70, 'F', '2026-04-15', 'Kaleida Methodist', 'Dr. Foo', 'diabetes, hypertension', '14214', 'Buffalo', 'NY'),
-    (5, 'Robert', 'Lee',  'Robert Lee',  '1970-11-22', 55, 'M', '2026-04-10', 'Buffalo Medical Group', 'Dr. Bar', 'hyperlipidemia', '14202', 'Buffalo', 'NY'),
-    (6, 'Anne',   'Garcia','Anne Garcia', '1948-01-05', 78, 'F', '2024-08-01', 'Kaleida Methodist', 'Dr. Baz', 'hypertension', '14209', 'Buffalo', 'NY'),
-    (7, 'Daniel', 'Wright','Daniel Wright','1977-09-30', 48, 'M', '2026-04-25', 'Buffalo Medical Group', 'Dr. Foo', 'type 2 diabetes mellitus', '14216', 'Buffalo', 'NY'),
-    (8, 'Susan',  'Park',  'Susan Park',   '1955-07-14', 71, 'F', '2026-03-20', 'Kaleida Methodist', 'Dr. Bar', 'diabetes', '14204', 'Buffalo', 'NY');
+    (1, 'John', 'Smith', 'John Smith', '1962-05-01', '2024-05-01', 64, 'M', '2026-04-01', 'Buffalo Medical Group', 'Dr. Foo', 'diabetes', '14223', 'Buffalo', 'NY'),
+    (2, 'John', 'Smith', 'John Smith', '1971-08-12', NULL, 54, 'M', '2026-03-15', 'Kaleida Methodist', 'Dr. Bar', NULL, '14201', 'Buffalo', 'NY'),
+    (3, 'Jane', 'Smith', 'Jane Smith', '1985-02-20', NULL, 41, 'F', '2026-04-20', 'ECMC', 'Dr. Baz', NULL, '15213', 'Pittsburgh', 'PA'),
+    (4, 'Mary', 'Jones', 'Mary Jones', '1956-03-10', NULL, 70, 'F', '2026-04-15', 'Kaleida Methodist', 'Dr. Foo', 'diabetes, hypertension', '14214', 'Buffalo', 'NY'),
+    (5, 'Robert', 'Lee',  'Robert Lee',  '1970-11-22', NULL, 55, 'M', '2026-04-10', 'Buffalo Medical Group', 'Dr. Bar', 'hyperlipidemia', '14202', 'Buffalo', 'NY'),
+    (6, 'Anne',   'Garcia','Anne Garcia', '1948-01-05', NULL, 78, 'F', '2024-08-01', 'Kaleida Methodist', 'Dr. Baz', 'hypertension', '14209', 'Buffalo', 'NY'),
+    (7, 'Daniel', 'Wright','Daniel Wright','1977-09-30', NULL, 48, 'M', '2026-04-25', 'Buffalo Medical Group', 'Dr. Foo', 'type 2 diabetes mellitus', '14216', 'Buffalo', 'NY'),
+    (8, 'Susan',  'Park',  'Susan Park',   '1955-07-14', NULL, 71, 'F', '2026-03-20', 'Kaleida Methodist', 'Dr. Bar', 'diabetes', '14204', 'Buffalo', 'NY');
 
 CREATE TABLE internal_source_reference_v (
     patient_id INTEGER,

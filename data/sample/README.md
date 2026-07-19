@@ -14,6 +14,11 @@ generates extra family members). Spans ~10 years of history, ~107k lab results,
   source of truth, ~5 MB. Load via `scripts/load_sample_db.py`.
 - `synthea/` — (gitignored) raw Synthea CSV outputs. Regenerable.
 
+Generated dumps stamp a SHA-256 fingerprint of `scripts/sample_db/schema.sql`
+in `thrive_sample_metadata`. Sample-database tests skip with a reload
+instruction when the configured database is not synthetic or its schema is
+stale.
+
 ## Loading
 
 ```bash

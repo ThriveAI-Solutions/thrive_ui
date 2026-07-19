@@ -26,6 +26,7 @@ class SelectedPatient:
     dob: Optional[date]
     selected_at: datetime
     selection_origin: SelectionOrigin
+    date_of_death: Optional[date] = None
 
     def __post_init__(self) -> None:
         if self.selection_origin not in ("user_click", "agent_disambiguation"):

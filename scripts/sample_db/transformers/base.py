@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import random
 from dataclasses import dataclass, field
 
@@ -22,7 +23,8 @@ class TransformContext:
     def rng(self, key: str) -> random.Random:
         """Return a deterministic per-key RNG. Independent of other keys."""
         if key not in self.rngs:
-            self.rngs[key] = random.Random(self.seed + hash(key) % 10**6)
+            key_offset = int.from_bytes(hashlib.sha256(key.encode()).digest(), "big") % 10**6
+            self.rngs[key] = random.Random(self.seed + key_offset)
         return self.rngs[key]
 
     def add_rows(self, table: str, rows: list[dict]) -> None:

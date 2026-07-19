@@ -44,10 +44,13 @@ def find_patient_sql(
 
     where = " AND ".join(where_clauses)
 
-    # isr.empi_rank = 1 picks the canonical source_id per patient (one
-    # row per patient). 99 is automatically excluded since 99 != 1.
-    # related_source_ids_sql returns the other ranks for the same
-    # internal patient.
+    # Post-Fusion best-rank pick (#239): choose ONE source_id per patient via
+    # ROW_NUMBER() PARTITION BY patient_id — lowest non-null empi_rank wins,
+    # source_id as a deterministic tiebreaker. A hard `empi_rank = 1` filter is
+    # NOT unique per patient: it both fans out duplicate result rows for
+    # patients with several rank-1 xref rows and silently drops patients that
+    # have no rank-1 row at all. empi_rank = 99 (stale) is excluded before the
+    # pick. related_source_ids_sql returns the other ranks for the same patient.
     sql = f"""
     SELECT
         isr.source_id AS source_id,
@@ -56,14 +59,22 @@ def find_patient_sql(
         ipp.last_name AS last_name,
         ipp.full_name AS display_name,
         ipp.date_of_birth AS dob,
+        ipp.date_of_death AS date_of_death,
         ipp.age AS age,
         ipp.last_date_of_visit AS most_recent_activity,
         ipp.practice_name AS practice_name,
         isr.empi_rank AS empi_rank
     FROM {schema_prefix}internal_patient_profile_v ipp
-    JOIN {schema_prefix}internal_source_reference_v isr
-      ON ipp.patient_id = isr.patient_id
-     AND isr.empi_rank = 1
+    JOIN (
+        SELECT patient_id, source_id, empi_rank FROM (
+            SELECT patient_id, source_id, empi_rank,
+                   ROW_NUMBER() OVER (PARTITION BY patient_id
+                       ORDER BY COALESCE(empi_rank, 2147483647) ASC, source_id ASC
+                   ) AS rn
+            FROM {schema_prefix}internal_source_reference_v
+            WHERE empi_rank <> 99
+        ) ranked WHERE rn = 1
+    ) isr ON ipp.patient_id = isr.patient_id
     WHERE {where}
     ORDER BY ipp.last_name, ipp.first_name, ipp.date_of_birth
     LIMIT :limit
@@ -72,14 +83,21 @@ def find_patient_sql(
 
 
 def resolve_source_patient_sql(*, schema_prefix: str = "") -> Tuple[str, dict]:
-    """Resolve an entered source_id (any empi_rank) to its internal patient_id.
+    """Resolve an entered source_id to its internal patient_id(s).
+
+    Returns the DISTINCT set of live patient_ids the source_id maps to — NOT a
+    single ``LIMIT 1`` pick (#243). A source_id that maps to more than one
+    patient is ambiguous and the caller must refuse rather than silently pick
+    one, which could merge or misattribute two different patients' charts.
+    Stale (empi_rank = 99) and the sentinel patient_id = -1 are excluded.
     Caller binds :source_id."""
     return (
         f"""
-        SELECT patient_id AS internal_patient_id
+        SELECT DISTINCT patient_id AS internal_patient_id
         FROM {schema_prefix}internal_source_reference_v
         WHERE source_id = :source_id
-        LIMIT 1
+          AND empi_rank <> 99
+          AND patient_id <> -1
         """,
         {},
     )

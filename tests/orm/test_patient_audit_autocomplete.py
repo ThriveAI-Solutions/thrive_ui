@@ -17,6 +17,11 @@ from sqlalchemy.orm import sessionmaker
 from orm.models import AgentPatientAccess, Base, RoleTypeEnum, User, UserRole
 
 
+# Keep ordinary audit fixtures inside the readers' rolling windows. Tests that
+# exercise cutoff behavior create their own recent and expired timestamps.
+AUDIT_NOW = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 @pytest.fixture
 def session_factory(monkeypatch):
     from orm import agent_logging_functions as alf
@@ -93,7 +98,7 @@ def test_three_distinct_source_ids_ordered_by_last_touched_desc(session_factory)
 
     s = session_factory()
     _seed_user(s)
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     _add_access(s, source_id="pat-1", display_name="Alice", created_at=base - timedelta(minutes=10))
     _add_access(s, source_id="pat-2", display_name="Bob", created_at=base - timedelta(minutes=5))
     _add_access(s, source_id="pat-3", display_name="Carol", created_at=base)
@@ -108,7 +113,7 @@ def test_repeated_touches_aggregate_into_one_row(session_factory):
 
     s = session_factory()
     _seed_user(s)
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     for i in range(4):
         _add_access(s, source_id="pat-1", display_name="Alice", created_at=base - timedelta(minutes=i))
 
@@ -124,7 +129,7 @@ def test_same_source_id_two_display_names_returns_two_rows(session_factory):
 
     s = session_factory()
     _seed_user(s)
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     _add_access(s, source_id="pat-1", display_name="Alice A", created_at=base - timedelta(minutes=5))
     _add_access(s, source_id="pat-1", display_name="Alice Anders", created_at=base)
 
@@ -153,7 +158,7 @@ def test_query_filter_matches_source_id_substring(session_factory):
 
     s = session_factory()
     _seed_user(s)
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     _add_access(s, source_id="pat-12-abc", display_name="X", created_at=base)
     _add_access(s, source_id="pat-99-xyz", display_name="Y", created_at=base - timedelta(minutes=1))
 
@@ -166,7 +171,7 @@ def test_query_filter_matches_display_name_substring(session_factory):
 
     s = session_factory()
     _seed_user(s)
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     _add_access(s, source_id="pat-A", display_name="Alice Anders", created_at=base)
     _add_access(s, source_id="pat-B", display_name="Bob Brown", created_at=base - timedelta(minutes=1))
 

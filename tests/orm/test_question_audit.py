@@ -10,6 +10,11 @@ from orm.models import Base, Message, RoleTypeEnum, User, UserRole
 from utils.enums import MessageType, RoleType
 
 
+# Keep ordinary audit fixtures inside the readers' rolling windows. Tests that
+# exercise cutoff behavior create their own recent and expired timestamps.
+AUDIT_NOW = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 @pytest.fixture
 def session_factory(monkeypatch):
     """In-memory SQLite with SessionLocal patched on orm.logging_functions."""
@@ -135,7 +140,7 @@ def test_single_user_three_questions_reverse_chrono(session_factory):
     _seed_roles(s)
     _seed_user(s, id=10, username="alice", org="Acme")
 
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="q1 oldest", when=now - timedelta(hours=2))
     _add_question(s, user_id=10, content="q2 middle", when=now - timedelta(hours=1))
     _add_question(s, user_id=10, content="q3 newest", when=now)
@@ -152,7 +157,7 @@ def test_pagination(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     for i in range(3):
         _add_question(s, user_id=10, content=f"q{i}", when=base - timedelta(hours=i))
 
@@ -170,7 +175,7 @@ def test_username_filter(session_factory):
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
     _seed_user(s, id=11, username="bob")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="a-only", when=now)
     _add_question(s, user_id=11, content="b-only", when=now)
 
@@ -191,7 +196,7 @@ def test_org_filter_no_org_sentinel(session_factory):
     _seed_roles(s)
     _seed_user(s, id=10, username="alice", org="Acme")
     _seed_user(s, id=11, username="bob", org=None)
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="acme-q", when=now)
     _add_question(s, user_id=11, content="noorg-q", when=now)
 
@@ -224,7 +229,7 @@ def test_search_matches_question_content(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="What about John Doe today?", when=now)
     _add_question(s, user_id=10, content="Show me yesterday's totals", when=now - timedelta(minutes=1))
 
@@ -239,7 +244,7 @@ def test_search_matches_assistant_sql_content(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(
         s,
         user_id=10,
@@ -260,7 +265,7 @@ def test_status_success_summary(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="ok", when=now, summary="here you go")
 
     result = get_question_audit_page(_filters(), page=1, page_size=50)
@@ -273,7 +278,7 @@ def test_status_error(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="fail", when=now, summary="partial", error="boom")
 
     result = get_question_audit_page(_filters(), page=1, page_size=50)
@@ -286,7 +291,7 @@ def test_status_empty(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="hanging", when=now)
 
     result = get_question_audit_page(_filters(), page=1, page_size=50)
@@ -299,7 +304,7 @@ def test_elapsed_is_sum_across_assistant_rows(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    now = datetime(2026, 6, 1, 12, 0, 0)
+    now = AUDIT_NOW
     _add_question(s, user_id=10, content="q", when=now, elapsed=1.5, sql="select 1", summary="ok")
     last_assistant = (
         s.query(Message)
@@ -345,7 +350,7 @@ def test_export_returns_full_filtered_set_no_pagination(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     for i in range(7):
         _add_question(s, user_id=10, content=f"q{i}", when=base - timedelta(hours=i))
 
