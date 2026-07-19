@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+from datetime import date
 from agent.deps import AgentDeps
 from orm.models import RoleTypeEnum
 from utils.enums import RoleType
@@ -50,6 +51,32 @@ def test_build_agent_deps_reads_cookie_user_id(rag_mock, db_mock):
 
     assert deps.user_id == 42
     assert deps.user_role == RoleTypeEnum.NURSE
+
+
+@patch("agent.deps_builder._analytics_db")
+@patch("agent.deps_builder._rag")
+def test_build_agent_deps_reads_selected_patient_date_of_death(rag_mock, db_mock):
+    db_mock.return_value = MagicMock()
+    rag_mock.return_value = MagicMock()
+    fake_session_state = {
+        "user_id": 1,
+        "user_role": RoleTypeEnum.DOCTOR.value,
+        "selected_patient_source_id": "src-john-1962",
+        "selected_patient_display_name": "John Smith",
+        "selected_patient_dob": "1962-05-01",
+        "selected_patient_date_of_death": "2024-05-01",
+        "selection_origin": "user_click",
+    }
+
+    with patch("agent.deps_builder.st") as st:
+        st.session_state = fake_session_state
+        from agent.deps_builder import build_agent_deps
+
+        deps = build_agent_deps(MagicMock())
+
+    assert deps.selected_patient is not None
+    assert deps.selected_patient.dob == date(1962, 5, 1)
+    assert deps.selected_patient.date_of_death == date(2024, 5, 1)
 
 
 def test_build_deps_attaches_run_logger(monkeypatch):

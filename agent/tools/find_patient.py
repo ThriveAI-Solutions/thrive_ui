@@ -44,6 +44,7 @@ class PatientMatch(BaseModel):
     related_source_ids: List[str]
     display_name: str
     dob: Optional[date]
+    date_of_death: Optional[date]
     age: Optional[int]
     facilities_seen: List[str]
     record_count: int
@@ -93,6 +94,11 @@ def find_patient(
                 related_source_ids=related_ids,
                 display_name=r["display_name"] or f"{r['first_name']} {r['last_name']}",
                 dob=r["dob"] if isinstance(r["dob"], date) else (date.fromisoformat(r["dob"]) if r["dob"] else None),
+                date_of_death=(
+                    r["date_of_death"]
+                    if isinstance(r.get("date_of_death"), date)
+                    else (date.fromisoformat(r["date_of_death"]) if r.get("date_of_death") else None)
+                ),
                 age=r["age"],
                 facilities_seen=[r["practice_name"]] if r.get("practice_name") else [],
                 record_count=0,

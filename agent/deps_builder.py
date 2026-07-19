@@ -60,6 +60,15 @@ def _selected_patient_from_session() -> Optional[SelectedPatient]:
             parsed_dob = date.fromisoformat(raw_dob) if isinstance(raw_dob, str) else raw_dob
         except ValueError:
             parsed_dob = None
+    raw_date_of_death = st.session_state.get("selected_patient_date_of_death")
+    parsed_date_of_death: Optional[date] = None
+    if raw_date_of_death:
+        try:
+            parsed_date_of_death = (
+                date.fromisoformat(raw_date_of_death) if isinstance(raw_date_of_death, str) else raw_date_of_death
+            )
+        except ValueError:
+            parsed_date_of_death = None
     selected_at_raw = st.session_state.get("selected_at")
     selected_at = (
         datetime.fromisoformat(selected_at_raw)
@@ -72,6 +81,7 @@ def _selected_patient_from_session() -> Optional[SelectedPatient]:
         dob=parsed_dob,
         selected_at=selected_at,
         selection_origin=st.session_state.get("selection_origin", "user_click"),
+        date_of_death=parsed_date_of_death,
     )
 
 
