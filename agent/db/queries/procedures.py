@@ -90,7 +90,7 @@ def procedures_sql(
             NULL AS facility_name
         FROM {schema_prefix}federated_orders_v
         WHERE source_id = :source_id
-          AND (code_type IN ({cpt_ct_placeholders}) OR code_type = '' OR code_type IS NULL)
+          AND code_type IN ({cpt_ct_placeholders})
           {cpt_filter}
           {text_filter_orders}
           {date_filter_orders}

@@ -27,9 +27,17 @@ def selection_instructions(ctx: RunContext[AgentDeps]) -> str:
         return ""
 
     dob_str = sp.dob.isoformat() if sp.dob else "unknown"
+    deceased_note = ""
+    if sp.date_of_death:
+        deceased_note = (
+            f"IMPORTANT: this patient is DECEASED (date of death {sp.date_of_death.isoformat()}). "
+            f"Frame every answer historically and in the past tense; never imply ongoing care, "
+            f"current medications, or future appointments. "
+        )
     return (
         f"A patient is currently selected: {sp.display_name}, "
         f"source_id '{sp.source_id}', DOB {dob_str}. "
+        f"{deceased_note}"
         f"Do NOT call find_patient — the slot is already filled. "
         f"Use the patient-specific tools (get_patient_clinical_data, "
         f"list_patient_documents) which read the slot automatically."

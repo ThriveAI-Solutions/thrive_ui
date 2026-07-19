@@ -7,7 +7,7 @@ calling st.rerun().
 
 Preserves: user identity (cookies, user, user_id, user_role), theme,
 sidebar preferences (show_*, agentic_mode, etc.), LLM selection, the
-selected_patient slot, and the _messages_loaded sentinel that suppresses
+selected_patient slot (including date of death), and the _messages_loaded sentinel that suppresses
 the page-load rehydrate-from-SQLite behavior after a reset.
 """
 

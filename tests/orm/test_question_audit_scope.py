@@ -25,6 +25,11 @@ from orm.models import AgentRun, Base, Message, RoleTypeEnum, ToolCall, User, Us
 from utils.enums import MessageType, RoleType
 
 
+# Keep ordinary audit fixtures inside the readers' rolling windows. Tests that
+# exercise cutoff behavior create their own recent and expired timestamps.
+AUDIT_NOW = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 # ---------------------------------------------------------------------------
 # Fixtures + helpers (lightly adapted from tests/orm/test_question_audit.py)
 # ---------------------------------------------------------------------------
@@ -160,7 +165,7 @@ def test_scope_legacy_when_no_agent_run(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    _add_question(s, user_id=10, content="legacy q", when=datetime(2026, 6, 1, 12, 0, 0))
+    _add_question(s, user_id=10, content="legacy q", when=AUDIT_NOW)
 
     page = get_question_audit_page(_filters(), page=1, page_size=50)
     assert len(page["items"]) == 1
@@ -174,7 +179,7 @@ def test_scope_patient_when_slot_filled(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="slot-filled", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="slot-filled", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-a", user_id=10, user_message_id=mid, selected_patient_source_id="pat-123")
 
     page = get_question_audit_page(_filters(), page=1, page_size=50)
@@ -194,7 +199,7 @@ def test_scope_patient_when_patient_intent_tool_only(session_factory, tool_name)
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content=f"intent-{tool_name}", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content=f"intent-{tool_name}", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-b", user_id=10, user_message_id=mid)  # slot empty
     _add_tool_call(s, run_id="run-b", user_id=10, tool_name=tool_name)
 
@@ -209,7 +214,7 @@ def test_scope_pop_health(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="cohort q", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="cohort q", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-c", user_id=10, user_message_id=mid)  # no slot
     _add_tool_call(s, run_id="run-c", user_id=10, tool_name="search_patients_by_criteria")
 
@@ -224,7 +229,7 @@ def test_scope_other_when_agent_run_but_no_classified_tools(session_factory):
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="kb only", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="kb only", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-d", user_id=10, user_message_id=mid)
     _add_tool_call(s, run_id="run-d", user_id=10, tool_name="search_knowledge_base")
     _add_tool_call(s, run_id="run-d", user_id=10, tool_name="run_sql")
@@ -242,7 +247,7 @@ def test_scope_patient_wins_over_pop_when_both_tool_families_fire(session_factor
     s = session_factory()
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    mid = _add_question(s, user_id=10, content="mixed", when=datetime(2026, 6, 1, 12, 0, 0))
+    mid = _add_question(s, user_id=10, content="mixed", when=AUDIT_NOW)
     _add_agent_run(s, run_id="run-e", user_id=10, user_message_id=mid)
     _add_tool_call(s, run_id="run-e", user_id=10, tool_name="find_patient")
     _add_tool_call(s, run_id="run-e", user_id=10, tool_name="search_patients_by_criteria")
@@ -265,7 +270,7 @@ def _seed_mixed_page(s) -> dict[str, int]:
     """
     _seed_roles(s)
     _seed_user(s, id=10, username="alice")
-    base = datetime(2026, 6, 1, 12, 0, 0)
+    base = AUDIT_NOW
     n = 0
 
     def _ts(i):

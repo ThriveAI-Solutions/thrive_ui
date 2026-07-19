@@ -21,13 +21,21 @@ from __future__ import annotations
 from typing import Optional, Tuple
 
 
+# Short modality tokens include spaces that become portable word boundaries
+# when matched against _padded(). This avoids substring matches such as POCT.
 _MODALITY_KEYWORDS = {
     "xray": ("x-ray", "xray", "x ray", "radiograph"),
-    "ct": ("ct ", " ct,", " ct;", "computed tomography", " ct scan"),
+    "ct": (" ct ", " ct,", " ct;", "computed tomography", "ct scan"),
     "mri": ("mri", "magnetic resonance"),
     "us": ("ultrasound", " us ", "sonogram"),
-    "pet": ("pet ", "positron emission"),
+    "pet": (" pet ", "positron emission"),
 }
+
+
+def _padded(column: str) -> str:
+    """Return a portable, space-padded case-insensitive match target."""
+    return f"(' ' || LOWER({column}) || ' ')"
+
 
 _BODY_REGION_KEYWORDS: dict[str, tuple[str, ...]] = {
     "head": ("head", "brain", "cranial", "cranium", "skull", "intracranial"),
@@ -68,8 +76,8 @@ def imaging_sql(
             for i, kw in enumerate(keywords):
                 key = f"mod_{i}"
                 params[key] = f"%{kw}%"
-                order_terms.append(f"LOWER(name) LIKE :{key}")
-                doc_terms.append(f"LOWER(name) LIKE :{key} OR LOWER(mnemonic) LIKE :{key}")
+                order_terms.append(f"{_padded('name')} LIKE :{key}")
+                doc_terms.append(f"{_padded('name')} LIKE :{key} OR {_padded('mnemonic')} LIKE :{key}")
             modality_clause_orders = f"AND ({' OR '.join(order_terms)})"
             modality_clause_docs = f"AND ({' OR '.join(doc_terms)})"
 
@@ -121,9 +129,10 @@ def imaging_sql(
           AND (
               LOWER(name) LIKE '%imag%'
               OR LOWER(name) LIKE '%x-ray%' OR LOWER(name) LIKE '%xray%'
-              OR LOWER(name) LIKE '%ct %' OR LOWER(name) LIKE '%mri%'
+              OR {_padded("name")} LIKE '% ct %' OR {_padded("name")} LIKE '% ct,%'
+              OR LOWER(name) LIKE '%mri%'
               OR LOWER(name) LIKE '%ultrasound%' OR LOWER(name) LIKE '%sonogram%'
-              OR LOWER(name) LIKE '%radiograph%' OR LOWER(name) LIKE '%pet %'
+              OR LOWER(name) LIKE '%radiograph%' OR {_padded("name")} LIKE '% pet %'
           )
           {modality_clause_orders}
           {body_clause_orders}
@@ -146,8 +155,8 @@ def imaging_sql(
           AND (
               LOWER(name) LIKE '%radiolog%'
               OR LOWER(name) LIKE '%imag%'
-              OR LOWER(mnemonic) LIKE '%xr%'
-              OR LOWER(mnemonic) LIKE '%ct%'
+              OR {_padded("mnemonic")} LIKE '% xr%'
+              OR {_padded("mnemonic")} LIKE '% ct %'
               OR LOWER(mnemonic) LIKE '%mri%'
           )
           {modality_clause_docs}

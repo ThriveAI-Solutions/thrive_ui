@@ -48,6 +48,48 @@ def test_procedures_orders_carry_cpt_codes(synthetic_db):
     assert "71046" in cpt_codes
 
 
+def test_procedures_excludes_blank_and_null_code_type_orders(synthetic_db):
+    with synthetic_db.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO federated_orders_v VALUES "
+                "(:source_id, :code, :code_type, :name, :procedure_date, "
+                ":created_date, :place_of_service, :status)"
+            ),
+            [
+                {
+                    "source_id": "src-john-1962",
+                    "code": "NOISE-BLANK",
+                    "code_type": "",
+                    "name": "CBC panel",
+                    "procedure_date": "2026-04-01 09:00",
+                    "created_date": "2026-04-01 08:00",
+                    "place_of_service": "22",
+                    "status": "completed",
+                },
+                {
+                    "source_id": "src-john-1962",
+                    "code": "NOISE-NULL",
+                    "code_type": None,
+                    "name": "Visit note",
+                    "procedure_date": "2026-04-02 09:00",
+                    "created_date": "2026-04-02 08:00",
+                    "place_of_service": "22",
+                    "status": "completed",
+                },
+            ],
+        )
+
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = procedures_sql(source_id="src-john-1962")
+    rows = adapter.fetch_all(sql, params)
+    codes = {row["code"] for row in rows}
+
+    assert {"NOISE-BLANK", "NOISE-NULL", "LOC-X-1"}.isdisjoint(codes)
+    assert {"45378", "71046"} <= codes
+    assert any(row["source"] == "problems" and row["code_type"] == "ICD-10-PCS" for row in rows)
+
+
 def test_procedures_filtered_by_cpt(synthetic_db):
     adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
     sql, params = procedures_sql(

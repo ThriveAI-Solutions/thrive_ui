@@ -35,6 +35,15 @@ def test_find_patient_filters_by_dob(synthetic_db):
     assert rows[0]["source_id"] == "src-john-1962"
 
 
+def test_find_patient_selects_date_of_death(synthetic_db):
+    adapter = AnalyticsDbAdapter(engine=synthetic_db, dialect="sqlite")
+    sql, params = find_patient_sql(last_name="Smith", dob="1962-05-01", limit=25)
+
+    rows = adapter.fetch_all(sql, params)
+
+    assert rows[0]["date_of_death"] == "2024-05-01"
+
+
 def test_find_patient_sql_rejects_empty_criteria():
     """Defense in depth — direct callers must not be able to issue an
     unfiltered scan of the patient table."""

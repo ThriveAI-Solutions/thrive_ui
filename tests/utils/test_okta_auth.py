@@ -465,7 +465,8 @@ def test_populate_session_state_from_user_writes_expected_keys(in_memory_orm_ses
 
 
 def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_session):
-    """If st.user.is_logged_in is False, render a login button and stop the page."""
+    """After a failed auto-login roundtrip (fresh marker), render the button."""
+    import time
     from types import SimpleNamespace
     from unittest.mock import MagicMock, patch
 
@@ -478,9 +479,13 @@ def test_handle_oidc_auth_shows_login_button_when_not_logged_in(in_memory_orm_se
 
     with (
         patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", {"cookies": {"oidc_auto_login_at": str(time.time())}}),
+        patch("streamlit.query_params", {}),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
         patch("streamlit.button", button_mock),
         patch("streamlit.login", login_mock),
         patch("streamlit.stop", stop_mock),
+        patch("streamlit.warning", MagicMock()),
         patch("streamlit.title"),
         patch("streamlit.markdown"),
     ):
@@ -501,6 +506,8 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
 
     from utils.okta_auth import handle_oidc_auth
 
+    import time
+
     fake_user = SimpleNamespace(is_logged_in=False)
     # Button returns True meaning the user clicked it.
     button_mock = MagicMock(return_value=True)
@@ -508,9 +515,13 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
 
     with (
         patch("streamlit.user", fake_user),
+        patch("streamlit.session_state", {"cookies": {"oidc_auto_login_at": str(time.time())}}),
+        patch("streamlit.query_params", {}),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
         patch("streamlit.button", button_mock),
         patch("streamlit.login", login_mock),
         patch("streamlit.stop", MagicMock(side_effect=SystemExit)),
+        patch("streamlit.warning", MagicMock()),
         patch("streamlit.title"),
         patch("streamlit.markdown"),
     ):
@@ -520,6 +531,7 @@ def test_handle_oidc_auth_clicking_button_calls_st_login(in_memory_orm_session):
             pass
 
     login_mock.assert_called_once()
+    button_mock.assert_called_once()  # login came from the click, not auto
 
 
 def test_handle_oidc_auth_when_logged_in_runs_sync_and_populates_state(
@@ -894,3 +906,489 @@ def test_organization_from_email_helper_handles_subdomain():
     # Malformed cases fall back to "unknown" — defensive, not user-facing.
     assert _organization_from_email("no-at-symbol") == "unknown"
     assert _organization_from_email("foo@") == "unknown"
+
+
+# ── Auto-login (seamless SSO): st.login() fires without a button click ────
+#
+# The attempt marker lives in a SERVER-SIDE registry keyed by a fingerprint of
+# the browser's existing cookies (st.context.cookies). Session state dies on
+# every bounce through Okta, and writing our own cookie races the redirect
+# against the cookie-component flush (lost on prod 2026-07-15: the login
+# redirect was dropped and every visitor landed on the fallback page). The
+# browser's own cookies (_streamlit_xsrf et al.) ride along on every connect
+# and survive the roundtrip with zero client-side writes.
+
+
+def _not_logged_in_patches(session_state, query_params, secrets, context_cookies):
+    """Common patch set for the not-logged-in handle_oidc_auth paths."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    fake_user = SimpleNamespace(is_logged_in=False)
+    fake_context = SimpleNamespace(cookies=context_cookies)
+    mocks = SimpleNamespace(
+        button=MagicMock(return_value=False),
+        login=MagicMock(),
+        stop=MagicMock(side_effect=SystemExit),
+        warning=MagicMock(),
+    )
+    patches = [
+        patch("streamlit.user", fake_user),
+        patch("streamlit.context", fake_context),
+        patch("streamlit.session_state", session_state),
+        patch("streamlit.query_params", query_params),
+        patch("streamlit.secrets", new=secrets),
+        patch("streamlit.button", mocks.button),
+        patch("streamlit.login", mocks.login),
+        patch("streamlit.stop", mocks.stop),
+        patch("streamlit.warning", mocks.warning),
+        patch("streamlit.title"),
+        patch("streamlit.markdown"),
+    ]
+    return patches, mocks
+
+
+def _run_not_logged_in(query_params, secrets, context_cookies, session_state=None):
+    import contextlib
+
+    from utils.okta_auth import handle_oidc_auth
+
+    patches, mocks = _not_logged_in_patches(
+        session_state if session_state is not None else {}, query_params, secrets, context_cookies
+    )
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+    return mocks
+
+
+def _clear_attempt_registry():
+    import utils.okta_auth as okta_auth
+
+    okta_auth._AUTO_LOGIN_ATTEMPTS.clear()
+
+
+def test_handle_oidc_auth_auto_login_fires_without_button(in_memory_orm_session):
+    """First visit from a cookie-bearing browser goes straight to st.login()."""
+    _clear_attempt_registry()
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, {"_streamlit_xsrf": "tok-abc"})
+
+    mocks.login.assert_called_once()
+    mocks.stop.assert_called_once()
+    mocks.button.assert_not_called()
+
+
+def test_handle_oidc_auth_failed_roundtrip_breaks_loop_and_warns(in_memory_orm_session):
+    """The bounce-back lands in a NEW session but the same browser: no retry.
+
+    This is the loop-breaker for IdP callback errors (e.g. Okta access_denied
+    "User is not assigned to the client application"). The second call
+    simulates the fresh session after the bounce — same context cookies,
+    empty session state.
+    """
+    _clear_attempt_registry()
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, cookies)  # attempt marked
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, cookies)  # bounce landing
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+    mocks.warning.assert_called_once()  # user is told sign-in didn't complete
+
+
+def test_handle_oidc_auth_stale_attempt_allows_auto_login_again(in_memory_orm_session):
+    """Attempts older than the retry window don't block the next visit."""
+    import time
+
+    import utils.okta_auth as okta_auth
+
+    _clear_attempt_registry()
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, cookies)
+    # Age the recorded attempt beyond the retry window.
+    for key in list(okta_auth._AUTO_LOGIN_ATTEMPTS):
+        okta_auth._AUTO_LOGIN_ATTEMPTS[key] = time.time() - okta_auth.AUTO_LOGIN_RETRY_WINDOW_S - 1
+
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, cookies)
+    mocks.login.assert_called_once()
+    mocks.button.assert_not_called()
+
+
+def test_handle_oidc_auth_different_browsers_do_not_interfere(in_memory_orm_session):
+    """A failed attempt in one browser must not suppress another browser."""
+    _clear_attempt_registry()
+    _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, {"_streamlit_xsrf": "browser-A"})
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, {"_streamlit_xsrf": "browser-B"})
+
+    mocks.login.assert_called_once()
+    mocks.button.assert_not_called()
+
+
+def test_handle_oidc_auth_cookieless_browser_gets_button_not_loop(in_memory_orm_session):
+    """No cookies → no way to bound a retry loop → never auto-login."""
+    _clear_attempt_registry()
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, {})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+    mocks.warning.assert_not_called()  # nothing failed; just not automatable
+
+
+def test_handle_oidc_auth_no_auto_login_after_logout(in_memory_orm_session):
+    """Arriving with ?logged_out=1 (post-logout) must not silently re-login."""
+    _clear_attempt_registry()
+    mocks = _run_not_logged_in({"logged_out": "1"}, {"auth": {"mode": "oidc"}}, {"_streamlit_xsrf": "tok"})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+    mocks.warning.assert_not_called()  # normal logout, nothing went wrong
+
+
+def test_handle_oidc_auth_auto_login_disabled_by_config(in_memory_orm_session):
+    """[auth].auto_login = false restores the button-first behavior."""
+    _clear_attempt_registry()
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc", "auto_login": False}}, {"_streamlit_xsrf": "tok"})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+
+
+def test_handle_oidc_logout_appends_logged_out_param_for_self_redirect(in_memory_orm_session):
+    """When post-logout lands back on our own host, tag it so auto-login stands down."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+    markdown_mock = MagicMock()
+
+    secrets = {
+        "auth": {
+            "post_logout_redirect_url": "https://wnyhealtheintelligence.com/",
+            "redirect_uri": "https://wnyhealtheintelligence.com/oauth2callback",
+        }
+    }
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown", markdown_mock),
+        patch("streamlit.secrets", new=secrets),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
+
+    redirect_calls = [str(c) for c in markdown_mock.call_args_list if "http-equiv" in str(c)]
+    assert redirect_calls, "expected a meta-refresh redirect"
+    assert any("logged_out=1" in c for c in redirect_calls)
+
+
+def test_handle_oidc_logout_foreign_redirect_left_untouched(in_memory_orm_session):
+    """A foreign post-logout URL (e.g. the HeC Portal) gets no logged_out param."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+    markdown_mock = MagicMock()
+
+    secrets = {
+        "auth": {
+            "post_logout_redirect_url": "https://portal.example/",
+            "redirect_uri": "https://wnyhealtheintelligence.com/oauth2callback",
+        }
+    }
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown", markdown_mock),
+        patch("streamlit.secrets", new=secrets),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
+
+    redirect_calls = [str(c) for c in markdown_mock.call_args_list if "http-equiv" in str(c)]
+    assert redirect_calls, "expected a meta-refresh redirect"
+    assert any("https://portal.example/" in c for c in redirect_calls)
+    assert not any("logged_out" in c for c in redirect_calls)
+
+
+def test_handle_oidc_logout_unconfigured_url_still_tags_logged_out(in_memory_orm_session):
+    """No post_logout_redirect_url → redirect to the app itself with ?logged_out=1."""
+    from unittest.mock import MagicMock, patch
+
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+    markdown_mock = MagicMock()
+
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown", markdown_mock),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        from utils.okta_auth import handle_oidc_logout
+
+        handle_oidc_logout()
+
+    redirect_calls = [str(c) for c in markdown_mock.call_args_list if "http-equiv" in str(c)]
+    assert redirect_calls, "expected a meta-refresh redirect even with no configured URL"
+    assert any("logged_out=1" in c for c in redirect_calls)
+
+
+# ── Fingerprint stability across the OIDC roundtrip ───────────────────────
+#
+# Real values captured 2026-07-15: Tornado re-masks the v2 XSRF cookie on
+# every response (mask + masked token change, underlying token is stable),
+# and _streamlit_session (OAuth state) changes per attempt. The fingerprint
+# must survive both, or the loop-breaker silently stops working.
+
+_XSRF_SAMPLE_A = "2|ea3264e1|b3e4d8bca17692b73eed0b6074db2d99|1784076427"
+_XSRF_SAMPLE_B = "2|a7cdaa61|fe1b163cec895c377312c5e03924e319|1784076427"
+
+
+def _fingerprint_for(cookies):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from utils.okta_auth import _browser_fingerprint
+
+    with patch("streamlit.context", SimpleNamespace(cookies=cookies)):
+        return _browser_fingerprint()
+
+
+def test_browser_fingerprint_stable_across_xsrf_remasking():
+    """Differently-masked v2 XSRF cookies must map to the same fingerprint."""
+    fp_a = _fingerprint_for({"_streamlit_xsrf": _XSRF_SAMPLE_A})
+    fp_b = _fingerprint_for({"_streamlit_xsrf": _XSRF_SAMPLE_B})
+    assert fp_a is not None
+    assert fp_a == fp_b
+
+
+def test_browser_fingerprint_differs_for_different_underlying_tokens():
+    fp_a = _fingerprint_for({"_streamlit_xsrf": _XSRF_SAMPLE_A})
+    fp_other = _fingerprint_for({"_streamlit_xsrf": "2|00000000|deadbeefdeadbeefdeadbeefdeadbeef|1784076427"})
+    assert fp_a != fp_other
+
+
+def test_browser_fingerprint_fallback_ignores_volatile_streamlit_cookies():
+    """Without an XSRF cookie, volatile _streamlit_* values must not change the key."""
+    fp_1 = _fingerprint_for({"_streamlit_session": "state-attempt-1", "ajs_anonymous_id": "anon-1"})
+    fp_2 = _fingerprint_for({"_streamlit_session": "state-attempt-2", "ajs_anonymous_id": "anon-1"})
+    assert fp_1 is not None
+    assert fp_1 == fp_2
+
+
+def test_browser_fingerprint_none_when_only_volatile_cookies():
+    """Only volatile cookies → no stable identity → None (no auto-login)."""
+    assert _fingerprint_for({"_streamlit_session": "state-only"}) is None
+
+
+def test_handle_oidc_auth_remasked_xsrf_still_breaks_loop(in_memory_orm_session):
+    """End-to-end loop-breaker with realistic re-masked XSRF cookies."""
+    _clear_attempt_registry()
+    _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, {"_streamlit_xsrf": _XSRF_SAMPLE_A})
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, {"_streamlit_xsrf": _XSRF_SAMPLE_B})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_called_once()
+    mocks.warning.assert_called_once()
+
+
+def test_handle_oidc_auth_reissues_login_on_rerun_of_originating_session(in_memory_orm_session):
+    """Reruns of the session that started auto-login must re-issue st.login().
+
+    Streamlit drops the auth-redirect message when a queued rerun (e.g. a
+    late cookie-component value) interrupts the run that called st.login()
+    — observed intermittently local and consistently on prod latency. Each
+    rerun re-issuing the login is self-healing: a drop implies another rerun
+    is queued, and the last run's redirect always lands. The bounce-back is
+    a NEW session (no pending flag), so the loop stays bounded.
+    """
+    _clear_attempt_registry()
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    session_state = {}
+    _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, cookies, session_state=session_state)
+    assert session_state.get("_oidc_auto_login_pending") is True
+
+    # Rerun of the SAME session (session_state persists): marker is fresh,
+    # but the pending flag must win — login again, not the warning page.
+    mocks = _run_not_logged_in({}, {"auth": {"mode": "oidc"}}, cookies, session_state=session_state)
+    mocks.login.assert_called_once()
+    mocks.button.assert_not_called()
+    mocks.warning.assert_not_called()
+
+
+# ── sso_fallback_url: unauthenticated fallback redirects to the Portal ────
+
+
+def _mocks_markdown_calls(mocks):
+    return [str(c) for c in mocks.markdown.call_args_list]
+
+
+def _not_logged_in_patches_with_markdown(session_state, query_params, secrets, context_cookies):
+    """Same as _not_logged_in_patches but exposes the markdown mock."""
+    from unittest.mock import MagicMock, patch
+
+    patches, mocks = _not_logged_in_patches(session_state, query_params, secrets, context_cookies)
+    mocks.markdown = MagicMock()
+    patches[-1] = patch("streamlit.markdown", mocks.markdown)
+    return patches, mocks
+
+
+def _run_fallback(query_params, secrets, context_cookies, session_state=None):
+    import contextlib
+
+    from utils.okta_auth import handle_oidc_auth
+
+    patches, mocks = _not_logged_in_patches_with_markdown(
+        session_state if session_state is not None else {}, query_params, secrets, context_cookies
+    )
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        try:
+            handle_oidc_auth()
+        except SystemExit:
+            pass
+    return mocks
+
+
+_PORTAL = "https://wnyhealthecommunity.com/login"
+
+
+def test_fallback_redirects_to_portal_when_sso_fallback_url_set(in_memory_orm_session):
+    """Failed roundtrip + sso_fallback_url → meta-refresh to the Portal, no button."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    _run_fallback({}, secrets, cookies)  # attempt marked
+    mocks = _run_fallback({}, secrets, cookies)  # bounce landing
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    redirects = [c for c in _mocks_markdown_calls(mocks) if "http-equiv" in c and _PORTAL in c]
+    assert redirects, "expected a meta-refresh redirect to the portal login"
+    mocks.stop.assert_called_once()
+
+
+def test_fallback_redirects_to_portal_after_logout_param(in_memory_orm_session):
+    """?logged_out=1 with sso_fallback_url also lands on the Portal, not the button."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    mocks = _run_fallback({"logged_out": "1"}, secrets, {"_streamlit_xsrf": "tok"})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    redirects = [c for c in _mocks_markdown_calls(mocks) if "http-equiv" in c and _PORTAL in c]
+    assert redirects
+
+
+def test_fallback_redirects_cookieless_browser_to_portal(in_memory_orm_session):
+    """No stable fingerprint + sso_fallback_url → Portal instead of dead-end button."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    mocks = _run_fallback({}, secrets, {})
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    redirects = [c for c in _mocks_markdown_calls(mocks) if "http-equiv" in c and _PORTAL in c]
+    assert redirects
+
+
+def test_fallback_keeps_button_when_sso_fallback_url_unset(in_memory_orm_session):
+    """Without the setting, the manual button page renders exactly as before."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc"}}
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    _run_fallback({}, secrets, cookies)
+    mocks = _run_fallback({}, secrets, cookies)
+
+    mocks.button.assert_called_once()
+    assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))
+
+
+def test_fallback_keeps_button_when_auto_login_disabled(in_memory_orm_session):
+    """auto_login = false is an explicit button-first choice — no portal redirect."""
+    _clear_attempt_registry()
+    secrets = {"auth": {"mode": "oidc", "auto_login": False, "sso_fallback_url": _PORTAL}}
+    mocks = _run_fallback({}, secrets, {"_streamlit_xsrf": "tok"})
+
+    mocks.button.assert_called_once()
+    assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))
+
+
+def test_handle_oidc_auth_stops_reissuing_after_two_attempts(in_memory_orm_session):
+    """Reruns beyond the second issue must go passive, not call st.login().
+
+    Regression (2026-07-15 prod): with prompt=none the whole roundtrip is
+    redirects, so the originating page never unloads and its session keeps
+    rerunning; unlimited re-issue canceled its own in-flight token exchange
+    (nginx 499 on every /oauth2callback?code=...) in an endless loop. Two
+    issues cover the dropped-redirect case; after that the navigation is in
+    flight and must be left alone — no login, no button, no meta-refresh.
+    """
+    _clear_attempt_registry()
+    cookies = {"_streamlit_xsrf": "tok-abc"}
+    secrets = {"auth": {"mode": "oidc", "sso_fallback_url": _PORTAL}}
+    session_state = {}
+    _run_fallback({}, secrets, cookies, session_state=session_state)  # issue 1
+    _run_fallback({}, secrets, cookies, session_state=session_state)  # issue 2 (re-issue)
+    mocks = _run_fallback({}, secrets, cookies, session_state=session_state)  # rerun 3+
+
+    mocks.login.assert_not_called()
+    mocks.button.assert_not_called()
+    assert not any("http-equiv" in c for c in _mocks_markdown_calls(mocks))
+    mocks.stop.assert_called_once()
+
+
+def test_handle_oidc_logout_marks_attempt_registry(in_memory_orm_session):
+    """Logout must suppress auto-login for this browser for the retry window.
+
+    st.logout() performs RP-initiated Okta logout and lands the browser back
+    on the app root with no query param. Without a registry mark, auto-login
+    fires instantly and the user is thrown at an Okta form (or silently
+    re-logged-in if a session survives) — instead of the configured portal.
+    """
+    from unittest.mock import MagicMock, patch
+
+    import utils.okta_auth as okta_auth
+
+    _clear_attempt_registry()
+    fake_session_state = {"cookies": MagicMock(), "messages": [], "user_role": 1}
+    fake_session_state["cookies"].get.return_value = "1"
+
+    from types import SimpleNamespace
+
+    with (
+        patch("streamlit.session_state", fake_session_state),
+        patch("streamlit.logout"),
+        patch("streamlit.markdown"),
+        patch("streamlit.context", SimpleNamespace(cookies={"_streamlit_xsrf": "tok-logout"})),
+        patch("streamlit.secrets", new={"auth": {"mode": "oidc"}}),
+        patch("utils.vanna_calls.VannaService.invalidate_cache_for_user", MagicMock()),
+    ):
+        okta_auth.handle_oidc_logout()
+
+    assert len(okta_auth._AUTO_LOGIN_ATTEMPTS) == 1
+
+
+def test_retry_window_is_shorter_than_a_portal_login_roundtrip():
+    """The retry window must only suppress machine-speed loops.
+
+    Regression (2026-07-15 night): logout marks the registry; with a 60s
+    window, a user who logged back in via the portal and clicked the app
+    badge within the minute was refused an auto-login attempt and bounced
+    app↔portal until the window expired ("only a hard refresh cures it").
+    IdP error-bounces arrive ~1/second, so ~10s bounds those storms while a
+    human portal-login roundtrip (>10s) is never suppressed.
+    """
+    import utils.okta_auth as okta_auth
+
+    assert okta_auth.AUTO_LOGIN_RETRY_WINDOW_S <= 15

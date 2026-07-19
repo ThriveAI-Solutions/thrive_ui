@@ -43,6 +43,7 @@ def render_patient_chooser(message, index: int) -> None:
             st.session_state["selected_patient_source_id"] = m["source_id"]
             st.session_state["selected_patient_display_name"] = m.get("display_name", "")
             st.session_state["selected_patient_dob"] = m.get("dob")
+            st.session_state["selected_patient_date_of_death"] = m.get("date_of_death")
             st.session_state["selection_origin"] = "user_click"
             st.session_state["selected_at"] = datetime.now().isoformat()
             try:

@@ -1,6 +1,6 @@
 import io
 
-from scripts.sample_db.dump_writer import write_copy_block, write_dump
+from scripts.sample_db.dump_writer import SAMPLE_METADATA_TABLE, schema_sha256, write_copy_block, write_dump
 
 
 def test_copy_block_emits_pg_dump_format():
@@ -34,6 +34,16 @@ def test_write_dump_concatenates_ddl_and_data():
     assert "CREATE TABLE dw.t" in out
     assert "COPY dw.t (id) FROM stdin;" in out
     assert "1" in out and "2" in out
+
+
+def test_write_dump_stamps_current_schema_fingerprint():
+    ddl = "CREATE TABLE dw.t (id INTEGER);"
+    buf = io.StringIO()
+    write_dump(buf, ddl, {})
+
+    out = buf.getvalue()
+    assert f"CREATE TABLE {SAMPLE_METADATA_TABLE}" in out
+    assert schema_sha256(ddl) in out
 
 
 def test_copy_block_missing_keys_emit_null():

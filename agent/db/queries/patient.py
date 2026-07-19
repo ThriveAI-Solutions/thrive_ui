@@ -59,6 +59,7 @@ def find_patient_sql(
         ipp.last_name AS last_name,
         ipp.full_name AS display_name,
         ipp.date_of_birth AS dob,
+        ipp.date_of_death AS date_of_death,
         ipp.age AS age,
         ipp.last_date_of_visit AS most_recent_activity,
         ipp.practice_name AS practice_name,
