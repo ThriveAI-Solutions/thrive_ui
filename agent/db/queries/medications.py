@@ -43,6 +43,7 @@ def medications_sql(
             drug_supply_days,
             number_of_refills,
             status,
+            status_date,
             date_stopped
         FROM {schema_prefix}federated_meds_v
         WHERE {" AND ".join(where)}

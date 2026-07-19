@@ -51,6 +51,7 @@ def test_adt_transformer_maps_inpatient_setting_and_status(encounters_with_admis
     assert inpatient["event_location"] == "Buffalo General"
     assert inpatient["location_type"] == "Hospital"
     assert inpatient["status"] == "Admitted"
+    assert inpatient["diagnosing_clinician"] == "prov-1"
     assert inpatient["discharge_disposition"] is None
     assert inpatient["discharge_location"] is None
 
@@ -61,6 +62,7 @@ def test_adt_transformer_maps_discharge_event_to_stop_time(encounters_with_admis
     discharge = next(r for r in rows if r["clean_setting"] == "INPATIENT" and r["clean_status"] == "DISCHARGE")
     assert discharge["status"] == "Discharged"
     assert str(discharge["event_date"]) == "2026-03-18 10:00:00"
+    assert discharge["diagnosing_clinician"] is None
     assert discharge["discharge_disposition"] == "Discharged to home"
     assert discharge["discharge_location"] == "Home"
 

@@ -35,7 +35,9 @@ def _labs_result():
                 result="120",
                 clean_result="120",
                 unit="mg/dL",
-                event_date="2026-04-01",
+                event_datetime="2026-04-01",
+                service_provider="placeholder",
+                source_name="Reporting Org",
             ),
             LabItem(
                 source_id="src-1",
@@ -45,7 +47,9 @@ def _labs_result():
                 result="14.2",
                 clean_result="14.2",
                 unit="g/dL",
-                event_date="2026-04-02",
+                event_datetime="2026-04-02",
+                service_provider="placeholder",
+                source_name="Reporting Org",
             ),
         ],
         data_availability="data_present",
@@ -59,6 +63,7 @@ def test_clinical_result_to_df_labs():
     # item_type column is preserved so heterogeneous unions stay readable
     assert "item_type" in df.columns
     assert df["name"].tolist() == ["Glucose", "Hgb"]
+    assert df["source_name"].tolist() == ["Reporting Org", "Reporting Org"]
     # None becomes NaN
     assert pd.isna(df["code"].iloc[1])
 

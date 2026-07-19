@@ -323,6 +323,7 @@ def admissions_sql(
                 adt.event_location AS event_location,
                 adt.location_type AS location_type,
                 adt.admit_from AS admit_from,
+                adt.diagnosing_clinician AS diagnosing_clinician,
                 adt.discharge_disposition AS discharge_disposition,
                 adt.discharge_location AS discharge_location,
                 CASE WHEN {visit_event_expr} THEN 1 ELSE 0 END AS is_visit_event,
@@ -355,6 +356,7 @@ def admissions_sql(
                 MAX(CASE WHEN adt.admit_rn = 1 THEN adt.event_location END) AS event_location,
                 MAX(CASE WHEN adt.admit_rn = 1 THEN adt.location_type END) AS location_type,
                 MAX(adt.admit_from) AS admit_from,
+                MAX(CASE WHEN adt.admit_rn = 1 THEN adt.diagnosing_clinician END) AS diagnosing_clinician,
                 MAX(CASE WHEN {discharge_expr} THEN adt.discharge_disposition END) AS discharge_disposition,
                 MAX(CASE WHEN {discharge_expr} THEN adt.discharge_location END) AS discharge_location
                 {facility_has_col}
@@ -368,7 +370,7 @@ def admissions_sql(
             discharge_date,
             setting,
             is_inpatient_admission, event_location, location_type, admit_from,
-            discharge_disposition, discharge_location
+            diagnosing_clinician, discharge_disposition, discharge_location
         FROM visit_rollup
         WHERE {" AND ".join(outer_where)}
         ORDER BY admit_date DESC

@@ -215,3 +215,13 @@ def test_event_location_is_admitting_facility_on_transfer(synthetic_db):
     assert rows[0]["event_location"] == "Kaleida Methodist"
     assert rows[0]["location_type"] == "Hospital"
     assert str(rows[0]["admit_date"]).startswith("2026-03-15 18:00")
+
+
+def test_diagnosing_clinician_comes_from_admitting_event(synthetic_db):
+    """The ED registration and inpatient A06 carry different clinicians; the
+    visit rollup must select the clinician from the same admitting row used for
+    the admission date and facility."""
+    sql, params = admissions_sql(source_id="src-john-1971", dialect="sqlite", facility_type="inpatient")
+    rows = _adapter(synthetic_db).fetch_all(sql, params)
+    assert len(rows) == 1
+    assert rows[0]["diagnosing_clinician"] == "Admitting diagnosing clinician"
