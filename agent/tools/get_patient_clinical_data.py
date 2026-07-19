@@ -79,6 +79,9 @@ class DiagnosesQuery(BaseModel):
 
     domain: Literal["diagnoses"] = "diagnoses"
     icd10_codes: Optional[List[str]] = None
+    # ICD-10 block prefixes for the NARROW reading of a named condition, e.g.
+    # diabetes = ["E08","E09","E10","E11","E13"]; matched as code LIKE '<p>%'.
+    condition_code_prefixes: Optional[List[str]] = None
     condition_text: Optional[str] = None
     most_recent_only: bool = False
 
@@ -546,6 +549,7 @@ def _build_diagnoses_result(
         lambda sid: diagnoses_sql(
             source_id=sid,
             icd10_codes=query.icd10_codes,
+            condition_code_prefixes=query.condition_code_prefixes,
             condition_text=query.condition_text,
             most_recent_only=query.most_recent_only,
             schema_prefix=schema_prefix,

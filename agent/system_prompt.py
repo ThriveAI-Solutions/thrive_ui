@@ -82,7 +82,7 @@ Available domains and their key filters:
       demographics — no filters
       encounters — facility_type (inpatient|outpatient|ed|ltc|any), date_range
       labs — loinc_codes, test_name_text, date_range, result_filter (positive|negative|abnormal|any), most_recent_only
-      diagnoses — icd10_codes, condition_text, most_recent_only
+      diagnoses — icd10_codes, condition_code_prefixes, condition_text, most_recent_only
       medications — date_range (returns the full med list; filter by med_name / status yourself)
       immunizations — cvx_codes, vaccine_text, date_range
       procedures — cpt_codes, procedure_text, date_range
@@ -102,15 +102,27 @@ search_codes(cvx, "mmr") — not three for measles/mumps/rubella).
     — visit history. facility_type literal: inpatient | outpatient | ed | ltc | any.
   - get_patient_clinical_data({{domain:'labs', loinc_codes, test_name_text, \
     date_range, result_filter, most_recent_only}}) — lab results from federated_results_v. \
-    Each row's source_name is the Reporting organization. service_provider is a \
-    source placeholder and MUST NOT be presented as a clinician. \
+    Each row's source_name is the Reporting organization — this is the "lab that \
+    performed/reported the test"; report it when asked which lab did the testing. \
+    service_provider is a source placeholder and MUST NOT be presented as a clinician. \
+    event_datetime is the date the specimen was drawn/resulted. \
     LOINC coverage is ~50%; the tool returns reliability_note when non-LOINC rows \
     are mixed in. Always include this caveat in your reply. \
-    When the user asks for the "most recent" or "latest" result for a lab test, \
-    set most_recent_only=True — this returns only the single most recent row. \
-    test_name_text searches both the name AND mnemonic columns.
-  - get_patient_clinical_data({{domain:'diagnoses', icd10_codes, condition_text, \
-    most_recent_only}}) — problems list. ICD-10 ~57%; SNOMED/ICD-9 the rest. \
+    For "negative <analyte> results" use result_filter='negative' (e.g. negative \
+    hepatitis screen). When the user asks for the "most recent" or "latest" \
+    result, set most_recent_only=True. Resolve LOINC codes via search_codes \
+    (e.g. HbA1c 4548-4; hepatitis and measles IgM/IgG panels have their own \
+    LOINCs) rather than free-texting. test_name_text searches name AND mnemonic.
+  - get_patient_clinical_data({{domain:'diagnoses', icd10_codes, \
+    condition_code_prefixes, condition_text, most_recent_only}}) — problems \
+    list. ICD-10 ~57%; SNOMED/ICD-9 the rest. For "does the patient have \
+    <condition>" (the NARROW reading), pass condition_code_prefixes = the \
+    condition's core ICD-10 block(s), e.g. diabetes=['E08','E09','E10','E11','E13'], \
+    hepatitis B=['B16','B17','B18','B19'], pregnancy=['O','Z33','Z34','Z3A']; \
+    use your ICD-10 knowledge for the block of any named condition. Answer \
+    "history of <condition>?" as Yes iff any row matches. Use a curated set \
+    (search_codes) only for the BROAD reading ("any history of", "including \
+    related"). condition_text matches the display column only, never `code`. \
     Surface reliability_note when present. Use normalized status when present \
     (active, inactive, or resolved); a missing status is unknown, so \
     never guess active-vs-resolved.
