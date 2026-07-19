@@ -88,9 +88,15 @@ class Patient360Result(BaseModel):
 
 
 def _items_to_markdown(items: list[Any]) -> str:
-    """Compact markdown table of item rows (item_type column dropped)."""
+    """Compact markdown table of item rows (item_type column dropped).
+
+    Columns are the first-appearance-ordered union across ALL rows — the
+    ``visits`` section mixes EncounterItem and AdmissionStay rows whose fields
+    barely overlap, and first-row-only columns would render the other feed's
+    rows as blanks.
+    """
     dumps = [i.model_dump(mode="json") if isinstance(i, BaseModel) else dict(i) for i in items[:_ROW_CAP]]
-    columns = [c for c in dumps[0].keys() if c != "item_type"]
+    columns = [c for c in dict.fromkeys(c for d in dumps for c in d.keys()) if c != "item_type"]
     header = "| " + " | ".join(columns) + " |"
     sep = "| " + " | ".join("---" for _ in columns) + " |"
     body = "\n".join(

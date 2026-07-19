@@ -40,6 +40,22 @@ def test_visits_unions_encounters_and_admissions(synthetic_db):
     assert by["encounters"].row_count > 0 and by["admissions"].row_count > 0
 
 
+def test_visits_markdown_carries_both_feeds_fields(synthetic_db):
+    """The visits table mixes EncounterItem and AdmissionStay rows whose fields
+    barely overlap; the rendered markdown must carry BOTH feeds' columns and
+    values, not render one feed as blank rows."""
+    fake = FakeSummarizer()
+    generate_patient360(_adapter(synthetic_db), _PATIENT, summarizer=fake, sections=["visits"])
+    visits_call = next(c for c in fake.calls if c[0] == SECTION_PROMPTS["visits"])
+    table = visits_call[1]
+    # encounter-feed column and admission-feed column both present
+    assert "event_datetime" in table
+    assert "admit_date" in table
+    # admission rows carry real values, not blanks: the fixture's inpatient
+    # stay dates appear in the table
+    assert "2025-06-15" in table
+
+
 def test_summarizer_called_once_per_done_section_plus_synthesis(synthetic_db):
     fake = FakeSummarizer()
     result = generate_patient360(_adapter(synthetic_db), _PATIENT, summarizer=fake)
