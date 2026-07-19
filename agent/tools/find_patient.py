@@ -86,7 +86,9 @@ def find_patient(
     # patient produces — consent status is never inferable. Fail-closed and
     # gated by config/role; default off until consent data + policy are ready.
     role = getattr(ctx.deps, "user_role", None)
-    enforcing = bool(getattr(ctx.deps, "enforce_consent", False)) and consent_required(role)
+    enforcing = bool(getattr(ctx.deps, "enforce_consent", False)) and consent_required(
+        role, getattr(ctx.deps, "consent_bypass_roles", frozenset())
+    )
     gate = ConsentGate(adapter, schema_prefix=schema_prefix, enforcing=enforcing)
 
     matches: List[PatientMatch] = []

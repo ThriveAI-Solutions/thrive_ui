@@ -6,10 +6,12 @@ session-state directly.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Literal, Optional, TYPE_CHECKING
+from typing import FrozenSet, Literal, Optional, TYPE_CHECKING
 import pandas as pd
+
+from agent.consent.suppression import SMALL_CELL_THRESHOLD
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -67,3 +69,10 @@ class AgentDeps:
     # flip on until consent data readiness + HeL policy (threshold, role
     # bypass) are confirmed. Set from [security].enforce_consent.
     enforce_consent: bool = False
+    # Roles exempt from consent enforcement (Erie-County-clinical principle,
+    # #244). Empty until HeL ratifies the mapping; parsed from
+    # [security].consent_bypass_roles by agent.consent.gate.parse_bypass_roles.
+    consent_bypass_roles: "FrozenSet[RoleTypeEnum]" = field(default_factory=frozenset)
+    # Small-cell suppression floor for the aggregate/cohort exemption (#244/#312).
+    # Informal default 11 (not yet ratified); from [security].small_cell_threshold.
+    small_cell_threshold: int = SMALL_CELL_THRESHOLD

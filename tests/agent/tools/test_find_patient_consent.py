@@ -65,10 +65,10 @@ def _engine():
     return eng
 
 
-def _deps(engine, *, enforce_consent):
+def _deps(engine, *, enforce_consent, user_role=None, consent_bypass_roles=frozenset()):
     return AgentDeps(
         user_id=1,
-        user_role=MagicMock(value=1),
+        user_role=user_role if user_role is not None else MagicMock(value=1),
         session_id="s1",
         selected_patient=None,
         last_dataframe=None,
@@ -79,6 +79,7 @@ def _deps(engine, *, enforce_consent):
         sqlite_session=None,
         run_logger=MagicMock(),
         enforce_consent=enforce_consent,
+        consent_bypass_roles=consent_bypass_roles,
     )
 
 
@@ -95,3 +96,19 @@ def test_enforcement_on_omits_non_consented():
     result = find_patient(ctx, PatientSearchQuery(last_name="Consenttest"))
     assert [m.source_id for m in result.matches] == ["src-consented"]
     assert result.total_unique == 1
+
+
+def test_bypass_role_sees_non_consented_even_with_enforcement_on():
+    from orm.models import RoleTypeEnum
+
+    # A role in the ratified bypass set is exempt: enforcement is on, but the
+    # role bypasses, so both consented and declined patients are returned.
+    ctx = MagicMock()
+    ctx.deps = _deps(
+        _engine(),
+        enforce_consent=True,
+        user_role=RoleTypeEnum.DOCTOR,
+        consent_bypass_roles=frozenset({RoleTypeEnum.DOCTOR}),
+    )
+    result = find_patient(ctx, PatientSearchQuery(last_name="Consenttest"))
+    assert sorted(m.source_id for m in result.matches) == ["src-consented", "src-declined"]

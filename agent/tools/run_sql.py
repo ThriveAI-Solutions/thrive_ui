@@ -142,7 +142,8 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
     # bearing views is refused so it can't bypass the consent-gated curated
     # tools. Fail-closed and role-aware; default off until consent data/policy.
     role = getattr(ctx.deps, "user_role", None)
-    if bool(getattr(ctx.deps, "enforce_consent", False)) and consent_required(role):
+    bypass_roles = getattr(ctx.deps, "consent_bypass_roles", frozenset())
+    if bool(getattr(ctx.deps, "enforce_consent", False)) and consent_required(role, bypass_roles):
         if references_patient_view(expansion.sql):
             raise ModelRetry(
                 "Consent enforcement blocks freeform SQL against patient data. "

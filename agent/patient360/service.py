@@ -32,6 +32,7 @@ def run_patient360(
     sections: Optional[List[str]] = None,
     enforce_consent: bool = False,
     user_role: Any = None,
+    consent_bypass_roles: Any = None,
     cache: Optional[SectionCache] = None,
 ) -> Patient360Result:
     """Run Patient 360 for ``source_id``.
@@ -55,7 +56,7 @@ def run_patient360(
 
     from agent.consent.gate import ConsentGate, consent_required
 
-    if bool(enforce_consent) and consent_required(user_role):
+    if bool(enforce_consent) and consent_required(user_role, consent_bypass_roles or frozenset()):
         gate = ConsentGate(adapter, schema_prefix=schema_prefix, enforcing=True)
         patient_id = _resolve_patient_id(adapter, source_id, schema_prefix)
         if patient_id is None or not gate.is_consented(patient_id):

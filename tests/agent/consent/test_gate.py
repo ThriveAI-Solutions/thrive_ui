@@ -122,6 +122,52 @@ def test_consent_required_default_true_for_all_roles():
         assert consent_required(role) is True
 
 
+def test_consent_required_bypass_role_is_exempt():
+    from orm.models import RoleTypeEnum
+
+    bypass = frozenset({RoleTypeEnum.ADMIN})
+    # A role in the ratified bypass set does NOT require consent.
+    assert consent_required(RoleTypeEnum.ADMIN, bypass_roles=bypass) is False
+    # Every other role still requires it.
+    assert consent_required(RoleTypeEnum.DOCTOR, bypass_roles=bypass) is True
+    assert consent_required(RoleTypeEnum.NURSE, bypass_roles=bypass) is True
+    assert consent_required(None, bypass_roles=bypass) is True
+
+
+def test_consent_required_empty_bypass_is_off_safe():
+    from orm.models import RoleTypeEnum
+
+    # Default (no ratified mapping wired) enforces consent for everyone.
+    for role in (RoleTypeEnum.ADMIN, RoleTypeEnum.DOCTOR, RoleTypeEnum.NURSE, RoleTypeEnum.PATIENT):
+        assert consent_required(role, bypass_roles=frozenset()) is True
+
+
+def test_parse_bypass_roles_accepts_names_and_ints():
+    from agent.consent.gate import parse_bypass_roles
+    from orm.models import RoleTypeEnum
+
+    assert parse_bypass_roles(["admin", "DOCTOR"]) == frozenset({RoleTypeEnum.ADMIN, RoleTypeEnum.DOCTOR})
+    assert parse_bypass_roles([0, 1]) == frozenset({RoleTypeEnum.ADMIN, RoleTypeEnum.DOCTOR})
+    assert parse_bypass_roles([RoleTypeEnum.NURSE]) == frozenset({RoleTypeEnum.NURSE})
+
+
+def test_parse_bypass_roles_drops_unknown_fail_safe():
+    from agent.consent.gate import parse_bypass_roles
+    from orm.models import RoleTypeEnum
+
+    # An unrecognized role must NOT silently grant bypass — it is dropped, so a
+    # typo fails closed (consent stays enforced) rather than opening the gate.
+    assert parse_bypass_roles(["erie_county_clinical", "typo", 99]) == frozenset()
+    assert parse_bypass_roles(["admin", "typo"]) == frozenset({RoleTypeEnum.ADMIN})
+
+
+def test_parse_bypass_roles_handles_empty_and_none():
+    from agent.consent.gate import parse_bypass_roles
+
+    assert parse_bypass_roles(None) == frozenset()
+    assert parse_bypass_roles([]) == frozenset()
+
+
 def test_population_counts_true_false_never_explicit():
     adapter = _adapter()
     sql, params = consent_population_counts_sql(dialect="sqlite")
