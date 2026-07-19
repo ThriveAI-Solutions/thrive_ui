@@ -20,7 +20,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from agent.codes.service import UnknownCodeSetError, VocabNotLoadedError
 from agent.consent.gate import consent_required
-from agent.consent.sql_gate import references_patient_view
+from agent.consent.sql_gate import aggregate_measure_labels, classify_sql
+from agent.consent.suppression import suppress_count
 from agent.dataframe_adapters import run_sql_result_to_df
 from agent.db.sql_context import schema_context_for_sql
 from agent.deps import AgentDeps, QueryMeta
@@ -111,6 +112,32 @@ def _ast_guard(sql: str) -> None:
             )
 
 
+def _suppress_measure_cells(columns, rows, sql, dialect, threshold):
+    """Small-cell-suppress the aggregate MEASURE columns of a result.
+
+    Only columns the classifier counts as approved measures (COUNT / SUM(CASE
+    0/1)) are suppressed; GROUP BY label columns (gender, year, ...) are left
+    intact. Non-integer cells pass through untouched. Complementary suppression
+    is not applied on the freeform path — additive partitions can't be reliably
+    identified in arbitrary SQL — but every individual small count is hidden.
+    """
+    measure_labels = aggregate_measure_labels(sql, dialect=dialect)
+    if not measure_labels:
+        return columns, rows
+    measure_idx = {i for i, name in enumerate(columns) if name in measure_labels}
+    if not measure_idx:
+        return columns, rows
+    new_rows = []
+    for row in rows:
+        new_row = list(row)
+        for i in measure_idx:
+            cell = new_row[i]
+            if isinstance(cell, int) and not isinstance(cell, bool):
+                new_row[i] = suppress_count(cell, threshold=threshold)
+        new_rows.append(new_row)
+    return columns, new_rows
+
+
 def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
     """Execute a read-only SELECT / WITH against the analytics warehouse.
 
@@ -138,18 +165,28 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
 
     _ast_guard(expansion.sql)
 
-    # Consent gate (#244): under enforcement, freeform SQL against patient-
-    # bearing views is refused so it can't bypass the consent-gated curated
-    # tools. Fail-closed and role-aware; default off until consent data/policy.
+    # Consent gate (#244): under enforcement, classify freeform SQL against
+    # patient-bearing views. non_patient runs untouched; a pure aggregate
+    # (COUNT / SUM(CASE 0/1) over non-identifying group keys, every UNION arm
+    # included) runs then has its measure cells small-cell-suppressed;
+    # anything row-level — or unparseable — is refused (fail-closed) and the
+    # model is steered to the consent-gated curated tools. Role-aware; default
+    # off until consent data/policy readiness.
     role = getattr(ctx.deps, "user_role", None)
     bypass_roles = getattr(ctx.deps, "consent_bypass_roles", frozenset())
+    dialect = getattr(ctx.deps.analytics_db, "dialect", "postgres")
+    suppress_measures = False
     if bool(getattr(ctx.deps, "enforce_consent", False)) and consent_required(role, bypass_roles):
-        if references_patient_view(expansion.sql):
+        mode = classify_sql(expansion.sql, dialect=dialect)
+        if mode in ("patient_row", "unparseable"):
             raise ModelRetry(
-                "Consent enforcement blocks freeform SQL against patient data. "
+                "Consent enforcement blocks row-level freeform SQL against patient data. "
                 "Use get_patient_clinical_data for per-patient questions or "
-                "search_patients_by_criteria for population breakdowns — both apply consent."
+                "search_patients_by_criteria for population breakdowns — both apply consent. "
+                "Only de-identified aggregate queries (COUNT / SUM(CASE .. 0/1) over "
+                "non-identifying groupings) are permitted here, and their counts are suppressed below the disclosure threshold."
             )
+        suppress_measures = mode == "aggregate"
 
     adapter = ctx.deps.analytics_db
     if adapter is None:
@@ -169,6 +206,11 @@ def run_sql(ctx: RunContext[AgentDeps], input: RunSqlInput) -> RunSqlResult:
         # str(exc) on SQLAlchemyError already includes the wrapped
         # psycopg2 message and the offending SQL fragment.
         raise ModelRetry(f"SQL execution failed: {exc}") from exc
+
+    if suppress_measures:
+        columns, rows = _suppress_measure_cells(
+            columns, rows, expansion.sql, dialect, int(getattr(ctx.deps, "small_cell_threshold", 11))
+        )
 
     reliability = None
     if truncated:
