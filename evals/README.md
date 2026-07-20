@@ -142,12 +142,7 @@ and `docs/superpowers/plans/2026-07-10-authenticated-evaluation-workspace.md`.
 
 ### Worker configuration
 
-Add to `.streamlit/secrets.toml` (defaults shown; the worker runs with these
-even if the section is absent):
-
-```toml
-[agent_evaluations]
-worker_enabled = true
-poll_interval_s = 5
-heartbeat_timeout_s = 120
-```
+The worker's timing is fixed in `evals/worker.py`: the poll interval
+(`POLL_INTERVAL_S = 5`) and heartbeat timeout (`HEARTBEAT_TIMEOUT_S = 120`) are
+module constants, not secrets. The worker always starts once after DB bootstrap
+(`app.py`) — there is no secrets.toml toggle to enable or disable it.
